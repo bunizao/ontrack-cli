@@ -1,0 +1,10 @@
+base_url: https://school.example.edu
+
+# Option 1: usually leave credentials unset and let the CLI read browser cookies.
+
+# Option 2: paste the exact browser localStorage value from doubtfire_user.
+# doubtfire_user_json: '{"id":123,"username":"your_username","authenticationToken":"..."}'
+
+# Option 3: provide the fields directly.
+# username: your_username
+# auth_token: your_auth_token
