@@ -125,6 +125,18 @@ def _cookie_value(cookie_jar, domain: str, name: str) -> str | None:
     return None
 
 
+def _cookie_record_value(cookies: list[dict[str, str]], domain: str, name: str) -> str | None:
+    """Read a named cookie from okta-auth cookie records."""
+    for cookie in cookies:
+        if cookie.get("name") != name:
+            continue
+        value = cookie.get("value")
+        cookie_domain = cookie.get("domain") or ""
+        if isinstance(value, str) and value and domain in cookie_domain:
+            return value
+    return None
+
+
 def _exchange_refresh_token(base_url: str, cookie_jar, domain: str) -> tuple[str, CachedUser] | None:
     """Exchange browser refresh_token cookie for an auth token."""
     username = _cookie_value(cookie_jar, domain, "username")
@@ -145,6 +157,62 @@ def _exchange_refresh_token(base_url: str, cookie_jar, domain: str) -> tuple[str
     )
     if response.status_code >= 400:
         log.debug("Refresh-token exchange failed with %s", response.status_code)
+        return None
+
+    try:
+        payload = response.json()
+    except ValueError:
+        return None
+
+    if not isinstance(payload, dict):
+        return None
+
+    auth_token = payload.get("auth_token") or payload.get("access_token") or payload.get("token")
+    user_data = payload.get("user") or {}
+    if not auth_token or not isinstance(user_data, dict):
+        return None
+
+    user = CachedUser(
+        id=user_data.get("id"),
+        username=user_data.get("username") or username,
+        authentication_token=auth_token,
+        first_name=user_data.get("first_name") or user_data.get("firstName"),
+        last_name=user_data.get("last_name") or user_data.get("lastName"),
+        email=user_data.get("email"),
+        nickname=user_data.get("nickname"),
+    )
+    return auth_token, user
+
+
+def _exchange_refresh_token_from_records(
+    base_url: str,
+    cookies: list[dict[str, str]],
+    domain: str,
+) -> tuple[str, CachedUser] | None:
+    """Exchange okta-auth cookie records for an auth token."""
+    username = _cookie_record_value(cookies, domain, "username")
+    refresh_token = _cookie_record_value(cookies, domain, "refresh_token")
+    if not username or not refresh_token:
+        return None
+
+    session = requests.Session()
+    for cookie in cookies:
+        cookie_domain = cookie.get("domain") or ""
+        if domain not in cookie_domain:
+            continue
+        value = cookie.get("value")
+        name = cookie.get("name")
+        if not isinstance(name, str) or not isinstance(value, str):
+            continue
+        session.cookies.set(name, value, domain=cookie_domain, path=cookie.get("path") or "/")
+
+    response = session.post(
+        f"{base_url}/api/auth/access-token",
+        json={"delete_auth_token": False},
+        timeout=DEFAULT_TIMEOUT,
+    )
+    if response.status_code >= 400:
+        log.debug("okta-auth refresh-token exchange failed with %s", response.status_code)
         return None
 
     try:
@@ -198,3 +266,40 @@ def get_browser_auth(base_url: str) -> tuple[str, str, CachedUser] | None:
             log.debug("Using browser auth from %s (%s)", browser_name, source)
             return username, auth_token, user
     return None
+
+
+def get_okta_auth(base_url: str) -> tuple[str, str, CachedUser] | None:
+    """Try to resolve OnTrack auth through okta-auth's local session store."""
+    try:
+        from okta_auth.adapter import OktaAdapterError, ensure_login, get_cookies
+    except ImportError:
+        return None
+
+    domain = urlparse(base_url).hostname or ""
+
+    def resolve_from_okta_cookies() -> tuple[str, str, CachedUser] | None:
+        cookies = get_cookies(base_url)
+        exchanged = _exchange_refresh_token_from_records(base_url, cookies, domain)
+        if exchanged is None:
+            return None
+        auth_token, user = exchanged
+        username = user.username or _cookie_record_value(cookies, domain, "username")
+        if not username:
+            return None
+        if _is_valid_token(base_url, username, auth_token):
+            return username, auth_token, user
+        return None
+
+    try:
+        existing = resolve_from_okta_cookies()
+        if existing is not None:
+            log.debug("Using OnTrack auth from okta-auth")
+            return existing
+        ensure_login(base_url)
+        refreshed = resolve_from_okta_cookies()
+        if refreshed is not None:
+            log.debug("Using OnTrack auth from okta-auth after automatic login")
+        return refreshed
+    except OktaAdapterError as exc:
+        log.debug("okta-auth could not establish an OnTrack session for %s: %s", base_url, exc)
+        return None

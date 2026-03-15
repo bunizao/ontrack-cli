@@ -16,6 +16,21 @@ from ontrack_cli.output import output_json, output_yaml
 
 stdout_console = Console()
 stderr_console = Console(stderr=True)
+OKTA_AUTH_URL = "https://github.com/bunizao/okta-auth"
+OKTA_AUTH_INSTALL_COMMAND = "uv tool install okta-auth-cli"
+OKTA_AUTH_CONFIG_COMMAND = "okta config"
+
+
+def _print_okta_auth_hint() -> None:
+    """Print a short hint about automatic session reuse via okta-auth."""
+    stderr_console.print(
+        "Tired of expired browser cookies? Try [bold cyan]okta-auth[/] for automatic "
+        f"login and session reuse: [underline]{OKTA_AUTH_URL}[/]"
+    )
+    stderr_console.print(
+        f"Install with [bold]{OKTA_AUTH_INSTALL_COMMAND}[/], then run "
+        f"[bold]{OKTA_AUTH_CONFIG_COMMAND}[/]."
+    )
 
 
 def _emit(data: object, *, as_json: bool, as_yaml: bool, printer) -> None:
@@ -212,9 +227,12 @@ def main() -> None:
         sys.exit(exc.exit_code)
     except ConfigError as exc:
         stderr_console.print(f"[bold red]Config error:[/] {exc}")
+        if "Missing OnTrack credentials" in str(exc):
+            _print_okta_auth_hint()
         sys.exit(1)
     except AuthError as exc:
         stderr_console.print(f"[bold red]Auth error:[/] {exc}")
+        _print_okta_auth_hint()
         sys.exit(1)
     except OnTrackAPIError as exc:
         stderr_console.print(f"[bold red]API error:[/] {exc}")

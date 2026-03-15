@@ -12,7 +12,7 @@ import click
 import requests
 import yaml
 
-from ontrack_cli.auth import get_browser_auth
+from ontrack_cli.auth import get_browser_auth, get_okta_auth
 from ontrack_cli.constants import (
     CONFIG_DIR,
     CONFIG_FILENAME,
@@ -233,6 +233,12 @@ def load_auth_config() -> AuthConfig:
     )
 
     if not username or not auth_token:
+        okta_auth = get_okta_auth(base_url)
+        if okta_auth is not None:
+            username, auth_token, browser_user = okta_auth
+            cached_user = browser_user
+
+    if not username or not auth_token:
         browser_auth = get_browser_auth(base_url)
         if browser_auth is not None:
             username, auth_token, browser_user = browser_auth
@@ -241,7 +247,7 @@ def load_auth_config() -> AuthConfig:
     if not username or not auth_token:
         raise ConfigError(
             "Missing OnTrack credentials. The CLI tried environment variables, config.yaml, "
-            "cached doubfire_user JSON, and browser cookies. "
+            "cached doubfire_user JSON, okta-auth, and browser cookies. "
             "Either log in to OnTrack in Chrome/Firefox/Brave/Edge first, "
             f"or set {ENV_ONTRACK_USERNAME} and {ENV_ONTRACK_AUTH_TOKEN} explicitly."
         )

@@ -36,6 +36,7 @@ def test_load_auth_config_requires_credentials(monkeypatch, tmp_path):
     monkeypatch.delenv("ONTRACK_AUTH_TOKEN", raising=False)
     monkeypatch.setenv("ONTRACK_BASE_URL", "https://school.example.edu")
     monkeypatch.setenv("ONTRACK_CONFIG", str(tmp_path / "missing.yaml"))
+    monkeypatch.setattr("ontrack_cli.config.get_okta_auth", lambda base_url: None)
     monkeypatch.setattr("ontrack_cli.config.get_browser_auth", lambda base_url: None)
 
     with pytest.raises(ConfigError) as exc:
@@ -50,6 +51,7 @@ def test_load_auth_config_falls_back_to_browser_auth(monkeypatch, tmp_path):
     monkeypatch.delenv("ONTRACK_AUTH_TOKEN", raising=False)
     monkeypatch.setenv("ONTRACK_BASE_URL", "https://school.example.edu")
     monkeypatch.setenv("ONTRACK_CONFIG", str(tmp_path / "missing.yaml"))
+    monkeypatch.setattr("ontrack_cli.config.get_okta_auth", lambda base_url: None)
 
     monkeypatch.setattr(
         "ontrack_cli.config.get_browser_auth",
@@ -75,6 +77,40 @@ def test_load_auth_config_falls_back_to_browser_auth(monkeypatch, tmp_path):
 
     assert config.username == "alice"
     assert config.auth_token == "token-from-browser"
+
+
+def test_load_auth_config_falls_back_to_okta_auth(monkeypatch, tmp_path):
+    monkeypatch.delenv("ONTRACK_DOUBTFIRE_USER_JSON", raising=False)
+    monkeypatch.delenv("ONTRACK_USERNAME", raising=False)
+    monkeypatch.delenv("ONTRACK_AUTH_TOKEN", raising=False)
+    monkeypatch.setenv("ONTRACK_BASE_URL", "https://school.example.edu")
+    monkeypatch.setenv("ONTRACK_CONFIG", str(tmp_path / "missing.yaml"))
+
+    monkeypatch.setattr(
+        "ontrack_cli.config.get_okta_auth",
+        lambda base_url: (
+            "alice",
+            "token-from-okta",
+            type(
+                "User",
+                (),
+                {
+                    "username": "alice",
+                    "authentication_token": "token-from-okta",
+                    "to_dict": lambda self: {
+                        "username": "alice",
+                        "authentication_token": "token-from-okta",
+                    },
+                },
+            )(),
+        ),
+    )
+    monkeypatch.setattr("ontrack_cli.config.get_browser_auth", lambda base_url: None)
+
+    config = load_auth_config()
+
+    assert config.username == "alice"
+    assert config.auth_token == "token-from-okta"
 
 
 def test_load_base_config_reads_file(monkeypatch, tmp_path):
