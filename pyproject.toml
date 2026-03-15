@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ontrack-cli"
-version = "0.1.1"
+version = "0.1.2"
 description = "Terminal-first CLI for the OnTrack/Doubtfire teaching platform"
 requires-python = ">=3.10"
 readme = "README.md"
