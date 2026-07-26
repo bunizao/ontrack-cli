@@ -4,6 +4,7 @@ export function renderJson(value: unknown): string {
 
 function display(value: unknown): string {
   if (value === undefined || value === null || value === "") return "-";
+  if (typeof value === "object") return JSON.stringify(value);
   return String(value);
 }
 

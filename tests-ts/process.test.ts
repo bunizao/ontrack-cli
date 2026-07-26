@@ -32,6 +32,24 @@ async function listen(server: Server): Promise<number> {
   return address.port;
 }
 
+async function interrupt(child: ReturnType<typeof spawn>): Promise<void> {
+  if (process.platform !== "win32") {
+    child.kill("SIGINT");
+    return;
+  }
+  assert.ok(child.pid);
+  const result = await run("powershell.exe", [
+    "-NoProfile",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-File",
+    "scripts/send-ctrl-c.ps1",
+    "-TargetPid",
+    String(child.pid),
+  ]);
+  assert.equal(result.code, 0, result.stderr);
+}
+
 export async function test_same_artifact_runs_help_and_version_in_node_and_bun(): Promise<void> {
   const packageMetadata = JSON.parse(readFileSync("package.json", "utf8")) as { version: string };
   for (const executable of [process.execPath, "bun"]) {
@@ -71,8 +89,38 @@ export async function test_process_projects_json_keeps_stdout_machine_clean(): P
   }
 }
 
+export async function test_terminal_output_preserves_unicode_and_never_emits_ansi(): Promise<void> {
+  const server = createServer((request, response) => {
+    assert.equal(request.url, "/api/projects?include_inactive=false");
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify([{ id: 7, unit: { id: 9, code: "FIT中文", name: "Café 🚀" } }]));
+  });
+  const port = await listen(server);
+  try {
+    const outputs: string[] = [];
+    for (const columns of ["20", "120"]) {
+      const result = await run(process.execPath, ["dist/cli.js", "projects"], {
+        ONTRACK_BASE_URL: `http://127.0.0.1:${port}`,
+        ONTRACK_USERNAME: "student",
+        ONTRACK_AUTH_TOKEN: "terminal-secret",
+        COLUMNS: columns,
+        FORCE_COLOR: "1",
+      });
+      assert.equal(result.code, 0);
+      assert.equal(result.stderr, "");
+      assert.match(result.stdout, /FIT中文/u);
+      assert.match(result.stdout, /Café 🚀/u);
+      assert.doesNotMatch(result.stdout, /\u001B\[[0-?]*[ -/]*[@-~]/u);
+      outputs.push(result.stdout);
+    }
+    assert.equal(outputs[0], outputs[1]);
+  } finally {
+    server.close();
+    await once(server, "close");
+  }
+}
+
 export async function test_sigint_aborts_in_flight_request_with_exit_130(): Promise<void> {
-  if (process.platform === "win32") return;
   let requestStarted!: () => void;
   const started = new Promise<void>((resolve) => { requestStarted = resolve; });
   const server = createServer(() => requestStarted());
@@ -85,6 +133,8 @@ export async function test_sigint_aborts_in_flight_request_with_exit_130(): Prom
       ONTRACK_AUTH_TOKEN: "cancel-secret",
     },
     stdio: ["ignore", "pipe", "pipe"],
+    detached: process.platform === "win32",
+    windowsHide: true,
   });
   let stdout = "";
   let stderr = "";
@@ -92,7 +142,7 @@ export async function test_sigint_aborts_in_flight_request_with_exit_130(): Prom
   child.stderr.setEncoding("utf8").on("data", (chunk: string) => { stderr += chunk; });
   try {
     await started;
-    child.kill("SIGINT");
+    await interrupt(child);
     const [code, signal] = await once(child, "exit") as [number | null, NodeJS.Signals | null];
     assert.equal(code, 130);
     assert.equal(signal, null);

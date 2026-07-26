@@ -224,6 +224,41 @@ export async function test_valid_cached_session_is_reused_and_expired_session_is
   assert.doesNotMatch(storedText, /refresh-secret/);
 }
 
+export async function test_adjacent_auth_sources_prefer_migration_over_cache_and_cache_over_okta(): Promise<void> {
+  const directory = await temporaryDirectory();
+  const sessionFile = join(directory, "session.json");
+  await writeFile(sessionFile, JSON.stringify({
+    base_url: "https://school.example.edu",
+    username: "cached-user",
+    access_token: "cached-token",
+    auth_token_expiry: "2030-01-01T00:00:00.000Z",
+    provenance: "okta",
+  }));
+  await fakeOkta(directory, '{"cookies":[{"name":"refresh_token","value":"okta-secret","domain":"school.example.edu","path":"/"}]}');
+
+  const migration = await resolveAuthenticatedSession({
+    baseUrl: "https://school.example.edu",
+    sessionFile,
+    env: { ONTRACK_DOUBTFIRE_USER_JSON: JSON.stringify({ username: "migration-user", authenticationToken: "migration-token" }) },
+    now: new Date("2029-01-01T00:00:00Z"),
+    oktaExecutable: fakeOktaPath(directory),
+    fetch: async () => { throw new Error("lower-priority Okta provider must not run"); },
+  });
+  assert.equal(migration.provenance, "migration");
+  assert.equal(migration.accessToken, "migration-token");
+
+  const cached = await resolveAuthenticatedSession({
+    baseUrl: "https://school.example.edu",
+    sessionFile,
+    env: {},
+    now: new Date("2029-01-01T00:00:00Z"),
+    oktaExecutable: fakeOktaPath(directory),
+    fetch: async () => { throw new Error("lower-priority Okta provider must not run"); },
+  });
+  assert.equal(cached.provenance, "session_cache");
+  assert.equal(cached.accessToken, "cached-token");
+}
+
 export async function test_fake_okta_subprocess_success_uses_only_json_output(): Promise<void> {
   const directory = await temporaryDirectory();
   await fakeOkta(directory, '{"cookies":[{"name":"username","value":"alice","domain":"school.example.edu","path":"/"},{"name":"refresh_token","value":"refresh-secret","domain":"school.example.edu","path":"/"}]}');

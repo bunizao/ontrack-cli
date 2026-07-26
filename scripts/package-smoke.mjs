@@ -25,6 +25,23 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+async function interrupt(child, workspace) {
+  if (process.platform !== "win32") {
+    child.kill("SIGINT");
+    return;
+  }
+  const result = await run("powershell.exe", [
+    "-NoProfile",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-File",
+    join(workspace, "scripts", "send-ctrl-c.ps1"),
+    "-TargetPid",
+    String(child.pid),
+  ]);
+  assert(result.code === 0, `Could not send Windows Ctrl+C: ${result.stderr}`);
+}
+
 function fakeOkta(directory) {
   const payload = '{"cookies":[{"name":"username","value":"student","domain":"127.0.0.1","path":"/"},{"name":"refresh_token","value":"refresh","domain":"127.0.0.1","path":"/"}]}';
   if (process.platform === "win32") {
@@ -112,23 +129,26 @@ async function main() {
       assert(error.code === 1 && error.stdout === "" && /config error/i.test(error.stderr), `${runtime} representative error failed`);
     }
 
-    if (process.platform !== "win32") {
-      for (const runtime of [process.execPath, executable("bun")]) {
+    for (const runtime of [process.execPath, executable("bun")]) {
         rmSync(join(temporary, "session.json"), { force: true });
         server.removeAllListeners("request");
         let hangStartedResolve;
         const hangStarted = new Promise((resolveStarted) => { hangStartedResolve = resolveStarted; });
         server.on("request", () => hangStartedResolve());
-        const child = spawn(runtime, [cli, "projects", "--json"], { env: authenticatedEnv, stdio: ["ignore", "pipe", "pipe"] });
+        const child = spawn(runtime, [cli, "projects", "--json"], {
+          env: authenticatedEnv,
+          stdio: ["ignore", "pipe", "pipe"],
+          detached: process.platform === "win32",
+          windowsHide: true,
+        });
         let stdout = "";
         let stderr = "";
         child.stdout.setEncoding("utf8").on("data", (chunk) => { stdout += chunk; });
         child.stderr.setEncoding("utf8").on("data", (chunk) => { stderr += chunk; });
         await hangStarted;
-        child.kill("SIGINT");
+        await interrupt(child, workspace);
         const [code] = await once(child, "exit");
         assert(code === 130 && stdout === "" && /cancellation/i.test(stderr), `${runtime} installed SIGINT behavior failed`);
-      }
     }
   } finally {
     server?.closeAllConnections();
