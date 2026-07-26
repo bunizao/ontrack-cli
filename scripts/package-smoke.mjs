@@ -139,7 +139,6 @@ async function main() {
           env: authenticatedEnv,
           stdio: ["ignore", "pipe", "pipe"],
           detached: process.platform === "win32",
-          windowsHide: true,
         });
         let stdout = "";
         let stderr = "";

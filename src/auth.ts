@@ -127,16 +127,12 @@ function runOkta(executable: string, baseUrl: string, timeoutMs: number, signal?
   if (useCommandShell && /["\r\n&|<>^%]/u.test(executable)) {
     return Promise.reject(authError("Okta provider path is unsafe."));
   }
-  const command = useCommandShell ? process.env.ComSpec ?? "cmd.exe" : executable;
-  const arguments_ = useCommandShell
-    ? ["/d", "/s", "/c", `"${executable}" cookies --json "${baseUrl}"`]
-    : ["cookies", "--json", baseUrl];
   return new Promise((resolve, reject) => {
     execFile(
-      command,
-      arguments_,
-      { encoding: "utf8", timeout: timeoutMs, windowsHide: true, maxBuffer: 1024 * 1024, signal },
-      (error, stdout) => {
+      executable,
+      ["cookies", "--json", baseUrl],
+      { encoding: "utf8", timeout: timeoutMs, windowsHide: true, maxBuffer: 1024 * 1024, signal, shell: useCommandShell },
+      (error, stdout, stderr) => {
         if (!error) {
           resolve({ stdout });
           return;
@@ -146,7 +142,7 @@ function runOkta(executable: string, baseUrl: string, timeoutMs: number, signal?
           reject(new CliError("cancellation", "Authentication cancelled."));
           return;
         }
-        if (code === "ENOENT") {
+        if (code === "ENOENT" || (useCommandShell && /not recognized|cannot find/iu.test(stderr))) {
           reject(authError("Okta provider is unavailable."));
           return;
         }

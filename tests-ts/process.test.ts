@@ -134,7 +134,6 @@ export async function test_sigint_aborts_in_flight_request_with_exit_130(): Prom
     },
     stdio: ["ignore", "pipe", "pipe"],
     detached: process.platform === "win32",
-    windowsHide: true,
   });
   let stdout = "";
   let stderr = "";

@@ -21,7 +21,13 @@ public static class ConsoleSignal
 "@
 
 [ConsoleSignal]::FreeConsole() | Out-Null
-if (-not [ConsoleSignal]::AttachConsole([uint32]$TargetPid)) { exit 1 }
+if (-not [ConsoleSignal]::AttachConsole([uint32]$TargetPid)) {
+    Write-Error "AttachConsole failed with Win32 error $([Runtime.InteropServices.Marshal]::GetLastWin32Error())."
+    exit 1
+}
 [ConsoleSignal]::SetConsoleCtrlHandler([IntPtr]::Zero, $true) | Out-Null
-if (-not [ConsoleSignal]::GenerateConsoleCtrlEvent(0, 0)) { exit 1 }
+if (-not [ConsoleSignal]::GenerateConsoleCtrlEvent(0, 0)) {
+    Write-Error "GenerateConsoleCtrlEvent failed with Win32 error $([Runtime.InteropServices.Marshal]::GetLastWin32Error())."
+    exit 1
+}
 Start-Sleep -Milliseconds 100
