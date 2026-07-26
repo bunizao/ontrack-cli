@@ -5,60 +5,87 @@ on:
     branches: ["**"]
   pull_request:
   workflow_call:
+  schedule:
+    - cron: "17 3 * * 1"
 
 permissions:
   contents: read
 
 jobs:
-  test:
-    name: Test (Python ${{ matrix.python-version }})
-    runs-on: ubuntu-latest
+  contract:
+    name: Contract (${{ matrix.os }}, Node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: [22, 24]
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v6
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          python-version: ${{ matrix.python-version }}
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - run: npm ci
+      - run: npm run verify:source
+      - run: npm run typecheck
+      - run: npm test
 
-      - name: Sync dependencies
-        run: uv sync --locked
+  bun:
+    name: Contract (${{ matrix.os }}, Bun 1.3.14)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
 
-      - name: Run tests
-        run: uv run pytest -q
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - run: npm ci
+      - run: npm run test:bun
 
-      - name: Compile package
-        run: uv run python -m compileall ontrack_cli
-
-      - name: Smoke test CLI
-        run: uv run ontrack --help
-
-  build:
-    name: Build distribution
+  package:
+    name: Packed package smoke
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v6
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          python-version: "3.12"
+          node-version: 22
+          cache: npm
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - run: npm ci
+      - run: npm pack
+      - run: npm install --prefix "$RUNNER_TEMP/ontrack-smoke" ./bunizao-ontrack-*.tgz
+      - run: node "$RUNNER_TEMP/ontrack-smoke/node_modules/@bunizao/ontrack/dist/cli.js" --help
+      - run: bun "$RUNNER_TEMP/ontrack-smoke/node_modules/@bunizao/ontrack/dist/cli.js" --version
 
-      - name: Build package
-        run: uv build
-
-      - name: Check distribution metadata
-        run: uvx twine check dist/*
+  runtime-drift:
+    name: Current runtime drift
+    if: github.event_name == 'schedule'
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: current
+          cache: npm
+      - uses: oven-sh/setup-bun@v2
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run test:bun

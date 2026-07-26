@@ -1,45 +1,27 @@
 # ontrack-cli
 
-Terminal-first CLI for OnTrack that reuses your authenticated browser session.
-
-`ontrack-cli` targets Doubtfire / OnTrack deployments and is designed for quick terminal access to your projects, tasks, and teaching roles without building a separate login flow.
-
-## Features
-
-- No manual API token setup in the common case
-- Reads browser auth state from Chrome, Firefox, Brave, or Edge when available
-- Prompts for `base_url` on first run and saves it like `moodle-cli`
-- Lists projects, merged task views, and teaching roles
-- Supports terminal output plus `--json` and `--yaml`
+Terminal-first CLI for Doubtfire / OnTrack, published as emitted ESM JavaScript for Node and Bun.
 
 ## Requirements
 
-- Python 3.10+
-- `uv` or `pipx`
-- An authenticated OnTrack browser session, or explicit credentials
+- Node.js 22 or newer, or Bun 1.3.14 or newer
+- An existing session managed by [`okta-auth`](https://github.com/bunizao/okta-auth), or explicit OnTrack credentials
 
 ## Install
 
 ```bash
-# Recommended: uv tool
-uv tool install ontrack-cli
-
-# Alternative: pipx
-pipx install ontrack-cli
+npm install --global @bunizao/ontrack
 ```
 
-Install from source:
+The package keeps the executable name `ontrack`. Bun runs the same emitted artifact:
 
 ```bash
-git clone https://github.com/bunizao/ontrack-cli.git
-cd ontrack-cli
-uv sync
+bun run --bun ontrack --help
 ```
 
-## Usage
+## Commands
 
 ```bash
-ontrack --help
 ontrack user
 ontrack auth check
 ontrack projects
@@ -48,98 +30,66 @@ ontrack tasks 12345
 ontrack roles
 ```
 
-Structured output:
+Retained options:
 
-```bash
-ontrack projects --json
-ontrack project 12345 --yaml
-```
+- `--json` on every command
+- `--include-inactive` on `projects`
+- repeatable `--status <raw_status>` on `tasks`
+- `--all` on `roles`
 
-To upgrade after a new release:
-
-```bash
-uv tool upgrade ontrack-cli
-# or
-pipx upgrade ontrack-cli
-```
+The former `--yaml` output mode was removed at the TypeScript cutover. Structured output uses stable `snake_case` keys. Successful JSON commands write only the result to stdout; failures leave stdout empty.
 
 ## Configuration
 
-On first run, if no `base_url` is configured, the CLI prompts for it and writes it to `config.yaml` in the project directory or in `~/.config/ontrack-cli/`:
+Set the deployment root URL:
 
-```yaml
-base_url: https://school.example.edu
+```bash
+export ONTRACK_BASE_URL='https://ontrack.example.edu'
 ```
 
-Required format:
+Or create `config.yaml` in the current directory, `$XDG_CONFIG_HOME/ontrack-cli/config.yaml`, or `~/.config/ontrack-cli/config.yaml`:
 
-- Use a full root URL such as `https://school.example.edu`
-- Do not include paths, query strings, or fragments
-- Do not use URLs like `/home`, `/#/projects`, or `/api/auth`
-- The CLI validates the URL against `/api/auth/method` and asks again if it does not look like an OnTrack site
+```yaml
+base_url: https://ontrack.example.edu
+```
 
-You can also set `ONTRACK_BASE_URL` instead of using the interactive prompt.
-You can copy from [config.example.yaml](config.example.yaml).
+`ONTRACK_CONFIG` selects an explicit config file. Resolution order is:
 
-Environment overrides:
-
-- `ONTRACK_BASE_URL`
-- `ONTRACK_USERNAME`
-- `ONTRACK_AUTH_TOKEN`
-- `ONTRACK_DOUBTFIRE_USER_JSON`
+1. `ONTRACK_CONFIG`
+2. a current-directory `config.yaml`
+3. the XDG or platform config directory
 
 ## Authentication
 
-Default behavior:
-
-1. Resolve `base_url`
-2. Try browser cookies
-3. Exchange OnTrack's browser `refresh_token` for an API auth token when supported
-4. Fall back to explicit environment variables or config values
-
-If browser auto-auth does not work, you can still provide credentials manually:
+For normal interactive use, install and configure `okta-auth`, then establish the session explicitly:
 
 ```bash
-export ONTRACK_BASE_URL='https://school.example.edu'
+uv tool install okta-auth-cli
+okta config
+okta login https://ontrack.example.edu
+```
+
+Normal `ontrack` commands only call `okta cookies --json`; they never start an interactive login and never read private `okta-auth` storage files. OnTrack access sessions are cached in `session.json` beside the selected config with mode `0600` until expiry.
+
+Automation can use an atomic credential pair:
+
+```bash
 export ONTRACK_USERNAME='your_username'
 export ONTRACK_AUTH_TOKEN='your_auth_token'
 ```
 
-You can also reuse the front-end cached user object:
-
-1. Open an authenticated OnTrack page
-2. Open DevTools Console
-3. Run:
-
-```js
-copy(localStorage.getItem('doubtfire_user'))
-```
-
-4. Export it:
-
-```bash
-export ONTRACK_DOUBTFIRE_USER_JSON='{"id":123,"username":"your_username","authenticationToken":"..."}'
-```
-
-## Commands
-
-- `ontrack user`: show the resolved signed-in user
-- `ontrack auth check`: validate access and show a quick auth summary
-- `ontrack projects`: list the current user's projects
-- `ontrack project <project_id>`: show a project with merged task definition metadata
-- `ontrack tasks <project_id>`: list task rows for a project
-- `ontrack roles`: list teaching roles for the current user
+Credential precedence is environment pair, config pair, migration-only `ONTRACK_DOUBTFIRE_USER_JSON`, cached session, then the `okta` subprocess provider. Access and refresh tokens are never included in command output or diagnostics.
 
 ## Development
 
 ```bash
-uv run pytest -q
-uv run python -m compileall ontrack_cli
-uv build
+npm ci
+npm run typecheck
+npm test
+npm run test:bun
+npm pack --dry-run
 ```
 
-## Notes
+Tests export plain async functions and use `node:assert/strict`, so the same suite runs through the local harness under Node and Bun. `ONTRACK_NOW` is available only for deterministic test and verification runs.
 
-- The CLI is built around Doubtfire / OnTrack API behavior
-- Browser-based auto-auth works best when you are already signed in to the target site
-- Some deployments expose `POST /api/auth/access-token`, which allows clean browser-session reuse
+See [ADR 0001](docs/adr/0001-typescript-7-dual-runtime-rewrite.md) and [PORTING.md](PORTING.md) for the cutover contract and module map.
