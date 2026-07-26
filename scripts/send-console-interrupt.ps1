@@ -26,7 +26,7 @@ if (-not [ConsoleSignal]::AttachConsole([uint32]$TargetPid)) {
     exit 1
 }
 [ConsoleSignal]::SetConsoleCtrlHandler([IntPtr]::Zero, $true) | Out-Null
-if (-not [ConsoleSignal]::GenerateConsoleCtrlEvent(0, 0)) {
+if (-not [ConsoleSignal]::GenerateConsoleCtrlEvent(1, [uint32]$TargetPid)) {
     Write-Error "GenerateConsoleCtrlEvent failed with Win32 error $([Runtime.InteropServices.Marshal]::GetLastWin32Error())."
     exit 1
 }

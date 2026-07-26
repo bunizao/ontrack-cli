@@ -125,7 +125,7 @@ The true external OnTrack seam has at least two adapters: the production `fetch`
 Three values are threaded explicitly rather than reached for globally, because each is a source of untestable behavior when it is ambient:
 
 - **Clock**: Project Snapshot receives a constructed value supplying both the current instant and today's local civil date, since it compares against each. `ONTRACK_NOW` overrides it and is documented as test-only, outside the CLI compatibility contract.
-- **AbortSignal**: one signal originates at the process entry point, is bound to SIGINT, and is passed through to every HTTP call. This is an API requirement, not an implementation detail: without it, the required SIGINT behavior cannot be met, and retrofitting the signature later touches every layer.
+- **AbortSignal**: one signal originates at the process entry point, is bound to SIGINT on POSIX and Ctrl+Break on Windows, and is passed through to every HTTP call. Windows cannot target Ctrl+C at a detached process group; Ctrl+Break is the native group-addressable console interrupt. This is an API requirement, not an implementation detail: without it, the required interrupt behavior cannot be met, and retrofitting the signature later touches every layer.
 - **Environment and platform**: configuration path resolution is a pure function of `env` and `platform`. Nothing below the command layer reads `process.env` directly.
 
 ### Stable CLI and upstream contract
@@ -191,7 +191,7 @@ Errors carry a category as a closed enumeration: usage, config, auth, upstream c
 
 At the cutover gate the observable exit codes remain what the Python implementation actually produces today: `0` on success, `2` for usage errors, `130` on interrupt, and `1` for everything else. Granular per-category exit codes are a later interface change, not part of parity. The internal categories exist now so that change costs a mapping table rather than a refactor.
 
-Cancellation must produce exit `130`, no partial structured output on stdout, and no stack trace.
+Cancellation through POSIX SIGINT or Windows Ctrl+Break must produce exit `130`, no partial structured output on stdout, and no stack trace.
 
 #### Retry safety
 
@@ -285,7 +285,7 @@ Golden files are pretty-printed and committed. Regeneration happens through `UPD
 4. **Exit code exhaustiveness.** Every error category has a mapping, asserted by iterating the enumeration.
 5. **Stream separation.** stdout parses as JSON in every `--json` success case and is empty in every failure case.
 6. **Colour and TTY decisions as pure functions.** Tested at L0 against synthetic stream and env inputs. No pseudo-terminal infrastructure; the defect lives in the decision, not in the terminal.
-7. **Cancellation.** SIGINT during an in-flight request yields exit `130`, empty stdout, and no stack trace.
+7. **Cancellation.** POSIX SIGINT or Windows Ctrl+Break during an in-flight request yields exit `130`, empty stdout, and no stack trace.
 8. **Timeout and network failure.** An adapter that never resolves proves the abort path fires, without depending on wall-clock delays.
 9. **Retry safety.** Three cases: GET refreshes and retries once; upload does not retry; repeated refresh failure terminates.
 10. **Configuration precedence.** Ordered-pair coverage — for each adjacent pair of sources, the higher one wins — rather than the full combination space.
@@ -329,7 +329,7 @@ The cutover cannot merge until all of the following are true:
 - Black-box fixtures capture current command names, flags, exit codes, stdout/stderr separation, config precedence, JSON shapes, and representative requests, recorded from a Python implementation that can authenticate.
 - Sanitized upstream fixtures cover current projects, project detail, unit detail, roles, malformed responses, unknown statuses, custom grades, Task Schedule variants, HTTP 401/419, and network failure, each in minimal and maximal form.
 - The same contract tests run under Node 22, Node 24, and current Bun.
-- Packed-package smoke tests install the tarball in an empty directory and exercise help, version, `projects --json`, a representative error, subprocess authentication, and SIGINT under both runtimes.
+- Packed-package smoke tests install the tarball in an empty directory and exercise help, version, `projects --json`, a representative error, subprocess authentication, and the platform console interrupt under both runtimes.
 - Config paths, executable shims, Unicode, and terminal behavior run on Linux, macOS, and Windows CI.
 - The secret sentinel appears in no output, fixture, or golden file.
 - No parity test is deleted or skipped to make the rewrite pass. Compilation-only stubs do not count as implementation.

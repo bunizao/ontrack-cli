@@ -11,7 +11,11 @@ function executable(name) {
 
 function run(command, args, env = process.env) {
   return new Promise((resolveResult, reject) => {
-    const child = spawn(command, args, { env, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(command, args, {
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+      shell: process.platform === "win32" && command.toLowerCase().endsWith(".cmd"),
+    });
     let stdout = "";
     let stderr = "";
     child.stdout.setEncoding("utf8").on("data", (chunk) => { stdout += chunk; });
@@ -35,7 +39,7 @@ async function interrupt(child, workspace) {
     "-ExecutionPolicy",
     "Bypass",
     "-File",
-    join(workspace, "scripts", "send-ctrl-c.ps1"),
+    join(workspace, "scripts", "send-console-interrupt.ps1"),
     "-TargetPid",
     String(child.pid),
   ]);
@@ -61,10 +65,10 @@ async function main() {
   let tarball;
   let server;
   try {
-    const packed = spawnSync(executable("npm"), ["pack", "--json"], { cwd: workspace, encoding: "utf8" });
+    const packed = spawnSync(executable("npm"), ["pack", "--json"], { cwd: workspace, encoding: "utf8", shell: process.platform === "win32" });
     assert(packed.status === 0, packed.stderr || "npm pack failed");
     tarball = resolve(workspace, JSON.parse(packed.stdout)[0].filename);
-    const installed = spawnSync(executable("npm"), ["install", "--prefix", temporary, tarball], { encoding: "utf8" });
+    const installed = spawnSync(executable("npm"), ["install", "--prefix", temporary, tarball], { encoding: "utf8", shell: process.platform === "win32" });
     assert(installed.status === 0, installed.stderr || "tarball installation failed");
     const cli = join(temporary, "node_modules", "@bunizao", "ontrack", "dist", "cli.js");
     const shim = join(temporary, "node_modules", ".bin", executable("ontrack"));
@@ -145,9 +149,16 @@ async function main() {
         child.stdout.setEncoding("utf8").on("data", (chunk) => { stdout += chunk; });
         child.stderr.setEncoding("utf8").on("data", (chunk) => { stderr += chunk; });
         await hangStarted;
+        const exited = once(child, "exit");
         await interrupt(child, workspace);
-        const [code] = await once(child, "exit");
-        assert(code === 130 && stdout === "" && /cancellation/i.test(stderr), `${runtime} installed SIGINT behavior failed`);
+        const outcome = await Promise.race([
+          exited,
+          new Promise((resolveTimeout) => setTimeout(() => resolveTimeout("timeout"), 10_000)),
+        ]);
+        if (outcome === "timeout") child.kill();
+        assert(outcome !== "timeout", `${runtime} installed console interrupt timed out`);
+        const [code] = outcome;
+        assert(code === 130 && stdout === "" && /cancellation/i.test(stderr), `${runtime} installed console interrupt behavior failed`);
     }
   } finally {
     server?.closeAllConnections();

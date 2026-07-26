@@ -73,6 +73,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   const controller = new AbortController();
   const cancel = (): void => controller.abort();
   process.once("SIGINT", cancel);
+  if (process.platform === "win32") process.once("SIGBREAK", cancel);
   try {
     const result = await executeCli(argv, {
       app: lazyApplication(controller.signal),
@@ -83,6 +84,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     return result.exitCode;
   } finally {
     process.removeListener("SIGINT", cancel);
+    if (process.platform === "win32") process.removeListener("SIGBREAK", cancel);
   }
 }
 

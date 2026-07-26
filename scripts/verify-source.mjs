@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 
@@ -36,6 +36,7 @@ const credentialPatterns = [
   /\b(?:authorization|proxy-authorization)\s*:\s*(?:bearer|basic)\s+[A-Za-z0-9._~+/-]{12,}/iu,
 ];
 for (const path of tracked.stdout.split("\0").filter(Boolean)) {
+  if (!existsSync(path)) continue;
   const source = readFileSync(path);
   if (source.includes(0)) continue;
   const text = source.toString("utf8");

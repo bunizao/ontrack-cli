@@ -43,7 +43,7 @@ async function interrupt(child: ReturnType<typeof spawn>): Promise<void> {
     "-ExecutionPolicy",
     "Bypass",
     "-File",
-    "scripts/send-ctrl-c.ps1",
+    "scripts/send-console-interrupt.ps1",
     "-TargetPid",
     String(child.pid),
   ]);
@@ -120,7 +120,7 @@ export async function test_terminal_output_preserves_unicode_and_never_emits_ans
   }
 }
 
-export async function test_sigint_aborts_in_flight_request_with_exit_130(): Promise<void> {
+export async function test_console_interrupt_aborts_in_flight_request_with_exit_130(): Promise<void> {
   let requestStarted!: () => void;
   const started = new Promise<void>((resolve) => { requestStarted = resolve; });
   const server = createServer(() => requestStarted());
@@ -141,8 +141,15 @@ export async function test_sigint_aborts_in_flight_request_with_exit_130(): Prom
   child.stderr.setEncoding("utf8").on("data", (chunk: string) => { stderr += chunk; });
   try {
     await started;
+    const exited = once(child, "exit") as Promise<[number | null, NodeJS.Signals | null]>;
     await interrupt(child);
-    const [code, signal] = await once(child, "exit") as [number | null, NodeJS.Signals | null];
+    const outcome = await Promise.race([
+      exited,
+      new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), 10_000)),
+    ]);
+    if (outcome === "timeout") child.kill();
+    assert.notEqual(outcome, "timeout", "console interrupt did not stop the process");
+    const [code, signal] = outcome as [number | null, NodeJS.Signals | null];
     assert.equal(code, 130);
     assert.equal(signal, null);
     assert.equal(stdout, "");
