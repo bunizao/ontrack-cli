@@ -104,7 +104,7 @@ function parseConfigText(text: string, configFile: string): OnTrackConfig {
   }
 
   const config: Record<string, unknown> = {};
-  let parent: { readonly key: string; readonly indent: number; readonly value: Record<string, unknown> } | undefined;
+  let parent: { readonly indent: number; readonly value: Record<string, unknown> } | undefined;
   for (const [index, line] of text.split(/\r?\n/).entries()) {
     const content = line.trim();
     if (!content || content.startsWith("#")) continue;
@@ -125,7 +125,7 @@ function parseConfigText(text: string, configFile: string): OnTrackConfig {
       if ((match[2] ?? "") === "") {
         const value: Record<string, unknown> = {};
         config[match[1]] = value;
-        parent = { key: match[1], indent, value };
+        parent = { indent, value };
       } else {
         config[match[1]] = parseScalar(match[2] ?? "");
       }

@@ -121,16 +121,19 @@ public sealed class ConsoleProcess : IDisposable
             Length = Marshal.SizeOf(typeof(SecurityAttributes)),
             InheritHandle = true,
         };
-        var standardInput = CreateFile("NUL", GenericRead, ShareRead | ShareWrite, ref security, OpenExisting, 0, IntPtr.Zero);
-        var standardOutput = CreateFile(stdoutPath, GenericWrite, ShareRead | ShareWrite, ref security, CreateAlways, 0, IntPtr.Zero);
-        var standardError = CreateFile(stderrPath, GenericWrite, ShareRead | ShareWrite, ref security, CreateAlways, 0, IntPtr.Zero);
-        if (standardInput == InvalidHandle || standardOutput == InvalidHandle || standardError == InvalidHandle)
-        {
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not open the runtime standard streams");
-        }
-
+        var standardInput = InvalidHandle;
+        var standardOutput = InvalidHandle;
+        var standardError = InvalidHandle;
         try
         {
+            standardInput = CreateFile("NUL", GenericRead, ShareRead | ShareWrite, ref security, OpenExisting, 0, IntPtr.Zero);
+            standardOutput = CreateFile(stdoutPath, GenericWrite, ShareRead | ShareWrite, ref security, CreateAlways, 0, IntPtr.Zero);
+            standardError = CreateFile(stderrPath, GenericWrite, ShareRead | ShareWrite, ref security, CreateAlways, 0, IntPtr.Zero);
+            if (standardInput == InvalidHandle || standardOutput == InvalidHandle || standardError == InvalidHandle)
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not open the runtime standard streams");
+            }
+
             var startupInfo = new StartupInfo {
                 Size = Marshal.SizeOf(typeof(StartupInfo)),
                 Flags = StartfUseStdHandles,
@@ -159,9 +162,9 @@ public sealed class ConsoleProcess : IDisposable
         }
         finally
         {
-            CloseHandle(standardInput);
-            CloseHandle(standardOutput);
-            CloseHandle(standardError);
+            if (standardInput != InvalidHandle) CloseHandle(standardInput);
+            if (standardOutput != InvalidHandle) CloseHandle(standardOutput);
+            if (standardError != InvalidHandle) CloseHandle(standardError);
         }
     }
 
@@ -242,10 +245,12 @@ public static class ConsoleHost
 "@
 
 $arguments = @((ConvertFrom-Json -InputObject $ArgumentsJson))
-$stdoutPath = [IO.Path]::GetTempFileName()
-$stderrPath = [IO.Path]::GetTempFileName()
+$stdoutPath = $null
+$stderrPath = $null
 $process = $null
 try {
+    $stdoutPath = [IO.Path]::GetTempFileName()
+    $stderrPath = [IO.Path]::GetTempFileName()
     [ConsoleHost]::EnsureConsole()
     $process = [ConsoleProcess]::Start($RuntimePath, [string[]]$arguments, $stdoutPath, $stderrPath)
     [Console]::Out.WriteLine("ONTRACK_INTERRUPT_READY")
@@ -255,13 +260,18 @@ try {
     }
     $process.Interrupt()
     $exitCode = $process.Wait()
+    [Console]::Out.Write([IO.File]::ReadAllText($stdoutPath))
+    [Console]::Error.Write([IO.File]::ReadAllText($stderrPath))
 }
 finally {
     if ($null -ne $process) {
         $process.Dispose()
     }
+    if ($null -ne $stdoutPath) {
+        Remove-Item -LiteralPath $stdoutPath -Force -ErrorAction SilentlyContinue
+    }
+    if ($null -ne $stderrPath) {
+        Remove-Item -LiteralPath $stderrPath -Force -ErrorAction SilentlyContinue
+    }
 }
-[Console]::Out.Write([IO.File]::ReadAllText($stdoutPath))
-[Console]::Error.Write([IO.File]::ReadAllText($stderrPath))
-Remove-Item -LiteralPath $stdoutPath, $stderrPath -Force
 exit $exitCode

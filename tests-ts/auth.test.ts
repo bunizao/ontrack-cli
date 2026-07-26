@@ -12,9 +12,15 @@ async function temporaryDirectory(): Promise<string> {
   return mkdtemp(join(tmpdir(), "ontrack-auth-test-"));
 }
 
-async function fakeOkta(directory: string, output: string | null, hang = false): Promise<void> {
-  const shellBody = hang ? "sleep 5" : output === null ? ":" : `printf '%s' '${output.replaceAll("'", "'\\''")}'`;
-  const cmdBody = hang ? "ping 127.0.0.1 -n 6 > nul" : output === null ? "rem empty" : `echo ${output}`;
+async function fakeOkta(directory: string, output: string | null, hang = false, failure?: string): Promise<void> {
+  const shellBody = hang
+    ? "sleep 5"
+    : failure
+      ? `printf '%s\\n' '${failure.replaceAll("'", "'\\''")}' >&2\nexit 1`
+      : output === null ? ":" : `printf '%s' '${output.replaceAll("'", "'\\''")}'`;
+  const cmdBody = hang
+    ? "ping 127.0.0.1 -n 6 > nul"
+    : failure ? `echo ${failure} 1>&2\r\nexit /b 1` : output === null ? "rem empty" : `echo ${output}`;
   const shell = `#!/bin/sh\n${shellBody}\n`;
   const cmd = `@echo off\r\n${cmdBody}\r\n`;
   await writeFile(join(directory, "okta"), shell, "utf8");
@@ -298,10 +304,11 @@ async function expectAuthFailure(
   expected: RegExp,
   timeoutMs = 1_000,
   hang = false,
+  failure?: string,
 ): Promise<void> {
   const directory = await temporaryDirectory();
   const executable = fakeOktaPath(directory);
-  if (output !== undefined) await fakeOkta(directory, output, hang);
+  if (output !== undefined) await fakeOkta(directory, output, hang, failure);
   await assert.rejects(
     resolveAuthenticatedSession({
       baseUrl: "https://school.example.edu",
@@ -315,11 +322,13 @@ async function expectAuthFailure(
   );
 }
 
-export async function test_fake_okta_subprocess_reports_malformed_empty_missing_and_timeout(): Promise<void> {
+export async function test_fake_okta_subprocess_reports_every_provider_failure_mode(): Promise<void> {
   await expectAuthFailure("not-json", /malformed JSON/i);
   await expectAuthFailure(null, /empty output/i);
   await expectAuthFailure(undefined, /unavailable/i);
   await expectAuthFailure(null, /timed out/i, 20, true);
+  await expectAuthFailure(null, /no stored Okta session/i, 1_000, false, "No stored session");
+  await expectAuthFailure(null, /Okta provider failed/i, 1_000, false, "Login failed");
 }
 
 export async function test_null_access_token_response_is_cookie_exchange_failure(): Promise<void> {

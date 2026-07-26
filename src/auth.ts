@@ -127,11 +127,22 @@ function runOkta(executable: string, baseUrl: string, timeoutMs: number, signal?
   if (useCommandShell && /["\r\n&|<>^%]/u.test(executable)) {
     return Promise.reject(authError("Okta provider path is unsafe."));
   }
+  const command = useCommandShell ? process.env.ComSpec ?? "cmd.exe" : executable;
+  const args = useCommandShell
+    ? ["/d", "/v:off", "/s", "/c", `call "${executable}" cookies --json "%ONTRACK_OKTA_BASE_URL%"`]
+    : ["cookies", "--json", baseUrl];
   return new Promise((resolve, reject) => {
     execFile(
-      executable,
-      ["cookies", "--json", baseUrl],
-      { encoding: "utf8", timeout: timeoutMs, windowsHide: true, maxBuffer: 1024 * 1024, signal, shell: useCommandShell },
+      command,
+      args,
+      {
+        encoding: "utf8",
+        timeout: timeoutMs,
+        windowsHide: true,
+        maxBuffer: 1024 * 1024,
+        signal,
+        env: useCommandShell ? { ...process.env, ONTRACK_OKTA_BASE_URL: baseUrl } : process.env,
+      },
       (error, stdout, stderr) => {
         if (!error) {
           resolve({ stdout });
@@ -150,7 +161,11 @@ function runOkta(executable: string, baseUrl: string, timeoutMs: number, signal?
           reject(authError("Okta provider timed out."));
           return;
         }
-        reject(authError("No stored Okta session is available."));
+        if (/no stored (?:Okta )?session|not logged in|no session/iu.test(stderr)) {
+          reject(authError("No stored Okta session is available."));
+          return;
+        }
+        reject(authError("Okta provider failed."));
       },
     );
   });

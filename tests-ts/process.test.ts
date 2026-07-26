@@ -79,7 +79,7 @@ function spawnInterruptible(
 export async function test_same_artifact_runs_help_and_version_in_node_and_bun(): Promise<void> {
   const packageMetadata = JSON.parse(readFileSync("package.json", "utf8")) as { version: string };
   for (const executable of [process.execPath, "bun"]) {
-    const prefix = executable === "bun" ? ["dist/cli.js"] : ["dist/cli.js"];
+    const prefix = ["dist/cli.js"];
     const help = await run(executable, [...prefix, "--help"]);
     assert.equal(help.code, 0, executable);
     assert.match(help.stdout, /^Usage: ontrack /, executable);
