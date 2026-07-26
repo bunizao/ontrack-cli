@@ -63,17 +63,44 @@ function spawnInterruptible(
     JSON.stringify(args),
   ], { env, stdio: ["pipe", "pipe", "pipe"] });
   const ready = new Promise<void>((resolve, reject) => {
+    let output = "";
+    let settled = false;
+    const finish = (error?: Error): void => {
+      if (settled) return;
+      settled = true;
+      child.stdout.off("data", onData);
+      if (error) reject(error);
+      else resolve();
+    };
     const onData = (chunk: Buffer): void => {
-      if (chunk.toString("utf8").includes("ONTRACK_INTERRUPT_READY\n")) {
-        child.stdout.off("data", onData);
-        resolve();
-      }
+      output += chunk.toString("utf8");
+      if (output.includes("ONTRACK_INTERRUPT_READY\n")) finish();
     };
     child.stdout.on("data", onData);
-    child.once("error", reject);
-    child.once("exit", (code) => reject(new Error(`Console harness exited before launch with code ${code ?? "unknown"}`)));
+    child.once("error", (error) => finish(error));
+    child.once("exit", (code) => finish(new Error(`Console harness exited before launch with code ${code ?? "unknown"}`)));
   });
   return { child, ready };
+}
+
+async function waitForInterruptReadiness(
+  child: ChildProcessWithoutNullStreams,
+  events: readonly Promise<unknown>[],
+): Promise<void> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      Promise.all(events),
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => reject(new Error("Console interrupt process did not become ready within 10 seconds")), 10_000);
+      }),
+    ]);
+  } catch (error) {
+    child.kill();
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export async function test_same_artifact_runs_help_and_version_in_node_and_bun(): Promise<void> {
@@ -166,7 +193,7 @@ export async function test_console_interrupt_aborts_in_flight_request_with_exit_
   child.stdout.setEncoding("utf8").on("data", (chunk: string) => { stdout += chunk; });
   child.stderr.setEncoding("utf8").on("data", (chunk: string) => { stderr += chunk; });
   try {
-    await Promise.all([started, ready]);
+    await waitForInterruptReadiness(child, [started, ready]);
     const exited = once(child, "exit") as Promise<[number | null, NodeJS.Signals | null]>;
     await interrupt(child);
     const outcome = await Promise.race([

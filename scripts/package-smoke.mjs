@@ -63,17 +63,41 @@ function spawnInterruptible(runtime, args, env, workspace) {
     JSON.stringify(args),
   ], { env, stdio: ["pipe", "pipe", "pipe"] });
   const ready = new Promise((resolveReady, reject) => {
+    let output = "";
+    let settled = false;
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      child.stdout.off("data", onData);
+      if (error) reject(error);
+      else resolveReady();
+    };
     const onData = (chunk) => {
-      if (chunk.toString("utf8").includes("ONTRACK_INTERRUPT_READY\n")) {
-        child.stdout.off("data", onData);
-        resolveReady();
-      }
+      output += chunk.toString("utf8");
+      if (output.includes("ONTRACK_INTERRUPT_READY\n")) finish();
     };
     child.stdout.on("data", onData);
-    child.once("error", reject);
-    child.once("exit", (code) => reject(new Error(`Console harness exited before launch with code ${code ?? "unknown"}`)));
+    child.once("error", (error) => finish(error));
+    child.once("exit", (code) => finish(new Error(`Console harness exited before launch with code ${code ?? "unknown"}`)));
   });
   return { child, ready };
+}
+
+async function waitForInterruptReadiness(child, events) {
+  let timeout;
+  try {
+    await Promise.race([
+      Promise.all(events),
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => reject(new Error("Console interrupt process did not become ready within 10 seconds")), 10_000);
+      }),
+    ]);
+  } catch (error) {
+    child.kill();
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function fakeOkta(directory) {
@@ -175,7 +199,7 @@ async function main() {
         let stderr = "";
         child.stdout.setEncoding("utf8").on("data", (chunk) => { stdout += chunk; });
         child.stderr.setEncoding("utf8").on("data", (chunk) => { stderr += chunk; });
-        await Promise.all([hangStarted, ready]);
+        await waitForInterruptReadiness(child, [hangStarted, ready]);
         const exited = once(child, "exit");
         await interrupt(child);
         const outcome = await Promise.race([

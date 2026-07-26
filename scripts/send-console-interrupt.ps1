@@ -245,6 +245,9 @@ public static class ConsoleHost
 "@
 
 $arguments = @((ConvertFrom-Json -InputObject $ArgumentsJson))
+$parentInput = [Console]::In
+$parentOutput = [Console]::Out
+$parentError = [Console]::Error
 $stdoutPath = $null
 $stderrPath = $null
 $process = $null
@@ -253,15 +256,15 @@ try {
     $stderrPath = [IO.Path]::GetTempFileName()
     [ConsoleHost]::EnsureConsole()
     $process = [ConsoleProcess]::Start($RuntimePath, [string[]]$arguments, $stdoutPath, $stderrPath)
-    [Console]::Out.WriteLine("ONTRACK_INTERRUPT_READY")
-    [Console]::Out.Flush()
-    if ([Console]::In.ReadLine() -ne "interrupt") {
+    $parentOutput.WriteLine("ONTRACK_INTERRUPT_READY")
+    $parentOutput.Flush()
+    if ($parentInput.ReadLine() -ne "interrupt") {
         throw "Console harness did not receive the interrupt command."
     }
     $process.Interrupt()
     $exitCode = $process.Wait()
-    [Console]::Out.Write([IO.File]::ReadAllText($stdoutPath))
-    [Console]::Error.Write([IO.File]::ReadAllText($stderrPath))
+    $parentOutput.Write([IO.File]::ReadAllText($stdoutPath))
+    $parentError.Write([IO.File]::ReadAllText($stderrPath))
 }
 finally {
     if ($null -ne $process) {
