@@ -28,15 +28,19 @@ The cutover gate depends on freezing today's observable behavior as fixtures. To
 
 Without a working reference implementation, "parity" degrades into "the TypeScript implementation agrees with fixtures hand-transcribed from upstream Ruby entities", which tests the transcription rather than the port. This is a sequencing defect in the plan, not an acceptable residual risk.
 
-### Deadline semantics are string comparison, not time
+### Date handling is untyped and its timezone assumption is unexamined
 
-Deadline interpretation is the CLI's main product value, and it is currently implemented as lexicographic string comparison. `build_task_rows` derives `today` from the local date, formats it as `YYYY-MM-DD`, and compares it directly against upstream date values that may carry a time and an offset. Three defects follow:
+Upstream exposes two different kinds of time value, and the CLI treats both as opaque strings.
 
-- a deadline earlier today never registers as overdue, because the date-only prefix does not compare as earlier;
-- local date and deployment timezone disagree across day boundaries;
-- the sort key mixes date-only and timestamp strings, so ordering is stable only by accident.
+`TaskEntity` renders `due_date`, `submission_date`, `completion_date`, `target_due_date`, and `target_start_date` through `format_with: :date_only`, so they arrive as `YYYY-MM-DD` civil dates carrying no time and no offset. It renders `moved_to_discuss_at` and `discuss_timeout_expiry_at` unformatted, so those arrive as full timestamps.
 
-Nothing in the current implementation models a timezone. A rewrite that preserves this behavior would preserve a wrong answer to the CLI's central question.
+Lexicographic comparison is therefore accidentally correct for the five civil dates, which is why the overdue calculation mostly works today. The real defects are narrower and less visible:
+
+- `today` is the client's local date, while the deadline is a civil date in the deployment's timezone. A user outside that timezone sees off-by-one overdue flags near midnight, and nothing records that this assumption was made.
+- Both timestamp fields are dropped by `_task_from_payload`, so the Discuss timeout this ADR requires cannot be shown at all.
+- The sort key has no total ordering guarantee and would break silently if any value changed format.
+
+The correction is not to parse everything into instants. Collapsing a civil date into an instant manufactures a time of day and a timezone that upstream never supplied. The two kinds need distinct types.
 
 ### Repeating the authentication handshake on every invocation is not viable
 
@@ -66,7 +70,7 @@ The repository will move to TypeScript in one replacement branch and merge witho
 
 The branch has two gates:
 
-1. **Cutover gate**: preserve the existing command names, flags, exit behavior, config/environment names, and JSON/YAML shapes while fixing confirmed authentication, Task Schedule, Task Status, grade, and error-handling defects.
+1. **Cutover gate**: preserve the existing command names, flags, exit behavior, config/environment names, and JSON shapes while fixing confirmed authentication, Task Schedule, Task Status, grade, and error-handling defects.
 2. **Feature gate**: add missing capabilities only through the new deep modules after the cutover contract suite passes under both runtimes.
 
 Only the cutover gate blocks the merge. The feature gate is ordinary post-merge work, so the replacement branch is short-lived rather than a multi-week integration branch.
@@ -82,7 +86,7 @@ Before bulk implementation, add a short `PORTING.md` that maps every current com
 - Publish only emitted JavaScript, declarations where useful, README, and license. Raw `.ts` is not the installed executable.
 - Support maintained Node releases with `node >=22`; test Node 22 and 24. Test the same artifact on current Bun, initially Bun 1.3.14 or newer.
 - Keep `dist/cli.js` as the `ontrack` executable with a Node shebang. Bun users run the same artifact with `bun` or `bun run --bun ontrack`; the shebang must not be presented as automatic Bun selection.
-- Use a verified project-owned npm scope while retaining the executable name `ontrack`. The working package name is `@bunizao/ontrack-cli`; `@bunizao/ontrack` is preferred if obtainable, because the scope already disambiguates and the `-cli` suffix only existed to avoid the unscoped collision. Scope ownership is verified as the first task of the plan rather than tracked as a standing blocker. The unscoped `ontrack-cli` name belongs to another publisher.
+- Publish as `@bunizao/ontrack` and keep the executable name `ontrack`. Both unscoped candidates are taken by other publishers — `ontrack-cli` and `ontrack` both resolve on the registry — so a scope is mandatory rather than stylistic. An npm account confers its own username as a scope, so registering the account is the whole of the ownership work and is the first task of the plan. The `-cli` suffix is dropped because the scope already disambiguates.
 - A Bun-compiled standalone executable may be added later as a convenience artifact. It is not the primary distribution and does not replace Node verification.
 
 There will be no Node implementation and Bun implementation. Core code must use the common subset: standard JavaScript, `fetch`, `URL`, `AbortController`, `FormData`, web streams, and Bun-compatible `node:` modules. `Bun.*`, `bun:*`, runtime-specific source branches, and raw-TypeScript execution are excluded from the shared artifact.
@@ -94,7 +98,6 @@ The runtime dependency budget is near zero, and each of these is a decision rath
 - **Argument parsing**: `node:util` `parseArgs`. The command surface is six commands with flag options; a parser framework would exceed the problem.
 - **Terminal tables**: a local renderer of roughly sixty lines. Table output is not a compatibility contract (see below), so matching an existing library's box drawing has no value.
 - **Runtime validation**: hand-written narrow readers per entity, not a schema library. The required policy is deliberately lenient in one direction and strict in another — tolerate absent new fields, reject wrong shapes, and preserve unknown enum keys verbatim. General-purpose schema libraries default to the opposite bias, and configuring them back costs more than the readers.
-- **YAML**: the only output mode that would require a runtime dependency. See open questions.
 
 #### Repository tooling
 
@@ -111,7 +114,7 @@ The rewrite will not mirror the current Python file layout.
 | **Authenticated Session** | Resolve, cache, and diagnose one verified session for an OnTrack Deployment | provider precedence, Okta subprocess, cookie normalization, refresh exchange, token expiry, on-disk session cache, provenance, validation |
 | **OnTrack HTTP contract** | Return validated domain values or stable errors | auth headers, cancellation, timeouts, JSON validation, multipart, binary streams, response decoding, safe retry after refresh |
 | **Task Submission** | Submit, inspect, and download a Submission | upload requirements, prerequisite checks, local file validation, multipart construction, status transition, PDF processing, history |
-| **Result Rendering** | Render one command result as terminal, JSON, or YAML output | stable machine keys, tables, secret filtering, ANSI isolation |
+| **Result Rendering** | Render one command result as terminal or JSON output | stable machine keys, tables, secret filtering, ANSI isolation |
 
 The command parser remains thin. It resolves arguments, invokes a deep module, renders its result, and maps stable errors to exit codes.
 
@@ -121,7 +124,7 @@ The true external OnTrack seam has at least two adapters: the production `fetch`
 
 Three values are threaded explicitly rather than reached for globally, because each is a source of untestable behavior when it is ambient:
 
-- **Clock**: Project Snapshot receives the current instant as a constructed value. `ONTRACK_NOW` overrides it and is documented as test-only, outside the CLI compatibility contract.
+- **Clock**: Project Snapshot receives a constructed value supplying both the current instant and today's local civil date, since it compares against each. `ONTRACK_NOW` overrides it and is documented as test-only, outside the CLI compatibility contract.
 - **AbortSignal**: one signal originates at the process entry point, is bound to SIGINT, and is passed through to every HTTP call. This is an API requirement, not an implementation detail: without it, the required SIGINT behavior cannot be met, and retrofitting the signature later touches every layer.
 - **Environment and platform**: configuration path resolution is a pure function of `env` and `platform`. Nothing below the command layer reads `process.env` directly.
 
@@ -136,9 +139,23 @@ The existing top-level commands remain available at the cutover gate:
 - `tasks <project_id>`
 - `roles`
 
-Existing snake_case JSON/YAML keys are compatibility contracts for those commands. New hierarchical commands may be added later, but the current commands will remain aliases through the next major interface review.
+New hierarchical commands may be added later, but the current commands will remain aliases through the next major interface review.
 
-**Structured output is a byte-level contract; terminal output is not.** Only `--json` output is compared byte-for-byte against the Python reference. Terminal rendering is free to differ, and matching the previous table layout is explicitly not a goal. Recording this now prevents the parity step from being spent aligning box-drawing characters.
+`--yaml` is removed. It is the one output mode with no evidence of use, and every retained mode multiplies the golden-case matrix that guards the cutover; carrying it costs half again as many parity cases for the six commands. `--json` piped through a YAML converter covers the same need. Removing a flag is a breaking change, which is affordable exactly once, at `0.x`.
+
+#### Key naming and what is actually frozen
+
+**snake_case is the permanent convention** for structured output, across the current commands and every command added later. It mirrors the upstream OnTrack payloads, so a reader comparing CLI output against an API response sees the same names. Converting to camelCase would be churn with no user benefit.
+
+The convention is permanent; individual field names are not yet frozen. They freeze at the first release after the cutover, not at today's shapes, because correcting Task Schedule necessarily changes what today's keys mean:
+
+- `due_date` and `deadline` currently hold the effective due date and the Task Definition due date respectively, which does not survive the precedence rules below;
+- Discuss timeout must become its own field rather than being folded into a date the CLI already publishes;
+- `target_due_date` and `target_start_date` are dropped today and must appear.
+
+Recording "existing keys are compatibility contracts" without this exemption would have made the cutover gate unsatisfiable by its own terms.
+
+**Structured output is a byte-level contract; terminal output is not.** Only `--json` output is compared byte-for-byte against the Python reference, and only for keys that survive the exemption above. Terminal rendering is free to differ, and matching the previous table layout is explicitly not a goal. Recording this now prevents the parity step from being spent aligning box-drawing characters.
 
 **Stream discipline is part of the contract.** On success, stdout carries only the command result and stderr may carry diagnostics. On failure, stdout is empty. `ontrack projects --json | jq` must therefore work in every success case and produce nothing in every failure case.
 
@@ -146,9 +163,16 @@ All upstream payloads enter the program as `unknown` and are validated at the HT
 
 #### Time semantics
 
-Upstream date and timestamp fields are parsed into absolute instants at the HTTP seam. All comparison and ordering happens in the instant domain. Formatting to a local-time string happens only in Result Rendering. String comparison of upstream date values is prohibited anywhere in the codebase.
+Upstream time values have two types, assigned by the reader layer at the HTTP seam:
 
-Sort keys must be total. Task ordering is `(effective due instant, abbreviation, task id)` so that ties cannot reorder between runs.
+- **Civil date** for every field upstream renders with `format_with: :date_only` — the five Task schedule fields, Unit start and end dates, and Task Definition dates. Modelled as a year-month-day value and never widened to an instant.
+- **Instant** for fields upstream renders unformatted — `moved_to_discuss_at` and `discuss_timeout_expiry_at`.
+
+Comparison happens within a type. Overdue is a civil-date comparison against today; Discuss timeout is an instant comparison against now. Converting between the two requires an explicit named conversion, so the place where a timezone is assumed is always visible.
+
+"Today" is the client's local civil date. The deployment's timezone is not exposed by the API, so no better answer is available; the assumption is recorded here, implemented in exactly one place, and injected for tests rather than read from an ambient clock. String comparison of upstream date values is prohibited.
+
+Sort keys must be total. Task ordering is `(effective due date, abbreviation, task id)` so ties cannot reorder between runs.
 
 #### Task Schedule precedence
 
@@ -245,7 +269,7 @@ Every source of non-determinism has a designated control:
 
 | Source | Failure it causes | Control |
 | --- | --- | --- |
-| Current instant | `is_overdue` flips daily | Injected clock via `ONTRACK_NOW` |
+| Current date and instant | `is_overdue` flips daily | Injected clock via `ONTRACK_NOW` |
 | Terminal width | Different wrapping | Fixed `COLUMNS` |
 | Colour | ANSI leaks into golden files | Explicit no-colour; structured output never carries ANSI, asserted separately |
 | Key order | Diff noise | Explicit ordering at serialization |
@@ -302,7 +326,7 @@ Table layout is not asserted. The TypeScript compiler is not tested. No test in 
 
 The cutover cannot merge until all of the following are true:
 
-- Black-box fixtures capture current command names, flags, exit codes, stdout/stderr separation, config precedence, JSON/YAML shapes, and representative requests, recorded from a Python implementation that can authenticate.
+- Black-box fixtures capture current command names, flags, exit codes, stdout/stderr separation, config precedence, JSON shapes, and representative requests, recorded from a Python implementation that can authenticate.
 - Sanitized upstream fixtures cover current projects, project detail, unit detail, roles, malformed responses, unknown statuses, custom grades, Task Schedule variants, HTTP 401/419, and network failure, each in minimal and maximal form.
 - The same contract tests run under Node 22, Node 24, and current Bun.
 - Packed-package smoke tests install the tarball in an empty directory and exercise help, version, `projects --json`, a representative error, subprocess authentication, and SIGINT under both runtimes.
@@ -345,16 +369,10 @@ Rejected. The required behavior is asymmetric: lenient about absent fields, stri
 - Direct browser-cookie extraction is no longer promised at the first TypeScript cutover. Okta subprocess and explicit credentials are the supported interactive and automation paths until the browser spike succeeds.
 - Machine-output compatibility becomes deliberate and testable instead of an accidental consequence of Python dataclasses. Terminal output correspondingly loses any compatibility guarantee.
 - Upstream drift becomes local to Project Snapshot and the OnTrack HTTP contract, increasing locality and leverage for future commands.
-- Deadline correctness improves visibly and will differ from the current output for same-day deadlines and across timezone boundaries. This is a fix, and it will look like a regression to anyone comparing against the old behavior.
+- The Task row schema changes at the cutover. Correcting Task Schedule redefines `due_date` and `deadline`, adds the Discuss timeout and the two target dates, and therefore breaks any consumer that parsed the current shape. Field names freeze only after this.
+- `--yaml` disappears. This is the one removal a user could notice immediately.
+- Overdue results will differ from today's output for users whose local date differs from the deployment's. This is a fix, and it will look like a regression to anyone diffing against the old behavior.
 - Tokens are now written to disk. The security posture shifts from "not stored" to "stored with restrictive permissions and never emitted", which must be documented for users.
 - Type-aware linting is unavailable for the life of TypeScript 7.0. `tsc --noEmit` carries that load.
 - The first implementation work is contract capture and module deepening, not bulk syntax translation.
 - Staff capability remains intentionally incomplete until the smaller student surface proves the interfaces, and staff fixtures will be synthetic for privacy reasons even when that work begins.
-
-## Open questions
-
-These are product decisions that block no current work but should be resolved before the cutover gate closes.
-
-- **Does `--yaml` survive?** It is the only output mode requiring a runtime dependency, and the package is at `0.1.2` with a short public history. Treating its key shapes as a frozen contract may be over-committing. Dropping it removes a dependency; keeping it costs one.
-- **How far do snake_case JSON keys bind?** They are recorded above as contracts. If the intent is to reserve the right to restructure at `1.0`, that intent belongs in this ADR rather than in a later surprise.
-- **Is `@bunizao/ontrack` obtainable?** If it is, the package name changes and the `-cli` suffix disappears.
