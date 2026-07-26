@@ -53,7 +53,7 @@ function effectiveStart(project: Project, task: Task, definition: TaskDefinition
     if (gradeStart) return gradeStart;
   }
   const base = definition?.start_date ?? null;
-  if (!project.flexible_dates && base && task.extensions !== null && task.extensions < 0) {
+  if (base && task.extensions !== null && task.extensions < 0) {
     return base.addDays(task.extensions * 7);
   }
   return base;
@@ -65,12 +65,12 @@ function text(value: { toString(): string } | null | undefined): string | null {
 
 export function buildProjectSnapshot(project: Project, unit: Unit, clock: Clock): ProjectSnapshot {
   const definitions = new Map(unit.task_definitions.map((definition) => [definition.id, definition]));
-  const tasks = project.tasks.map((task): TaskRow => {
+  const scheduled = project.tasks.map((task): { due: CivilDate | null; row: TaskRow } => {
     const definition = definitions.get(task.task_definition_id);
     const due = effectiveDue(project, task, definition);
     const start = effectiveStart(project, task, definition);
     const deadline = definition?.due_date?.addDays(project.special_consideration_days) ?? null;
-    return {
+    return { due, row: {
       id: task.id,
       task_definition_id: task.task_definition_id,
       abbreviation: definition?.abbreviation ?? `TD-${task.task_definition_id}`,
@@ -96,12 +96,17 @@ export function buildProjectSnapshot(project: Project, unit: Unit, clock: Clock)
       include_in_portfolio: task.include_in_portfolio,
       is_overdue: Boolean(due && due.compare(clock.today) < 0 && !isFinalStatus(task.status)),
       is_discuss_overdue: Boolean(task.discuss_timeout_expiry_at && task.discuss_timeout_expiry_at.compare(clock.now) < 0),
-    };
+    } };
   });
-  tasks.sort((left, right) =>
-    (left.due_date ?? "9999-12-31").localeCompare(right.due_date ?? "9999-12-31") ||
-    left.abbreviation.localeCompare(right.abbreviation) ||
-    left.id - right.id,
-  );
-  return { project, unit, tasks };
+  scheduled.sort((left, right) => {
+    const dueOrder = left.due === null
+      ? right.due === null ? 0 : 1
+      : right.due === null ? -1 : left.due.compare(right.due);
+    if (dueOrder !== 0) return dueOrder;
+    const abbreviationOrder = left.row.abbreviation < right.row.abbreviation
+      ? -1
+      : left.row.abbreviation > right.row.abbreviation ? 1 : 0;
+    return abbreviationOrder || left.row.id - right.row.id;
+  });
+  return { project, unit, tasks: scheduled.map(({ row }) => row) };
 }

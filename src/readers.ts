@@ -33,6 +33,11 @@ function requiredNumber(value: unknown, name: string): number {
   return value;
 }
 
+function requiredPositiveInteger(value: unknown, name: string): number {
+  if (!Number.isSafeInteger(value) || (value as number) <= 0) return contract(`${name} must be a positive safe integer`);
+  return value as number;
+}
+
 function requiredString(value: unknown, name: string): string {
   if (typeof value !== "string") return contract(`${name} must be a string`);
   return value;
@@ -77,7 +82,7 @@ function instant(value: unknown, name: string): Instant | null {
 export function readUnitSummary(value: unknown): UnitSummary {
   const data = object(value, "unit");
   return {
-    id: requiredNumber(data.id, "unit id"),
+    id: requiredPositiveInteger(data.id, "unit id"),
     code: requiredString(data.code, "unit code"),
     name: requiredString(data.name, "unit name"),
     my_role: nullableString(data.my_role, "unit my_role"),
@@ -91,8 +96,8 @@ export function readUnitSummary(value: unknown): UnitSummary {
 function readTask(value: unknown): Task {
   const data = object(value, "task");
   return {
-    id: requiredNumber(data.id, "task id"),
-    task_definition_id: requiredNumber(data.task_definition_id, "task task_definition_id"),
+    id: requiredPositiveInteger(data.id, "task id"),
+    task_definition_id: requiredPositiveInteger(data.task_definition_id, "task task_definition_id"),
     status: requiredString(data.status, "task status"),
     due_date: civilDate(data.due_date, "task due_date"),
     target_due_date: civilDate(data.target_due_date, "task target_due_date"),
@@ -122,7 +127,7 @@ function readTaskDefinition(value: unknown): TaskDefinition {
     if (start) gradeStartDates[String(grade)] = start;
   }
   return {
-    id: requiredNumber(data.id, "task definition id"),
+    id: requiredPositiveInteger(data.id, "task definition id"),
     abbreviation: requiredString(data.abbreviation, "task definition abbreviation"),
     name: requiredString(data.name, "task definition name"),
     description: nullableString(data.description, "task definition description"),
@@ -141,7 +146,7 @@ export function readProjects(value: unknown): ProjectSummary[] {
   return array(value, "projects").map((item) => {
     const data = object(item, "project summary");
     return {
-      id: requiredNumber(data.id, "project id"),
+      id: requiredPositiveInteger(data.id, "project id"),
       unit: readUnitSummary(data.unit),
       target_grade: nullableNumber(data.target_grade, "project target_grade"),
       portfolio_available: nullableBoolean(data.portfolio_available, "project portfolio_available"),
@@ -155,7 +160,7 @@ export function readProject(value: unknown): Project {
   const data = object(value, "project");
   const unit = readUnitSummary(data.unit);
   return {
-    id: requiredNumber(data.id, "project id"),
+    id: requiredPositiveInteger(data.id, "project id"),
     unit,
     target_grade: nullableNumber(data.target_grade, "project target_grade"),
     submitted_grade: nullableNumber(data.submitted_grade, "project submitted_grade"),
@@ -201,7 +206,7 @@ export function readRoles(value: unknown): UnitRole[] {
   return array(value, "roles").map((item) => {
     const data = object(item, "role");
     return {
-      id: requiredNumber(data.id, "role id"),
+      id: requiredPositiveInteger(data.id, "role id"),
       role: requiredString(data.role, "role role"),
       unit: readUnitSummary(data.unit),
       user: data.user === undefined || data.user === null ? null : readUser(data.user),

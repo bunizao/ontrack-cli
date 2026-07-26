@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { mkdtemp } from "node:fs/promises";
 
 import { resolveAuthenticatedSession } from "../src/auth.js";
-import { resolveConfigPaths, resolveCredentialSource } from "../src/config.js";
+import { loadConfig, resolveConfigPaths, resolveCredentialSource } from "../src/config.js";
 import { CliError } from "../src/errors.js";
 
 async function temporaryDirectory(): Promise<string> {
@@ -67,11 +67,23 @@ export function test_config_paths_honor_explicit_xdg_and_platform_fallbacks(): v
     cwd: "/work",
   }).configFile, "/Users/alice/.config/ontrack-cli/config.yaml");
   assert.equal(resolveConfigPaths({
+    env: { ONTRACK_CONFIG: "~/.ontrack/config.yaml" },
+    platform: "darwin",
+    homeDir: "/Users/alice",
+    cwd: "/work",
+  }).configFile, "/Users/alice/.ontrack/config.yaml");
+  assert.equal(resolveConfigPaths({
     env: { APPDATA: "C:\\Users\\alice\\AppData\\Roaming" },
     platform: "win32",
     homeDir: "C:\\Users\\alice",
     cwd: "C:\\work",
   }).configFile, "C:\\Users\\alice\\AppData\\Roaming\\ontrack-cli\\config.yaml");
+  assert.equal(resolveConfigPaths({
+    env: { ONTRACK_CONFIG: "~\\ontrack\\config.yaml" },
+    platform: "win32",
+    homeDir: "C:\\Users\\alice",
+    cwd: "C:\\work",
+  }).configFile, "C:\\Users\\alice\\ontrack\\config.yaml");
 }
 
 export function test_credential_precedence_is_environment_config_then_migration(): void {
@@ -106,6 +118,67 @@ export function test_credential_precedence_is_environment_config_then_migration(
       nickname: null,
     },
   });
+}
+
+export async function test_nested_yaml_migration_credentials_remain_supported(): Promise<void> {
+  const directory = await temporaryDirectory();
+  const configFile = join(directory, "config.yaml");
+  await writeFile(configFile, [
+    "base_url: https://school.example.edu",
+    "doubtfire_user:",
+    "  username: migration-user",
+    "  authenticationToken: migration-token",
+    "",
+  ].join("\n"));
+  const config = loadConfig({ configDir: directory, configFile, sessionFile: join(directory, "session.json") });
+  assert.deepEqual(resolveCredentialSource({}, config), {
+    username: "migration-user",
+    accessToken: "migration-token",
+    provenance: "migration",
+    user: {
+      id: null,
+      username: "migration-user",
+      first_name: null,
+      last_name: null,
+      email: null,
+      nickname: null,
+    },
+  });
+}
+
+export async function test_cookie_exchange_filters_inapplicable_cookies(): Promise<void> {
+  const directory = await temporaryDirectory();
+  await fakeOkta(directory, JSON.stringify({ cookies: [
+    { name: "valid", value: "kept", domain: "school.example.edu", path: "/api", secure: true, expires: "2030-01-01T00:00:00Z" },
+    { name: "wrong-path", value: "dropped", domain: "school.example.edu", path: "/account", secure: true },
+    { name: "expired", value: "dropped", domain: "school.example.edu", path: "/", secure: true, expires: "2020-01-01T00:00:00Z" },
+  ] }));
+  let cookieHeader = "";
+  await resolveAuthenticatedSession({
+    baseUrl: "https://school.example.edu",
+    configDir: directory,
+    env: {},
+    oktaExecutable: fakeOktaPath(directory),
+    now: new Date("2029-01-01T00:00:00Z"),
+    fetch: async (_input, init) => {
+      cookieHeader = new Headers(init?.headers).get("Cookie") ?? "";
+      return exchangeResponse({
+        auth_token: "access-secret",
+        auth_token_expiry: "2030-01-01T00:00:00Z",
+        user: { username: "alice" },
+      })(_input, init);
+    },
+  });
+  assert.equal(cookieHeader, "valid=kept");
+
+  await assert.rejects(resolveAuthenticatedSession({
+    baseUrl: "http://school.example.edu",
+    configDir: join(directory, "http"),
+    env: {},
+    oktaExecutable: fakeOktaPath(directory),
+    now: new Date("2029-01-01T00:00:00Z"),
+    fetch: exchangeResponse(null),
+  }), /no OnTrack cookies/i);
 }
 
 export async function test_valid_cached_session_is_reused_and_expired_session_is_replaced(): Promise<void> {
@@ -258,6 +331,21 @@ export async function test_abort_cancels_okta_and_cookie_exchange(): Promise<voi
   await new Promise((resolve) => setTimeout(resolve, 20));
   exchangeController.abort();
   await assert.rejects(waitingForExchange, (error) => error instanceof CliError && error.category === "cancellation");
+}
+
+export async function test_cookie_exchange_has_its_own_timeout(): Promise<void> {
+  const directory = await temporaryDirectory();
+  await fakeOkta(directory, '{"cookies":[{"name":"refresh_token","value":"secret","domain":"school.example.edu","path":"/"}]}');
+  await assert.rejects(resolveAuthenticatedSession({
+    baseUrl: "https://school.example.edu",
+    configDir: directory,
+    env: {},
+    oktaExecutable: fakeOktaPath(directory),
+    exchangeTimeoutMs: 5,
+    fetch: async (_input, init) => await new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+    }),
+  }), (error) => error instanceof CliError && error.category === "auth" && /exchange timed out/i.test(error.message));
 }
 
 export async function test_skip_cache_bypasses_a_rejected_unexpired_session(): Promise<void> {

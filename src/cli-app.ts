@@ -74,7 +74,9 @@ function help(): string {
 
 function projectId(value: string | undefined): number {
   if (!value || !/^\d+$/.test(value)) throw new CliError("usage", "project_id must be an integer");
-  return Number(value);
+  const id = Number(value);
+  if (!Number.isSafeInteger(id) || id <= 0) throw new CliError("usage", "project_id must be a positive safe integer");
+  return id;
 }
 
 function terminal(value: unknown): string {
@@ -125,7 +127,10 @@ export async function executeCli(argv: readonly string[], dependencies: Dependen
   const sensitiveValues = dependencies.sensitiveValues ?? [];
   if (argv.length === 1 && argv[0] === "--help") return { exitCode: 0, stdout: help(), stderr: "" };
   if (argv.length === 1 && argv[0] === "--version") return { exitCode: 0, stdout: `ontrack ${dependencies.version}\n`, stderr: "" };
-  if (argv.includes("--help")) return { exitCode: 0, stdout: help(), stderr: "" };
+  const command = argv[0];
+  const knownHelpTarget = ["user", "projects", "project", "tasks", "roles"].includes(command ?? "")
+    || (command === "auth" && (argv[1] === "check" || argv[1] === "--help"));
+  if (argv.includes("--help") && knownHelpTarget) return { exitCode: 0, stdout: help(), stderr: "" };
   try {
     const result = await invoke(argv, dependencies.app);
     const value = sanitized(result.value);

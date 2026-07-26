@@ -50,6 +50,12 @@ async function main() {
     const installed = spawnSync(executable("npm"), ["install", "--prefix", temporary, tarball], { encoding: "utf8" });
     assert(installed.status === 0, installed.stderr || "tarball installation failed");
     const cli = join(temporary, "node_modules", "@bunizao", "ontrack", "dist", "cli.js");
+    const shim = join(temporary, "node_modules", ".bin", executable("ontrack"));
+
+    const shimHelp = await run(shim, ["--help"]);
+    assert(shimHelp.code === 0 && shimHelp.stdout.startsWith("Usage: ontrack ") && shimHelp.stderr === "", "installed shim help failed");
+    const shimVersion = await run(shim, ["--version"]);
+    assert(shimVersion.code === 0 && shimVersion.stdout === expectedVersion && shimVersion.stderr === "", "installed shim version failed");
 
     for (const runtime of [process.execPath, executable("bun")]) {
       const help = await run(runtime, [cli, "--help"]);
@@ -87,14 +93,20 @@ async function main() {
     delete authenticatedEnv.ONTRACK_USERNAME;
     delete authenticatedEnv.ONTRACK_AUTH_TOKEN;
     for (const runtime of [process.execPath, executable("bun")]) {
+      rmSync(join(temporary, "session.json"), { force: true });
       const projects = await run(runtime, [cli, "projects", "--json"], authenticatedEnv);
       assert(projects.code === 0 && projects.stdout === "[]\n" && projects.stderr === "", `${runtime} projects failed: ${projects.stderr}`);
     }
+    rmSync(join(temporary, "session.json"), { force: true });
+    const shimProjects = await run(shim, ["projects", "--json"], authenticatedEnv);
+    assert(shimProjects.code === 0 && shimProjects.stdout === "[]\n" && shimProjects.stderr === "", `installed shim projects failed: ${shimProjects.stderr}`);
 
     const errorEnv = { ...process.env, ONTRACK_CONFIG: join(temporary, "missing.yaml") };
     delete errorEnv.ONTRACK_BASE_URL;
     delete errorEnv.ONTRACK_USERNAME;
     delete errorEnv.ONTRACK_AUTH_TOKEN;
+    const shimError = await run(shim, ["projects", "--json"], errorEnv);
+    assert(shimError.code === 1 && shimError.stdout === "" && /config error/i.test(shimError.stderr), "installed shim representative error failed");
     for (const runtime of [process.execPath, executable("bun")]) {
       const error = await run(runtime, [cli, "projects", "--json"], errorEnv);
       assert(error.code === 1 && error.stdout === "" && /config error/i.test(error.stderr), `${runtime} representative error failed`);
@@ -102,6 +114,7 @@ async function main() {
 
     if (process.platform !== "win32") {
       for (const runtime of [process.execPath, executable("bun")]) {
+        rmSync(join(temporary, "session.json"), { force: true });
         server.removeAllListeners("request");
         let hangStartedResolve;
         const hangStarted = new Promise((resolveStarted) => { hangStartedResolve = resolveStarted; });

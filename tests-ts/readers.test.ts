@@ -84,5 +84,8 @@ export function test_wrong_shapes_are_contract_errors_not_empty_successes(): voi
   assert.throws(() => readProject({ id: 7, unit: unitSummary, tasks: {} }), /tasks must be an array/i);
   assert.throws(() => readUnit({ ...unitSummary, task_definitions: [], grade_definitions: {} }), /grade_definitions/i);
   assert.throws(() => readUnit({ ...unitSummary, task_definitions: [], grade_definitions: [] }), /grade_definitions/i);
-  assert.throws(() => readRoles([{ id: "4", role: "Tutor", unit: unitSummary }]), /id must be a number/i);
+  assert.throws(() => readRoles([{ id: "4", role: "Tutor", unit: unitSummary }]), /id must be a positive safe integer/i);
+  for (const id of [0, 7.5, Number.MAX_SAFE_INTEGER + 1]) {
+    assert.throws(() => readProjects([{ id, unit: unitSummary }]), /id must be a positive safe integer/i);
+  }
 }

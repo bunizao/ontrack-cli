@@ -185,11 +185,22 @@ export async function test_command_help_does_not_resolve_the_application(): Prom
   }
 }
 
-export async function test_invalid_project_id_is_a_usage_error_before_application_work(): Promise<void> {
+export async function test_unknown_command_with_help_remains_a_usage_error(): Promise<void> {
   const { app, invocations } = await fakeApplication();
-  const result = await executeCli(["project", "not-an-id", "--json"], { app, version: "0.2.0" });
+  const result = await executeCli(["unknown", "--help"], { app, version: "0.2.0" });
   assert.equal(result.exitCode, 2);
   assert.equal(result.stdout, "");
-  assert.match(result.stderr, /project_id|integer/i);
+  assert.match(result.stderr, /unknown command/i);
+  assert.deepEqual(invocations, []);
+}
+
+export async function test_invalid_project_id_is_a_usage_error_before_application_work(): Promise<void> {
+  const { app, invocations } = await fakeApplication();
+  for (const value of ["not-an-id", "0", "9007199254740992"]) {
+    const result = await executeCli(["project", value, "--json"], { app, version: "0.2.0" });
+    assert.equal(result.exitCode, 2);
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, /project_id|integer/i);
+  }
   assert.deepEqual(invocations, []);
 }

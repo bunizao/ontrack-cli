@@ -46,7 +46,12 @@ export function resolveConfigPaths(options: ConfigPathOptions): ConfigPaths {
   const explicit = nonEmptyString(options.env.ONTRACK_CONFIG);
   let configFile: string;
   if (explicit) {
-    configFile = path.isAbsolute(explicit) ? path.normalize(explicit) : path.resolve(options.cwd, explicit);
+    const homeRelative = explicit === "~"
+      ? options.homeDir
+      : explicit.startsWith("~/") || explicit.startsWith("~\\")
+        ? path.join(options.homeDir, explicit.slice(2))
+        : explicit;
+    configFile = path.isAbsolute(homeRelative) ? path.normalize(homeRelative) : path.resolve(options.cwd, homeRelative);
   } else if (options.cwdConfigExists) {
     configFile = path.join(options.cwd, "config.yaml");
   } else if (options.platform === "win32") {
@@ -99,15 +104,31 @@ function parseConfigText(text: string, configFile: string): OnTrackConfig {
   }
 
   const config: Record<string, unknown> = {};
+  let parent: { readonly key: string; readonly indent: number; readonly value: Record<string, unknown> } | undefined;
   for (const [index, line] of text.split(/\r?\n/).entries()) {
     const content = line.trim();
     if (!content || content.startsWith("#")) continue;
+    const indent = line.length - line.trimStart().length;
     const match = /^([A-Za-z_][A-Za-z0-9_]*):(?:\s*(.*))?$/.exec(content);
     if (!match?.[1]) {
       throw new CliError("config", `Config file ${configFile} has invalid YAML at line ${index + 1}.`);
     }
     try {
-      config[match[1]] = parseScalar(match[2] ?? "");
+      if (indent > 0) {
+        if (!parent || indent <= parent.indent || (match[2] ?? "") === "") {
+          throw new CliError("config", `Config file ${configFile} has invalid YAML at line ${index + 1}.`);
+        }
+        parent.value[match[1]] = parseScalar(match[2] ?? "");
+        continue;
+      }
+      parent = undefined;
+      if ((match[2] ?? "") === "") {
+        const value: Record<string, unknown> = {};
+        config[match[1]] = value;
+        parent = { key: match[1], indent, value };
+      } else {
+        config[match[1]] = parseScalar(match[2] ?? "");
+      }
     } catch {
       throw new CliError("config", `Config file ${configFile} has an invalid value at line ${index + 1}.`);
     }

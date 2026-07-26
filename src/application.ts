@@ -5,25 +5,34 @@ import { buildProjectSnapshot } from "./project-snapshot.js";
 import { projectSummaryToJson, roleToJson, snapshotToJson, userToJson } from "./serialize.js";
 import type { Clock } from "./time.js";
 
+export interface SessionState {
+  current: AuthenticatedSession;
+}
+
 export class OnTrackApplication implements CliApplication {
   constructor(
-    readonly session: AuthenticatedSession,
+    readonly sessionState: SessionState,
     readonly client: OnTrackClient,
     readonly clock: Clock,
   ) {}
 
   async user(): Promise<unknown> {
-    const authMethod = await this.client.getAuthMethod();
-    if (this.session.user) {
+    const [authMethod] = await Promise.all([
+      this.client.getAuthMethod(),
+      this.client.getProjects(true),
+      this.client.getRoles(false),
+    ]);
+    const session = this.sessionState.current;
+    if (session.user) {
       return {
-        ...userToJson(this.session.user),
-        base_url: this.session.baseUrl,
+        ...userToJson(session.user),
+        base_url: session.baseUrl,
         auth_method: authMethod.method,
       };
     }
     return {
-      username: this.session.username,
-      base_url: this.session.baseUrl,
+      username: session.username,
+      base_url: session.baseUrl,
       auth_method: authMethod.method,
     };
   }
@@ -35,12 +44,12 @@ export class OnTrackApplication implements CliApplication {
       this.client.getRoles(false),
     ]);
     return {
-      base_url: this.session.baseUrl,
-      username: this.session.username,
+      base_url: this.sessionState.current.baseUrl,
+      username: this.sessionState.current.username,
       auth_method: authMethod.method,
       projects: projects.length,
       unit_roles: roles.length,
-      cached_user: this.session.user ? userToJson(this.session.user) : null,
+      cached_user: this.sessionState.current.user ? userToJson(this.sessionState.current.user) : null,
     };
   }
 

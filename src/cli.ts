@@ -48,6 +48,7 @@ async function createApplication(signal: AbortSignal): Promise<OnTrackApplicatio
     config,
     signal,
   });
+  const sessionState = { current: session };
   const http = new HttpClient({
     baseUrl,
     credentials: { username: session.username, accessToken: session.accessToken },
@@ -61,10 +62,11 @@ async function createApplication(signal: AbortSignal): Promise<OnTrackApplicatio
         signal: refreshSignal,
         skipCache: true,
       });
+      sessionState.current = session;
       return { username: session.username, accessToken: session.accessToken };
     },
   });
-  return new OnTrackApplication(session, new OnTrackClient(http), createClock(env.ONTRACK_NOW));
+  return new OnTrackApplication(sessionState, new OnTrackClient(http), createClock(env.ONTRACK_NOW));
 }
 
 export async function main(argv = process.argv.slice(2)): Promise<number> {

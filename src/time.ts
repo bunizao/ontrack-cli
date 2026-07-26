@@ -1,27 +1,33 @@
 export class CivilDate {
   readonly #value: string;
+  readonly #ordinal: number;
 
-  private constructor(value: string) {
+  private constructor(value: string, ordinal: number) {
     this.#value = value;
+    this.#ordinal = ordinal;
   }
 
   static parse(value: string): CivilDate {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new TypeError(`Invalid civil date: ${value}`);
     const [year, month, day] = value.split("-").map(Number);
-    const date = new Date(Date.UTC(year ?? 0, (month ?? 0) - 1, day));
+    const date = new Date(0);
+    date.setUTCHours(0, 0, 0, 0);
+    date.setUTCFullYear(year ?? 0, (month ?? 0) - 1, day);
     if (date.getUTCFullYear() !== year || date.getUTCMonth() + 1 !== month || date.getUTCDate() !== day) {
       throw new TypeError(`Invalid civil date: ${value}`);
     }
-    return new CivilDate(value);
+    return new CivilDate(value, date.valueOf());
   }
 
   compare(other: CivilDate): -1 | 0 | 1 {
-    return this.#value < other.#value ? -1 : this.#value > other.#value ? 1 : 0;
+    return this.#ordinal < other.#ordinal ? -1 : this.#ordinal > other.#ordinal ? 1 : 0;
   }
 
   addDays(days: number): CivilDate {
     const [year, month, day] = this.#value.split("-").map(Number);
-    const value = new Date(Date.UTC(year ?? 0, (month ?? 0) - 1, day));
+    const value = new Date(0);
+    value.setUTCHours(0, 0, 0, 0);
+    value.setUTCFullYear(year ?? 0, (month ?? 0) - 1, day);
     value.setUTCDate(value.getUTCDate() + days);
     return CivilDate.parse(value.toISOString().slice(0, 10));
   }

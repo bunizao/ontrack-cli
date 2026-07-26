@@ -42,6 +42,7 @@ export interface ResolveAuthenticatedSessionOptions {
   readonly now?: Date;
   readonly oktaExecutable?: string;
   readonly oktaTimeoutMs?: number;
+  readonly exchangeTimeoutMs?: number;
   readonly fetch?: typeof fetch;
   readonly signal?: AbortSignal;
   readonly skipCache?: boolean;
@@ -157,7 +158,18 @@ function domainMatches(hostname: string, cookieDomain: string): boolean {
   return normalized === host || host.endsWith(`.${normalized}`);
 }
 
-function readCookies(stdout: string, baseUrl: string): CookieRecord[] {
+function cookiePathMatches(requestPath: string, cookiePath: string): boolean {
+  if (!requestPath.startsWith(cookiePath)) return false;
+  return requestPath.length === cookiePath.length || cookiePath.endsWith("/") || requestPath[cookiePath.length] === "/";
+}
+
+function cookieIsExpired(value: unknown, now: Date): boolean {
+  if (value === undefined || value === null || value === "") return false;
+  const expiry = typeof value === "number" ? new Date(value * 1_000) : new Date(String(value));
+  return Number.isNaN(expiry.valueOf()) || expiry.valueOf() <= now.valueOf();
+}
+
+function readCookies(stdout: string, baseUrl: string, now: Date): CookieRecord[] {
   if (!stdout.trim()) throw authError("Okta provider returned empty output.");
   let payload: unknown;
   try {
@@ -170,10 +182,13 @@ function readCookies(stdout: string, baseUrl: string): CookieRecord[] {
   }
   const records = (payload as Record<string, unknown>).cookies;
   if (!Array.isArray(records)) throw authError("Okta provider returned malformed JSON.");
-  const hostname = new URL(baseUrl).hostname;
+  const url = new URL(baseUrl);
+  const hostname = url.hostname;
+  const exchangePath = "/api/auth/access-token";
   return records.flatMap((record): CookieRecord[] => {
     if (typeof record !== "object" || record === null || Array.isArray(record)) return [];
     const data = record as Record<string, unknown>;
+    const path = typeof data.path === "string" && data.path.startsWith("/") ? data.path : "/";
     if (
       typeof data.name !== "string"
       || !data.name
@@ -181,10 +196,13 @@ function readCookies(stdout: string, baseUrl: string): CookieRecord[] {
       || !data.value
       || typeof data.domain !== "string"
       || !domainMatches(hostname, data.domain)
+      || (data.secure === true && url.protocol !== "https:")
+      || !cookiePathMatches(exchangePath, path)
+      || cookieIsExpired(data.expires ?? data.expirationDate, now)
       || /[;\r\n]/.test(data.name)
       || /[;\r\n]/.test(data.value)
     ) return [];
-    return [{ name: data.name, value: data.value, domain: data.domain, path: typeof data.path === "string" ? data.path : "/" }];
+    return [{ name: data.name, value: data.value, domain: data.domain, path }];
   });
 }
 
@@ -197,10 +215,16 @@ async function exchangeCookies(
   cookies: readonly CookieRecord[],
   fetchImplementation: typeof fetch,
   now: Date,
+  timeoutMs: number,
   signal?: AbortSignal,
 ): Promise<AuthenticatedSession> {
   if (cookies.length === 0) throw authError("Cookie exchange failed: the Okta session has no OnTrack cookies.");
   let response: Response;
+  const timeoutController = new AbortController();
+  const timeout = setTimeout(() => timeoutController.abort(), timeoutMs);
+  const requestSignal = signal
+    ? AbortSignal.any([signal, timeoutController.signal])
+    : timeoutController.signal;
   try {
     const init: RequestInit = {
       method: "POST",
@@ -211,19 +235,28 @@ async function exchangeCookies(
       },
       body: JSON.stringify({ delete_auth_token: false }),
     };
-    if (signal) init.signal = signal;
+    init.signal = requestSignal;
     response = await fetchImplementation(`${baseUrl}/api/auth/access-token`, init);
   } catch {
+    clearTimeout(timeout);
     if (signal?.aborted) throw new CliError("cancellation", "Authentication cancelled.");
+    if (timeoutController.signal.aborted) throw authError(`Cookie exchange timed out after ${timeoutMs}ms.`);
     throw authError("Cookie exchange failed: OnTrack could not be reached.");
   }
-  if (!response.ok) throw authError("Cookie exchange failed: OnTrack rejected the stored session.");
+  if (!response.ok) {
+    clearTimeout(timeout);
+    throw authError("Cookie exchange failed: OnTrack rejected the stored session.");
+  }
 
   let payload: unknown;
   try {
     payload = await response.json();
   } catch {
+    if (signal?.aborted) throw new CliError("cancellation", "Authentication cancelled.");
+    if (timeoutController.signal.aborted) throw authError(`Cookie exchange timed out after ${timeoutMs}ms.`);
     throw authError("Cookie exchange failed: OnTrack returned malformed JSON.");
+  } finally {
+    clearTimeout(timeout);
   }
   if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
     throw authError("Cookie exchange failed: OnTrack returned no access token.");
@@ -282,12 +315,13 @@ export async function resolveAuthenticatedSession(
     options.oktaTimeoutMs ?? 30_000,
     options.signal,
   );
-  const cookies = readCookies(processResult.stdout, options.baseUrl);
+  const cookies = readCookies(processResult.stdout, options.baseUrl, now);
   const session = await exchangeCookies(
     options.baseUrl,
     cookies,
     options.fetch ?? fetch,
     now,
+    options.exchangeTimeoutMs ?? 30_000,
     options.signal,
   );
   await saveStoredSession(sessionFile, session);

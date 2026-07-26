@@ -5,7 +5,7 @@ import type { Project, ProjectSummary, Unit, UnitRole } from "./types.js";
 
 export interface AuthMethod {
   readonly method: string;
-  readonly redirect_to?: string;
+  readonly redirect_to?: string | null;
 }
 
 export class OnTrackClient {
@@ -38,7 +38,7 @@ export class OnTrackClient {
     }
     const method = Reflect.get(value, "method");
     const redirectTo = Reflect.get(value, "redirect_to");
-    if (typeof method !== "string" || (redirectTo !== undefined && typeof redirectTo !== "string")) {
+    if (typeof method !== "string" || (redirectTo !== undefined && redirectTo !== null && typeof redirectTo !== "string")) {
       throw new CliError("upstream_contract", "auth method response is invalid");
     }
     return redirectTo === undefined ? { method } : { method, redirect_to: redirectTo };

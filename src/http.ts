@@ -22,6 +22,12 @@ export interface HttpRequestOptions {
   readonly signal?: AbortSignal;
 }
 
+interface HttpResponse {
+  readonly status: number;
+  readonly ok: boolean;
+  readonly text: string;
+}
+
 export class HttpClient {
   readonly #baseUrl: URL;
   readonly #fetch: typeof globalThis.fetch;
@@ -29,6 +35,7 @@ export class HttpClient {
   readonly #timeoutMs: number;
   readonly #signal: AbortSignal | undefined;
   #credentials: AccessCredentials;
+  #refreshing: Promise<void> | undefined;
 
   constructor(options: HttpClientOptions) {
     this.#baseUrl = new URL(options.baseUrl.endsWith("/") ? options.baseUrl : `${options.baseUrl}/`);
@@ -48,8 +55,7 @@ export class HttpClient {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const response = await this.#send(url, method, options);
       if (response.status === 419 && method === "GET" && attempt === 0 && this.#refresh) {
-        const refreshed = await this.#refresh(options.signal ?? this.#signal ?? new AbortController().signal);
-        if (refreshed) this.#credentials = refreshed;
+        await this.#refreshOnce(options.signal ?? this.#signal ?? new AbortController().signal);
         continue;
       }
       if (response.status === 401 || response.status === 419) {
@@ -57,7 +63,7 @@ export class HttpClient {
       }
       if (!response.ok) throw new CliError("upstream_api", `OnTrack returned HTTP ${response.status}`, response.status);
       try {
-        return JSON.parse(await response.text()) as unknown;
+        return JSON.parse(response.text) as unknown;
       } catch {
         throw new CliError("upstream_contract", "OnTrack returned invalid JSON");
       }
@@ -65,7 +71,17 @@ export class HttpClient {
     throw new CliError("auth", "OnTrack rejected the refreshed session", 419);
   }
 
-  async #send(url: URL, method: string, options: HttpRequestOptions): Promise<Response> {
+  async #refreshOnce(signal: AbortSignal): Promise<void> {
+    this.#refreshing ??= (async () => {
+      const refreshed = await this.#refresh?.(signal);
+      if (refreshed) this.#credentials = refreshed;
+    })().finally(() => {
+      this.#refreshing = undefined;
+    });
+    await this.#refreshing;
+  }
+
+  async #send(url: URL, method: string, options: HttpRequestOptions): Promise<HttpResponse> {
     const headers = new Headers(options.headers);
     headers.set("Accept", "application/json");
     headers.set("Username", this.#credentials.username);
@@ -79,7 +95,8 @@ export class HttpClient {
     try {
       const init: RequestInit = { method, headers, signal };
       if (options.body !== undefined) init.body = options.body;
-      return await this.#fetch(url, init);
+      const response = await this.#fetch(url, init);
+      return { status: response.status, ok: response.ok, text: await response.text() };
     } catch (error) {
       if (externalSignal?.aborted) {
         throw new CliError("cancellation", "Request cancelled");

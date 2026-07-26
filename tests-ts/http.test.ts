@@ -61,6 +61,27 @@ export async function test_get_refreshes_after_419_and_retries_once(): Promise<v
   assert.deepEqual(tokens, ["expired", "renewed"]);
 }
 
+export async function test_concurrent_419_responses_share_one_refresh(): Promise<void> {
+  let refreshes = 0;
+  const client = new HttpClient({
+    baseUrl: "https://ontrack.example.edu",
+    credentials: { username: "student", accessToken: "expired" },
+    refresh: async () => {
+      refreshes += 1;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      return { username: "student", accessToken: "renewed" };
+    },
+    fetch: async (input, init) => {
+      const token = new Request(input, init).headers.get("Auth-Token");
+      return token === "expired"
+        ? Response.json({ error: "expired" }, { status: 419 })
+        : Response.json([]);
+    },
+  });
+  assert.deepEqual(await Promise.all([client.request("api/projects"), client.request("api/unit_roles")]), [[], []]);
+  assert.equal(refreshes, 1);
+}
+
 export async function test_external_abort_is_a_cancellation_error(): Promise<void> {
   const controller = new AbortController();
   const client = new HttpClient({
@@ -94,6 +115,30 @@ export async function test_timeout_aborts_an_in_flight_request_as_a_network_erro
     client.request("api/projects"),
     (error) => error instanceof CliError && error.category === "network" && /timed out/i.test(error.message),
   );
+}
+
+export async function test_timeout_remains_active_while_reading_response_body(): Promise<void> {
+  const external = new AbortController();
+  const client = new HttpClient({
+    baseUrl: "https://ontrack.example.edu",
+    credentials: { username: "student", accessToken: "token" },
+    timeoutMs: 5,
+    fetch: async (_input, init) => new Response(new ReadableStream({
+      start(controller) {
+        init?.signal?.addEventListener("abort", () => controller.error(init.signal?.reason), { once: true });
+      },
+    })),
+  });
+  const request = client.request("api/projects", { signal: external.signal });
+  const outcome = await Promise.race([
+    request.then(() => "resolved", (error: unknown) => error),
+    new Promise<string>((resolve) => setTimeout(() => resolve("hung"), 100)),
+  ]);
+  if (outcome === "hung") {
+    external.abort();
+    await request.catch(() => undefined);
+  }
+  assert.ok(outcome instanceof CliError && outcome.category === "network" && /timed out/i.test(outcome.message));
 }
 
 export async function test_invalid_json_and_invalid_entity_shapes_are_contract_errors(): Promise<void> {
@@ -231,4 +276,14 @@ export async function test_invalid_auth_method_shape_is_a_contract_error(): Prom
     client.getAuthMethod(),
     (error) => error instanceof CliError && error.category === "upstream_contract",
   );
+}
+
+export async function test_auth_method_accepts_null_redirect(): Promise<void> {
+  const client = new OnTrackClient(new HttpClient({
+    baseUrl: "https://ontrack.example.edu",
+    credentials: { username: "student", accessToken: "token" },
+    fetch: async () => Response.json({ method: "database", redirect_to: null }),
+  }));
+
+  assert.deepEqual(await client.getAuthMethod(), { method: "database", redirect_to: null });
 }
