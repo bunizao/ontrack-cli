@@ -123,10 +123,18 @@ interface ProcessResult {
 
 function runOkta(executable: string, baseUrl: string, timeoutMs: number, signal?: AbortSignal): Promise<ProcessResult> {
   if (signal?.aborted) return Promise.reject(new CliError("cancellation", "Authentication cancelled."));
+  const useCommandShell = process.platform === "win32" && !executable.toLowerCase().endsWith(".exe");
+  if (useCommandShell && /["\r\n&|<>^%]/u.test(executable)) {
+    return Promise.reject(authError("Okta provider path is unsafe."));
+  }
+  const command = useCommandShell ? process.env.ComSpec ?? "cmd.exe" : executable;
+  const arguments_ = useCommandShell
+    ? ["/d", "/s", "/c", `"${executable}" cookies --json "${baseUrl}"`]
+    : ["cookies", "--json", baseUrl];
   return new Promise((resolve, reject) => {
     execFile(
-      executable,
-      ["cookies", "--json", baseUrl],
+      command,
+      arguments_,
       { encoding: "utf8", timeout: timeoutMs, windowsHide: true, maxBuffer: 1024 * 1024, signal },
       (error, stdout) => {
         if (!error) {
