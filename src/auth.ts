@@ -128,8 +128,9 @@ function runOkta(executable: string, baseUrl: string, timeoutMs: number, signal?
     return Promise.reject(authError("Okta provider path is unsafe."));
   }
   const command = useCommandShell ? process.env.ComSpec ?? "cmd.exe" : executable;
+  const commandExecutable = /[\\/]/u.test(executable) ? `"${executable}"` : executable;
   const args = useCommandShell
-    ? ["/d", "/v:off", "/s", "/c", `call "${executable}" cookies --json "%ONTRACK_OKTA_BASE_URL%"`]
+    ? ["/d", "/v:off", "/s", "/c", `call ${commandExecutable} cookies --json "%ONTRACK_OKTA_BASE_URL%"`]
     : ["cookies", "--json", baseUrl];
   return new Promise((resolve, reject) => {
     execFile(
