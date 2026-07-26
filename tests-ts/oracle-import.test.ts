@@ -44,6 +44,10 @@ function validRolesRecord(): OracleRecord {
       json: [{
         id: 1,
         role: "Student",
+        observer_only: false,
+        can_mark_overflow_tasks: true,
+        mentor_id: 1,
+        tutor_note_count: 3,
         unit: { id: 1, code: "UNIT", name: "Unit" },
         user: {
           id: 1,
@@ -150,6 +154,20 @@ export async function test_oracle_import_rejects_raw_role_user_pii(): Promise<vo
         unit: { id: 1, code: "UNIT", name: "Unit" },
         user: { id: 1, username: "real-monash-identity" },
       }],
+    },
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /was not rebuilt by the Python allowlist sanitizer/u);
+}
+
+export async function test_oracle_import_rejects_a_raw_role_mentor_id(): Promise<void> {
+  const record = validRolesRecord();
+  const role = (record.response.json as readonly Record<string, unknown>[])[0]!;
+  const result = await importRecord({
+    ...record,
+    response: {
+      ...record.response,
+      json: [{ ...role, mentor_id: 9182 }],
     },
   });
   assert.notEqual(result.status, 0);

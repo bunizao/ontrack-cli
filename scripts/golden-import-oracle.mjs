@@ -5,20 +5,21 @@ import process from "node:process";
 
 const oracleCommit = "06e0c4b6d45cdda4e999e4c829d61bfe8392ef8c";
 const allowedFields = new Set([
-  "abbreviation", "active", "assess_in_portfolio", "code", "compile_portfolio", "completion_date",
+  "abbreviation", "active", "assess_in_portfolio", "can_mark_overflow_tasks", "code", "compile_portfolio", "completion_date",
   "description", "discuss_timeout_expiry_at", "due_date", "end_date", "error", "extensions", "grade",
   "grade_definitions", "id", "include_in_portfolio", "is_graded", "max_quality_pts", "message", "method",
-  "moved_to_discuss_at", "my_role", "name", "portfolio_available", "project_id", "quality_pts", "role",
-  "start_date", "status", "submission_date", "submitted_grade", "target_date", "target_due_date", "target_grade",
-  "target_start_date", "task_definition_id", "task_definitions", "tasks", "times_assessed", "unit", "unit_id",
+  "mentor_id", "moved_to_discuss_at", "my_role", "name", "observer_only", "portfolio_available", "project_id",
+  "quality_pts", "role", "start_date", "status", "submission_date", "submitted_grade", "target_date", "target_due_date",
+  "target_grade", "target_start_date", "task_definition_id", "task_definitions", "tasks", "times_assessed",
+  "tutor_note_count", "unit", "unit_id",
   "user", "user_id", "username", "first_name", "last_name", "email", "nickname",
   "uses_draft_learning_summary",
 ]);
-const idFields = new Set(["id", "project_id", "task_definition_id", "unit_id", "user_id"]);
+const idFields = new Set(["id", "mentor_id", "project_id", "task_definition_id", "unit_id", "user_id"]);
 const dateFields = new Set(["completion_date", "due_date", "end_date", "start_date", "submission_date", "target_date", "target_due_date", "target_start_date"]);
 const instantFields = new Set(["discuss_timeout_expiry_at", "moved_to_discuss_at"]);
-const booleanFields = new Set(["active", "assess_in_portfolio", "compile_portfolio", "include_in_portfolio", "is_graded", "portfolio_available", "uses_draft_learning_summary"]);
-const numberFields = new Set(["extensions", "grade", "max_quality_pts", "quality_pts", "submitted_grade", "target_grade", "times_assessed"]);
+const booleanFields = new Set(["active", "assess_in_portfolio", "can_mark_overflow_tasks", "compile_portfolio", "include_in_portfolio", "is_graded", "observer_only", "portfolio_available", "uses_draft_learning_summary"]);
+const numberFields = new Set(["extensions", "grade", "max_quality_pts", "quality_pts", "submitted_grade", "target_grade", "times_assessed", "tutor_note_count"]);
 const enumFields = new Set(["method", "my_role", "role", "status"]);
 const textSubstitutions = new Map([
   ["abbreviation", "TASK"], ["code", "UNIT"], ["description", "Description"], ["error", "API error"],
