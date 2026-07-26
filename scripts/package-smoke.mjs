@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
@@ -38,6 +38,8 @@ function fakeOkta(directory) {
 
 async function main() {
   const workspace = process.cwd();
+  const packageMetadata = JSON.parse(readFileSync(join(workspace, "package.json"), "utf8"));
+  const expectedVersion = `ontrack ${packageMetadata.version}\n`;
   const temporary = mkdtempSync(join(tmpdir(), "ontrack-package-smoke-"));
   let tarball;
   let server;
@@ -53,7 +55,7 @@ async function main() {
       const help = await run(runtime, [cli, "--help"]);
       assert(help.code === 0 && help.stdout.startsWith("Usage: ontrack ") && help.stderr === "", `${runtime} help failed`);
       const version = await run(runtime, [cli, "--version"]);
-      assert(version.code === 0 && version.stdout === "ontrack 0.2.0\n" && version.stderr === "", `${runtime} version failed`);
+      assert(version.code === 0 && version.stdout === expectedVersion && version.stderr === "", `${runtime} version failed`);
     }
 
     server = createServer((request, response) => {
@@ -93,23 +95,27 @@ async function main() {
     delete errorEnv.ONTRACK_BASE_URL;
     delete errorEnv.ONTRACK_USERNAME;
     delete errorEnv.ONTRACK_AUTH_TOKEN;
-    const error = await run(process.execPath, [cli, "projects", "--json"], errorEnv);
-    assert(error.code === 1 && error.stdout === "" && /config error/i.test(error.stderr), "representative error failed");
+    for (const runtime of [process.execPath, executable("bun")]) {
+      const error = await run(runtime, [cli, "projects", "--json"], errorEnv);
+      assert(error.code === 1 && error.stdout === "" && /config error/i.test(error.stderr), `${runtime} representative error failed`);
+    }
 
     if (process.platform !== "win32") {
-      server.removeAllListeners("request");
-      let hangStartedResolve;
-      const hangStarted = new Promise((resolveStarted) => { hangStartedResolve = resolveStarted; });
-      server.on("request", () => hangStartedResolve());
-      const child = spawn(process.execPath, [cli, "projects", "--json"], { env: authenticatedEnv, stdio: ["ignore", "pipe", "pipe"] });
-      let stdout = "";
-      let stderr = "";
-      child.stdout.setEncoding("utf8").on("data", (chunk) => { stdout += chunk; });
-      child.stderr.setEncoding("utf8").on("data", (chunk) => { stderr += chunk; });
-      await hangStarted;
-      child.kill("SIGINT");
-      const [code] = await once(child, "exit");
-      assert(code === 130 && stdout === "" && /cancellation/i.test(stderr), "installed SIGINT behavior failed");
+      for (const runtime of [process.execPath, executable("bun")]) {
+        server.removeAllListeners("request");
+        let hangStartedResolve;
+        const hangStarted = new Promise((resolveStarted) => { hangStartedResolve = resolveStarted; });
+        server.on("request", () => hangStartedResolve());
+        const child = spawn(runtime, [cli, "projects", "--json"], { env: authenticatedEnv, stdio: ["ignore", "pipe", "pipe"] });
+        let stdout = "";
+        let stderr = "";
+        child.stdout.setEncoding("utf8").on("data", (chunk) => { stdout += chunk; });
+        child.stderr.setEncoding("utf8").on("data", (chunk) => { stderr += chunk; });
+        await hangStarted;
+        child.kill("SIGINT");
+        const [code] = await once(child, "exit");
+        assert(code === 130 && stdout === "" && /cancellation/i.test(stderr), `${runtime} installed SIGINT behavior failed`);
+      }
     }
   } finally {
     server?.closeAllConnections();

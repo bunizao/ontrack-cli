@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { once } from "node:events";
 
@@ -32,6 +33,7 @@ async function listen(server: Server): Promise<number> {
 }
 
 export async function test_same_artifact_runs_help_and_version_in_node_and_bun(): Promise<void> {
+  const packageMetadata = JSON.parse(readFileSync("package.json", "utf8")) as { version: string };
   for (const executable of [process.execPath, "bun"]) {
     const prefix = executable === "bun" ? ["dist/cli.js"] : ["dist/cli.js"];
     const help = await run(executable, [...prefix, "--help"]);
@@ -41,7 +43,7 @@ export async function test_same_artifact_runs_help_and_version_in_node_and_bun()
     const version = await run(executable, [...prefix, "--version"]);
     assert.deepEqual({ code: version.code, stdout: version.stdout, stderr: version.stderr }, {
       code: 0,
-      stdout: "ontrack 0.2.0\n",
+      stdout: `ontrack ${packageMetadata.version}\n`,
       stderr: "",
     }, executable);
   }
