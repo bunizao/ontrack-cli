@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { once } from "node:events";
 import { tmpdir } from "node:os";
@@ -143,6 +143,11 @@ export async function test_same_artifact_runs_help_and_version_in_node_and_bun()
       stderr: "",
     }, executable);
   }
+}
+
+export function test_distribution_cli_is_directly_executable(): void {
+  if (process.platform === "win32") return;
+  assert.notEqual(statSync("dist/cli.js").mode & 0o111, 0);
 }
 
 export async function test_process_projects_json_keeps_stdout_machine_clean(): Promise<void> {

@@ -15,7 +15,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "node scripts/clean-dist.mjs && tsc -p tsconfig.build.json",
+    "build": "node scripts/clean-dist.mjs && tsc -p tsconfig.build.json && node scripts/mark-cli-executable.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && tsc -p tsconfig.json && node .build/tests-ts/harness.js",
     "test:bun": "npm run build && tsc -p tsconfig.json && bun .build/tests-ts/harness.js",

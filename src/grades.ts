@@ -20,8 +20,8 @@ export function readGradeDefinitions(value: unknown): GradeDefinition[] {
   return value.map((item) => {
     if (typeof item !== "object" || item === null || Array.isArray(item)) throw new TypeError("grade definition must be an object");
     const data = item as Record<string, unknown>;
-    const name = data.name ?? data.label;
     if (typeof data.id !== "string" || typeof data.value !== "number") throw new TypeError("Grade id must be a string and value must be a number");
+    const name = data.name ?? data.label ?? fallback.get(data.value)?.name;
     if (typeof name !== "string" || typeof data.abbreviation !== "string") throw new TypeError("Grade name and abbreviation must be strings");
     return { id: data.id, value: data.value, name, abbreviation: data.abbreviation };
   });

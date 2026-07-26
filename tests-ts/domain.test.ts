@@ -56,6 +56,13 @@ export function test_unit_grades_override_historical_fallback(): void {
   assert.equal(gradeLabel(99, definitions), "99");
 }
 
+export function test_sanitized_standard_grades_recover_historical_labels(): void {
+  const definitions = readGradeDefinitions([
+    { id: "recorded-grade", value: 3, abbreviation: "HD" },
+  ]);
+  assert.equal(gradeLabel(3, definitions), "HD (High Distinction)");
+}
+
 export function test_project_snapshot_applies_schedule_precedence_and_total_order(): void {
   const project: Project = {
     id: 7,

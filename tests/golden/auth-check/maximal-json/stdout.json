@@ -1,15 +1,8 @@
 {
   "base_url": "https://school.example.invalid",
-  "username": "synthetic-student",
+  "username": "recorded-user",
   "auth_method": "saml",
   "projects": 2,
-  "unit_roles": 2,
-  "cached_user": {
-    "id": 42,
-    "username": "synthetic-student",
-    "first_name": "Example",
-    "last_name": "Student",
-    "email": "student@example.invalid",
-    "nickname": "Example"
-  }
+  "unit_roles": 0,
+  "cached_user": null
 }
