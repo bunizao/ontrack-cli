@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { once } from "node:events";
@@ -32,22 +32,48 @@ async function listen(server: Server): Promise<number> {
   return address.port;
 }
 
-async function interrupt(child: ReturnType<typeof spawn>): Promise<void> {
+async function interrupt(child: ChildProcessWithoutNullStreams): Promise<void> {
   if (process.platform !== "win32") {
     child.kill("SIGINT");
     return;
   }
-  assert.ok(child.pid);
-  const result = await run("powershell.exe", [
+  child.stdin.write("interrupt\n");
+}
+
+function spawnInterruptible(
+  executable: string,
+  args: readonly string[],
+  env: NodeJS.ProcessEnv,
+): { child: ChildProcessWithoutNullStreams; ready: Promise<void> } {
+  if (process.platform !== "win32") {
+    return {
+      child: spawn(executable, [...args], { env, stdio: ["pipe", "pipe", "pipe"] }),
+      ready: Promise.resolve(),
+    };
+  }
+  const child = spawn("powershell.exe", [
     "-NoProfile",
     "-ExecutionPolicy",
     "Bypass",
     "-File",
     "scripts/send-console-interrupt.ps1",
-    "-TargetPid",
-    String(child.pid),
-  ]);
-  assert.equal(result.code, 0, result.stderr);
+    "-RuntimePath",
+    executable,
+    "-ArgumentsJson",
+    JSON.stringify(args),
+  ], { env, stdio: ["pipe", "pipe", "pipe"] });
+  const ready = new Promise<void>((resolve, reject) => {
+    const onData = (chunk: Buffer): void => {
+      if (chunk.toString("utf8").includes("ONTRACK_INTERRUPT_READY\n")) {
+        child.stdout.off("data", onData);
+        resolve();
+      }
+    };
+    child.stdout.on("data", onData);
+    child.once("error", reject);
+    child.once("exit", (code) => reject(new Error(`Console harness exited before launch with code ${code ?? "unknown"}`)));
+  });
+  return { child, ready };
 }
 
 export async function test_same_artifact_runs_help_and_version_in_node_and_bun(): Promise<void> {
@@ -125,22 +151,22 @@ export async function test_console_interrupt_aborts_in_flight_request_with_exit_
   const started = new Promise<void>((resolve) => { requestStarted = resolve; });
   const server = createServer(() => requestStarted());
   const port = await listen(server);
-  const child = spawn(process.execPath, ["dist/cli.js", "projects", "--json"], {
-    env: {
+  const { child, ready } = spawnInterruptible(
+    process.execPath,
+    ["dist/cli.js", "projects", "--json"],
+    {
       ...process.env,
       ONTRACK_BASE_URL: `http://127.0.0.1:${port}`,
       ONTRACK_USERNAME: "student",
       ONTRACK_AUTH_TOKEN: "cancel-secret",
     },
-    stdio: ["ignore", "pipe", "pipe"],
-    detached: process.platform === "win32",
-  });
+  );
   let stdout = "";
   let stderr = "";
   child.stdout.setEncoding("utf8").on("data", (chunk: string) => { stdout += chunk; });
   child.stderr.setEncoding("utf8").on("data", (chunk: string) => { stderr += chunk; });
   try {
-    await started;
+    await Promise.all([started, ready]);
     const exited = once(child, "exit") as Promise<[number | null, NodeJS.Signals | null]>;
     await interrupt(child);
     const outcome = await Promise.race([
@@ -152,7 +178,7 @@ export async function test_console_interrupt_aborts_in_flight_request_with_exit_
     const [code, signal] = outcome as [number | null, NodeJS.Signals | null];
     assert.equal(code, 130);
     assert.equal(signal, null);
-    assert.equal(stdout, "");
+    assert.equal(stdout.replace(/^ONTRACK_INTERRUPT_READY\r?\n/u, ""), "");
     assert.match(stderr, /cancellation/i);
     assert.doesNotMatch(stderr, /\n\s+at\s/u);
   } finally {

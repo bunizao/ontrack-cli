@@ -36,21 +36,44 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-async function interrupt(child, workspace) {
+async function interrupt(child) {
   if (process.platform !== "win32") {
     child.kill("SIGINT");
     return;
   }
-  const result = await run("powershell.exe", [
+  child.stdin.write("interrupt\n");
+}
+
+function spawnInterruptible(runtime, args, env, workspace) {
+  if (process.platform !== "win32") {
+    return {
+      child: spawn(runtime, args, { env, stdio: ["ignore", "pipe", "pipe"] }),
+      ready: Promise.resolve(),
+    };
+  }
+  const child = spawn("powershell.exe", [
     "-NoProfile",
     "-ExecutionPolicy",
     "Bypass",
     "-File",
     join(workspace, "scripts", "send-console-interrupt.ps1"),
-    "-TargetPid",
-    String(child.pid),
-  ]);
-  assert(result.code === 0, `Could not send Windows Ctrl+C: ${result.stderr}`);
+    "-RuntimePath",
+    runtime,
+    "-ArgumentsJson",
+    JSON.stringify(args),
+  ], { env, stdio: ["pipe", "pipe", "pipe"] });
+  const ready = new Promise((resolveReady, reject) => {
+    const onData = (chunk) => {
+      if (chunk.toString("utf8").includes("ONTRACK_INTERRUPT_READY\n")) {
+        child.stdout.off("data", onData);
+        resolveReady();
+      }
+    };
+    child.stdout.on("data", onData);
+    child.once("error", reject);
+    child.once("exit", (code) => reject(new Error(`Console harness exited before launch with code ${code ?? "unknown"}`)));
+  });
+  return { child, ready };
 }
 
 function fakeOkta(directory) {
@@ -147,18 +170,14 @@ async function main() {
         let hangStartedResolve;
         const hangStarted = new Promise((resolveStarted) => { hangStartedResolve = resolveStarted; });
         server.on("request", () => hangStartedResolve());
-        const child = spawn(runtime, [cli, "projects", "--json"], {
-          env: authenticatedEnv,
-          stdio: ["ignore", "pipe", "pipe"],
-          detached: process.platform === "win32",
-        });
+        const { child, ready } = spawnInterruptible(runtime, [cli, "projects", "--json"], authenticatedEnv, workspace);
         let stdout = "";
         let stderr = "";
         child.stdout.setEncoding("utf8").on("data", (chunk) => { stdout += chunk; });
         child.stderr.setEncoding("utf8").on("data", (chunk) => { stderr += chunk; });
-        await hangStarted;
+        await Promise.all([hangStarted, ready]);
         const exited = once(child, "exit");
-        await interrupt(child, workspace);
+        await interrupt(child);
         const outcome = await Promise.race([
           exited,
           new Promise((resolveTimeout) => setTimeout(() => resolveTimeout("timeout"), 10_000)),
@@ -166,6 +185,7 @@ async function main() {
         if (outcome === "timeout") child.kill();
         assert(outcome !== "timeout", `${runtime} installed console interrupt timed out`);
         const [code] = outcome;
+        stdout = stdout.replace(/^ONTRACK_INTERRUPT_READY\r?\n/u, "");
         assert(code === 130 && stdout === "" && /cancellation/i.test(stderr), `${runtime} installed console interrupt behavior failed`);
     }
   } finally {
