@@ -9,6 +9,13 @@ function executable(name) {
   return process.platform === "win32" ? `${name}.cmd` : name;
 }
 
+function runtimeExecutable(name) {
+  if (process.platform !== "win32") return name;
+  const located = spawnSync("where.exe", [name], { encoding: "utf8" });
+  if (located.status !== 0) return name;
+  return located.stdout.split(/\r?\n/).find((path) => path.toLowerCase().endsWith(".exe")) ?? name;
+}
+
 function run(command, args, env = process.env) {
   return new Promise((resolveResult, reject) => {
     const child = spawn(command, args, {
@@ -78,7 +85,8 @@ async function main() {
     const shimVersion = await run(shim, ["--version"]);
     assert(shimVersion.code === 0 && shimVersion.stdout === expectedVersion && shimVersion.stderr === "", "installed shim version failed");
 
-    for (const runtime of [process.execPath, executable("bun")]) {
+    const runtimes = [process.execPath, runtimeExecutable("bun")];
+    for (const runtime of runtimes) {
       const help = await run(runtime, [cli, "--help"]);
       assert(help.code === 0 && help.stdout.startsWith("Usage: ontrack ") && help.stderr === "", `${runtime} help failed`);
       const version = await run(runtime, [cli, "--version"]);
@@ -113,7 +121,7 @@ async function main() {
     };
     delete authenticatedEnv.ONTRACK_USERNAME;
     delete authenticatedEnv.ONTRACK_AUTH_TOKEN;
-    for (const runtime of [process.execPath, executable("bun")]) {
+    for (const runtime of runtimes) {
       rmSync(join(temporary, "session.json"), { force: true });
       const projects = await run(runtime, [cli, "projects", "--json"], authenticatedEnv);
       assert(projects.code === 0 && projects.stdout === "[]\n" && projects.stderr === "", `${runtime} projects failed: ${projects.stderr}`);
@@ -128,12 +136,12 @@ async function main() {
     delete errorEnv.ONTRACK_AUTH_TOKEN;
     const shimError = await run(shim, ["projects", "--json"], errorEnv);
     assert(shimError.code === 1 && shimError.stdout === "" && /config error/i.test(shimError.stderr), "installed shim representative error failed");
-    for (const runtime of [process.execPath, executable("bun")]) {
+    for (const runtime of runtimes) {
       const error = await run(runtime, [cli, "projects", "--json"], errorEnv);
       assert(error.code === 1 && error.stdout === "" && /config error/i.test(error.stderr), `${runtime} representative error failed`);
     }
 
-    for (const runtime of [process.execPath, executable("bun")]) {
+    for (const runtime of runtimes) {
         rmSync(join(temporary, "session.json"), { force: true });
         server.removeAllListeners("request");
         let hangStartedResolve;
