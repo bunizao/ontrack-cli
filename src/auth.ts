@@ -302,7 +302,7 @@ function cookiePathMatches(requestPath: string, cookiePath: string): boolean {
 }
 
 function cookieIsExpired(value: unknown, now: Date): boolean {
-  if (value === undefined || value === null || value === "") return false;
+  if (value === undefined || value === null || value === "" || value === 0) return false;
   const expiry = typeof value === "number" ? new Date(value * 1_000) : new Date(String(value));
   return Number.isNaN(expiry.valueOf()) || expiry.valueOf() <= now.valueOf();
 }

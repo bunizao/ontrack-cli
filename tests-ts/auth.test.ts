@@ -241,6 +241,7 @@ export async function test_cookie_exchange_filters_inapplicable_cookies(): Promi
   const directory = await temporaryDirectory();
   await fakeOkta(directory, JSON.stringify({ cookies: [
     { name: "valid", value: "kept", domain: "school.example.edu", path: "/api", secure: true, expires: "2030-01-01T00:00:00Z" },
+    { name: "session", value: "kept", domain: "school.example.edu", path: "/api", secure: true, expires: 0 },
     { name: "parent-host-only", value: "dropped", domain: "example.edu", path: "/api", secure: true },
     { name: "wrong-path", value: "dropped", domain: "school.example.edu", path: "/account", secure: true },
     { name: "expired", value: "dropped", domain: "school.example.edu", path: "/", secure: true, expires: "2020-01-01T00:00:00Z" },
@@ -261,7 +262,7 @@ export async function test_cookie_exchange_filters_inapplicable_cookies(): Promi
       })(_input, init);
     },
   });
-  assert.equal(cookieHeader, "valid=kept");
+  assert.equal(cookieHeader, "valid=kept; session=kept");
 
   await assert.rejects(resolveAuthenticatedSession({
     baseUrl: "http://school.example.edu",
