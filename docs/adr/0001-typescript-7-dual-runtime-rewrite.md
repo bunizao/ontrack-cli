@@ -366,7 +366,7 @@ Rejected. The required behavior is asymmetric: lenient about absent fields, stri
 
 - The install channel moves from a Python tool to a scoped npm package; existing users need an explicit migration path, delivered as a notice in the final Python release.
 - One disposable Python release is written and then discarded. This is accepted cost in exchange for a falsifiable parity claim.
-- Direct browser-cookie extraction is no longer promised at the first TypeScript cutover. Okta subprocess and explicit credentials are the supported interactive and automation paths until the browser spike succeeds.
+- Direct browser-cookie extraction is a best-effort provider at the first TypeScript cutover. Inaccessible or incompatible browser profiles fall through to stored Okta sessions, interactive Okta login, or explicit credentials.
 - Machine-output compatibility becomes deliberate and testable instead of an accidental consequence of Python dataclasses. Terminal output correspondingly loses any compatibility guarantee.
 - Upstream drift becomes local to Project Snapshot and the OnTrack HTTP contract, increasing locality and leverage for future commands.
 - The Task row schema changes at the cutover. Correcting Task Schedule redefines `due_date` and `deadline`, adds the Discuss timeout and the two target dates, and therefore breaks any consumer that parsed the current shape. Field names freeze only after this.

@@ -226,13 +226,15 @@ function runOkta(options: OktaProcessOptions): Promise<ProcessResult> {
 }
 
 function validateLoginResult(stdout: string): void {
-  for (let index = stdout.lastIndexOf("{"); index >= 0; index = stdout.lastIndexOf("{", index - 1)) {
+  for (let index = stdout.lastIndexOf("{"); index >= 0;) {
     try {
       const value: unknown = JSON.parse(stdout.slice(index));
       if (typeof value === "object" && value !== null && !Array.isArray(value) && Reflect.get(value, "success") === true) return;
     } catch {
       // Keep searching for the start of the final provider payload.
     }
+    if (index === 0) break;
+    index = stdout.lastIndexOf("{", index - 1);
   }
   throw authError("Okta login failed.");
 }
@@ -590,6 +592,21 @@ export async function loginAuthenticatedSession(
     ...commonProcess,
     targetUrl: loginUrl,
   };
+  try {
+    const result = await runOkta({ ...common, command: "cookies" });
+    const session = await exchangeCookies(
+      options.baseUrl,
+      readCookies(result.stdout, options.baseUrl, now),
+      fetchImplementation,
+      now,
+      exchangeTimeoutMs,
+      options.signal,
+    );
+    await saveStoredSession(options.sessionFile, session);
+    return session;
+  } catch (error) {
+    if (error instanceof CliError && error.category === "cancellation") throw error;
+  }
   validateLoginResult((await runOkta({ ...common, command: "login" })).stdout);
   const cookies = readCookies((await runOkta({ ...common, command: "cookies" })).stdout, options.baseUrl, now);
   const session = await exchangeCookies(

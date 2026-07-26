@@ -50,11 +50,13 @@ async function fakeInteractiveOkta(directory: string, argumentsFile: string): Pr
     { name: "refresh_token", value: "refresh-secret", domain: "school.example.edu", path: "/" },
   ] });
   const executable = join(directory, "interactive-okta");
+  const loginMarker = join(directory, "interactive-login-complete");
   const shell = [
     "#!/bin/sh",
     "if [ \"$1\" = cookies ] && [ \"$3\" = https://school.example.edu ]; then echo 'No stored session' >&2; exit 1; fi",
     `printf '%s\\n' \"$*\" >> '${argumentsFile.replaceAll("'", "'\\''")}'`,
-    `if [ \"$1\" = login ]; then printf '%s' 'Username: TOTP secret (optional): {"success":true}'; else printf '%s' '${cookies}'; fi`,
+    `if [ \"$1\" = cookies ] && [ ! -f '${loginMarker.replaceAll("'", "'\\''")}' ]; then echo 'No stored session' >&2; exit 1; fi`,
+    `if [ \"$1\" = login ]; then touch '${loginMarker.replaceAll("'", "'\\''")}'; printf '%s' 'Username: TOTP secret (optional): {"success":true}'; else printf '%s' '${cookies}'; fi`,
     "",
   ].join("\n");
   await writeFile(executable, shell, "utf8");
@@ -422,6 +424,7 @@ export async function test_interactive_login_follows_ontrack_sign_in_redirect_be
   assert.equal(session.provenance, "okta");
   assert.equal(prompts, "Username: TOTP secret (optional): ");
   assert.deepEqual((await readFile(argumentsFile, "utf8")).trim().split("\n"), [
+    "cookies --json https://monash.okta.com/app/ontrack/sso/saml",
     "login --headed --timeout-ms 120000 --settle-ms 5000 --json https://monash.okta.com/app/ontrack/sso/saml",
     "cookies --json https://monash.okta.com/app/ontrack/sso/saml",
   ]);
@@ -464,6 +467,40 @@ export async function test_auth_login_reuses_browser_cookies_without_starting_in
   ]);
   assert.deepEqual(requests.map((request) => `${request.method} ${request.url}`), [
     "POST https://school.example.edu/api/auth/access-token",
+  ]);
+}
+
+export async function test_auth_login_reuses_a_session_keyed_by_the_discovered_sign_in_url(): Promise<void> {
+  if (process.platform === "win32") return;
+  const directory = await temporaryDirectory();
+  const argumentsFile = join(directory, "arguments.txt");
+  const executable = await fakeRedirectOnlyOkta(directory, argumentsFile);
+  const session = await loginAuthenticatedSession({
+    baseUrl: "https://school.example.edu",
+    sessionFile: join(directory, "session.json"),
+    env: {},
+    platform: process.platform,
+    oktaExecutable: executable,
+    now: new Date("2029-01-01T00:00:00Z"),
+    fetch: async (input, init) => {
+      if (new Request(input, init).url.endsWith("/api/auth/method")) {
+        return new Response(JSON.stringify({
+          method: "saml",
+          redirect_to: "https://monash.okta.com/app/ontrack/sso/saml",
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return exchangeResponse({
+        auth_token: "access-secret",
+        auth_token_expiry: "2030-01-01T00:00:00Z",
+        user: { username: "alice" },
+      })(input, init);
+    },
+  });
+
+  assert.equal(session.username, "alice");
+  assert.deepEqual((await readFile(argumentsFile, "utf8")).trim().split("\n"), [
+    "cookies --json https://school.example.edu",
+    "cookies --json https://monash.okta.com/app/ontrack/sso/saml",
   ]);
 }
 
@@ -554,6 +591,26 @@ export async function test_interactive_login_reports_provider_failure_without_ex
     && error.category === "auth"
     && error.message === "Okta login failed."
     && !error.message.includes("private-provider-detail"));
+}
+
+export async function test_interactive_login_rejects_unsuccessful_json(): Promise<void> {
+  const directory = await temporaryDirectory();
+  await fakeOkta(directory, '{"success":false}');
+  await assert.rejects(loginAuthenticatedSession({
+    baseUrl: "https://school.example.edu",
+    sessionFile: join(directory, "session.json"),
+    env: {},
+    platform: process.platform,
+    oktaExecutable: fakeOktaPath(directory),
+    fetch: async (input) => new URL(input.toString()).pathname === "/api/auth/method"
+      ? new Response(JSON.stringify({
+        method: "saml",
+        redirect_to: "https://monash.okta.com/app/ontrack/sso/saml",
+      }), { status: 200, headers: { "content-type": "application/json" } })
+      : exchangeResponse(null)(input),
+  }), (error) => error instanceof CliError
+    && error.category === "auth"
+    && error.message === "Okta login failed.");
 }
 
 export async function test_normal_auth_reuses_a_session_keyed_by_the_discovered_sign_in_url(): Promise<void> {

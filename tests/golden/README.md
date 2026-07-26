@@ -1,13 +1,13 @@
 # Command golden corpus
 
-Each command case contains JSON `argv`, JSON `env`, `source.json`, exact `stdout.json`, exact `stderr.txt`, and `exit` files. Run `npm run test:golden:update` to regenerate outputs; do not edit expected output files by hand.
+Each command case contains JSON `argv`, JSON `env`, `source.json`, exact `stdout.json`, exact `stderr.txt`, and `exit` files. Run `npm run test:golden:update` to regenerate synthetic outputs and unbound live-fixture candidates; cases with imported Python command output are locked. Do not edit expected output files by hand.
 
 Case `source.json` files name a source under `sources/`. A source is either:
 
 - `synthetic`: deliberately invented, non-live data with `live_recorded: false`; or
 - `python_oracle`: a sanitized capture made by the final Python release pinned in [`oracle-provenance.json`](./oracle-provenance.json), with recording time and capture digest.
 
-The current corpus is synthetic because the available Okta session cannot authenticate the Python oracle. Synthetic data must never be presented as live-recorded parity evidence.
+The representative success corpus is bound to `oracle-2026-07-27`, an authenticated sanitized capture with reproducible Python command replays. Nonrepresentative edge and failure cases remain synthetic and must not be presented as live-recorded parity evidence.
 
 Capture every required route through one Python process so the first-seen identifier pseudonyms remain stable across project, unit, task, and role responses. The helper selects the first current project as pseudonym `1`, rejects an existing destination, and records each route exactly once:
 
@@ -55,4 +55,4 @@ For `user`, `auth check`, `projects`, and `roles`, the complete parsed JSON rema
 
 The importer validates the replay's Python commit, entrypoint, fixture and session hashes, committed replay harness hash, argv, environment allowlist, exit status, stderr digest, and stdout digest before rebinding the case. After schema-aware placeholder validation, it stores the sanitized replay stdout, deterministic projection, and full safe replay provenance. This lets `verify:oracle` recompute the stdout hash and projection instead of trusting a hand-written digest. `verify:oracle` requires reproducible replay evidence for nine representative cases covering all six retained commands plus `--include-inactive`, `--status`, and `--all`. Minimal, empty, unknown-status, and error cases remain synthetic because they are not claims about the captured live state.
 
-The available Monash session currently lacks the OnTrack `username` and `refresh_token` cookies required for authenticated capture. Until a sanitized authenticated fixture is captured and all cases are replayed from it, `verify:oracle` intentionally remains red; synthetic fixtures must not be relabelled as live evidence.
+`verify:oracle` is the merge gate for the authenticated capture and all nine representative command replays. It must remain green; synthetic fixtures must never be relabelled as live evidence.
