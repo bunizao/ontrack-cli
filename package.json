@@ -22,7 +22,7 @@
     "test:golden": "npm run build && tsc -p tsconfig.json && node scripts/golden-run.mjs",
     "test:golden:update": "npm run build && tsc -p tsconfig.json && node scripts/golden-update.mjs",
     "verify:golden": "node scripts/golden-check.mjs",
-    "verify:oracle": "node scripts/golden-check.mjs --require-python-oracle",
+    "verify:oracle": "node scripts/golden-verify-oracle.mjs",
     "verify:source": "node scripts/verify-source.mjs",
     "verify:live": "npm run build && node dist/cli.js auth check --json",
     "coverage:domain": "npm run build && tsc -p tsconfig.json && node scripts/check-domain-coverage.mjs",

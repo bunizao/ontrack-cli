@@ -14,7 +14,7 @@ import { createClock } from "../src/time.js";
 const root = join(process.cwd(), "tests", "golden");
 const sourcesRoot = join(root, "sources");
 const secretSentinel = "ontrack-golden-secret-9d634c";
-const pythonOracleCommit = "06e0c4b6d45cdda4e999e4c829d61bfe8392ef8c";
+const pythonOracleCommit = (JSON.parse(await readFile(join(root, "oracle-provenance.json"), "utf8")) as { readonly python_release_commit: string }).python_release_commit;
 
 interface GoldenCase {
   readonly name: string;
@@ -22,6 +22,7 @@ interface GoldenCase {
   readonly argv: readonly string[];
   readonly env: Readonly<Record<string, string>>;
   readonly sourceId: string;
+  readonly oracleOutput?: string;
 }
 
 interface SourceMetadata {
@@ -34,6 +35,7 @@ interface SourceMetadata {
   readonly oracle_commit?: string;
   readonly recorded_at?: string;
   readonly capture_sha256?: string;
+  readonly command_outputs?: readonly string[];
 }
 
 interface HttpRecord {
@@ -71,13 +73,14 @@ async function goldenCases(): Promise<GoldenCase[]> {
     if (command === "sources") continue;
     for (const caseName of await directories(join(root, command))) {
       const directory = join(root, command, caseName);
-      const source = await jsonFile<{ readonly id: string }>(join(directory, "source.json"));
+      const source = await jsonFile<{ readonly id: string; readonly oracle_output?: string }>(join(directory, "source.json"));
       cases.push({
         name: `${command}/${caseName}`,
         directory,
         argv: await jsonFile<readonly string[]>(join(directory, "argv")),
         env: await jsonFile<Readonly<Record<string, string>>>(join(directory, "env")),
         sourceId: source.id,
+        ...(source.oracle_output === undefined ? {} : { oracleOutput: source.oracle_output }),
       });
     }
   }
@@ -198,6 +201,7 @@ export async function test_source_metadata_never_confuses_synthetic_with_live_or
       assert.equal(metadata.oracle_commit, undefined, sourceId);
       assert.equal(metadata.recorded_at, undefined, sourceId);
       assert.equal(metadata.capture_sha256, undefined, sourceId);
+      assert.equal(metadata.command_outputs, undefined, sourceId);
     } else {
       assert.equal(metadata.live_recorded, true, sourceId);
       assert.equal(metadata.oracle_commit, pythonOracleCommit, sourceId);
@@ -205,6 +209,13 @@ export async function test_source_metadata_never_confuses_synthetic_with_live_or
       assert.match(metadata.capture_sha256 ?? "", /^[0-9a-f]{64}$/u, sourceId);
       const fixture = await readFile(join(sourcesRoot, sourceId, metadata.fixture));
       assert.equal(createHash("sha256").update(fixture).digest("hex"), metadata.capture_sha256, sourceId);
+      if (metadata.command_outputs !== undefined) {
+        assert.ok(metadata.command_outputs.length > 0, sourceId);
+        assert.equal(new Set(metadata.command_outputs).size, metadata.command_outputs.length, sourceId);
+        for (const artifact of metadata.command_outputs) {
+          assert.match(artifact, /^commands\/[a-z][a-z-]*\/[a-z0-9][a-z0-9-]*\.json$/u, sourceId);
+        }
+      }
     }
   }
 }

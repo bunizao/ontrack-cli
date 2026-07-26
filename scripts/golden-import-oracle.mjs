@@ -3,7 +3,8 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import process from "node:process";
 
-const oracleCommit = "06e0c4b6d45cdda4e999e4c829d61bfe8392ef8c";
+const provenance = JSON.parse(await readFile(new URL("../tests/golden/oracle-provenance.json", import.meta.url), "utf8"));
+const oracleCommit = provenance.python_release_commit;
 const allowedFields = new Set([
   "abbreviation", "active", "assess_in_portfolio", "can_mark_overflow_tasks", "code", "compile_portfolio", "completion_date",
   "description", "discuss_timeout_expiry_at", "due_date", "end_date", "error", "extensions", "grade",

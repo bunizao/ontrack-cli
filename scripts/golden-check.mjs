@@ -16,7 +16,6 @@ const forbidden = [
 const credentialPattern = /\beyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}/u;
 const authorizationPattern = /\b(?:bearer|basic)\s+[A-Za-z0-9._~+/-]{12,}/iu;
 let failures = 0;
-let oracleSources = 0;
 
 async function directories(path) {
   return (await readdir(path, { withFileTypes: true }))
@@ -61,15 +60,6 @@ for (const command of await directories(root)) {
       process.stderr.write(`${directory}: expected exactly ${requiredCaseFiles.join(", ")}\n`);
     }
   }
-}
-
-for (const sourceId of await directories(join(root, "sources"))) {
-  const metadata = JSON.parse(await readFile(join(root, "sources", sourceId, "source.json"), "utf8"));
-  if (metadata.kind === "python_oracle") oracleSources += 1;
-}
-if (process.argv.includes("--require-python-oracle") && oracleSources === 0) {
-  failures += 1;
-  process.stderr.write("No authenticated Python-oracle source is present.\n");
 }
 
 await scan(root);
