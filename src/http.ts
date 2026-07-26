@@ -36,6 +36,7 @@ export class HttpClient {
   readonly #signal: AbortSignal | undefined;
   #credentials: AccessCredentials;
   #refreshing: Promise<void> | undefined;
+  #sessionVersion = 0;
 
   constructor(options: HttpClientOptions) {
     this.#baseUrl = new URL(options.baseUrl.endsWith("/") ? options.baseUrl : `${options.baseUrl}/`);
@@ -53,9 +54,12 @@ export class HttpClient {
     }
     const method = (options.method ?? "GET").toUpperCase();
     for (let attempt = 0; attempt < 2; attempt += 1) {
+      const sessionVersion = this.#sessionVersion;
       const response = await this.#send(url, method, options);
       if (response.status === 419 && method === "GET" && attempt === 0 && this.#refresh) {
-        await this.#refreshOnce(options.signal ?? this.#signal ?? new AbortController().signal);
+        if (sessionVersion === this.#sessionVersion) {
+          await this.#refreshOnce(options.signal ?? this.#signal ?? new AbortController().signal);
+        }
         continue;
       }
       if (response.status === 401 || response.status === 419) {
@@ -75,6 +79,7 @@ export class HttpClient {
     this.#refreshing ??= (async () => {
       const refreshed = await this.#refresh?.(signal);
       if (refreshed) this.#credentials = refreshed;
+      this.#sessionVersion += 1;
     })().finally(() => {
       this.#refreshing = undefined;
     });

@@ -38,10 +38,12 @@ export function test_status_catalog_includes_current_upstream_states(): void {
 }
 
 export function test_unknown_status_round_trips_with_safe_label(): void {
-  const key = "future_status_2027";
-  assert.equal(statusLabel(key), key);
-  assert.equal(isFinalStatus(key), false);
-  assert.equal(isSubmittedStatus(key), false);
+  for (let index = 0; index < 128; index += 1) {
+    const key = `future_${index.toString(36)}_${(index * 2_654_435_761).toString(36)}`;
+    assert.equal(statusLabel(key), key);
+    assert.equal(isFinalStatus(key), false);
+    assert.equal(isSubmittedStatus(key), false);
+  }
 }
 
 export function test_unit_grades_override_historical_fallback(): void {

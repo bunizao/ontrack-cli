@@ -63,19 +63,23 @@ export async function test_get_refreshes_after_419_and_retries_once(): Promise<v
 
 export async function test_concurrent_419_responses_share_one_refresh(): Promise<void> {
   let refreshes = 0;
+  let expiredRequests = 0;
+  let releaseDelayedResponse: (() => void) | undefined;
+  const refreshCompleted = new Promise<void>((resolve) => { releaseDelayedResponse = resolve; });
   const client = new HttpClient({
     baseUrl: "https://ontrack.example.edu",
     credentials: { username: "student", accessToken: "expired" },
     refresh: async () => {
       refreshes += 1;
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      releaseDelayedResponse?.();
       return { username: "student", accessToken: "renewed" };
     },
     fetch: async (input, init) => {
       const token = new Request(input, init).headers.get("Auth-Token");
-      return token === "expired"
-        ? Response.json({ error: "expired" }, { status: 419 })
-        : Response.json([]);
+      if (token !== "expired") return Response.json([]);
+      expiredRequests += 1;
+      if (expiredRequests > 1) await refreshCompleted;
+      return Response.json({ error: "expired" }, { status: 419 });
     },
   });
   assert.deepEqual(await Promise.all([client.request("api/projects"), client.request("api/unit_roles")]), [[], []]);

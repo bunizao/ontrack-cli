@@ -127,23 +127,41 @@ export async function test_failures_use_stable_exit_codes_and_never_write_stdout
 
 export async function test_secret_sentinel_is_removed_from_results_and_diagnostics(): Promise<void> {
   const { app } = await fakeApplication();
-  const leaking: CliApplication = {
-    ...app,
-    user: async () => ({
-      ...(await fixture("user") as Record<string, unknown>),
-      authentication_token: secret,
-      access_token: secret,
-      nested: { refresh_token: secret },
-    }),
-  };
-  const success = await executeCli(["user", "--json"], {
-    app: leaking,
-    version: "0.2.0",
-    sensitiveValues: [secret],
+  const expose = async (value: Promise<unknown>): Promise<unknown> => ({
+    marker: secret,
+    auth_token: secret,
+    result: await value,
   });
-  assert.equal(success.exitCode, 0);
-  assert.doesNotMatch(`${success.stdout}${success.stderr}`, new RegExp(secret));
-  assert.equal(success.stdout, jsonText(await fixture("user")));
+  const leaking: CliApplication = {
+    user: async () => expose(app.user()),
+    authCheck: async () => expose(app.authCheck()),
+    projects: async (options) => expose(app.projects(options)),
+    project: async (projectId) => expose(app.project(projectId)),
+    tasks: async (projectId, options) => expose(app.tasks(projectId, options)),
+    roles: async (options) => expose(app.roles(options)),
+  };
+  const commands = [
+    ["user"],
+    ["auth", "check"],
+    ["projects"],
+    ["project", "7"],
+    ["tasks", "7"],
+    ["roles"],
+  ];
+  for (const command of commands) {
+    for (const json of [false, true]) {
+      const argv = json ? [...command, "--json"] : command;
+      const success = await executeCli(argv, {
+        app: leaking,
+        version: "0.2.0",
+        sensitiveValues: [secret],
+      });
+      assert.equal(success.exitCode, 0, argv.join(" "));
+      assert.doesNotMatch(`${success.stdout}${success.stderr}`, new RegExp(secret), argv.join(" "));
+      assert.match(success.stdout, /\[REDACTED\]/u, argv.join(" "));
+      assert.doesNotMatch(success.stdout, /auth_token/u, argv.join(" "));
+    }
+  }
 
   const diagnostic: CliApplication = {
     ...app,

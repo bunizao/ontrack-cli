@@ -156,7 +156,7 @@ export async function test_cookie_exchange_filters_inapplicable_cookies(): Promi
   let cookieHeader = "";
   await resolveAuthenticatedSession({
     baseUrl: "https://school.example.edu",
-    configDir: directory,
+    sessionFile: join(directory, "session.json"),
     env: {},
     oktaExecutable: fakeOktaPath(directory),
     now: new Date("2029-01-01T00:00:00Z"),
@@ -173,7 +173,7 @@ export async function test_cookie_exchange_filters_inapplicable_cookies(): Promi
 
   await assert.rejects(resolveAuthenticatedSession({
     baseUrl: "http://school.example.edu",
-    configDir: join(directory, "http"),
+    sessionFile: join(directory, "http", "session.json"),
     env: {},
     oktaExecutable: fakeOktaPath(directory),
     now: new Date("2029-01-01T00:00:00Z"),
@@ -193,7 +193,7 @@ export async function test_valid_cached_session_is_reused_and_expired_session_is
   }));
   const cached = await resolveAuthenticatedSession({
     baseUrl: "https://school.example.edu",
-    configDir: directory,
+    sessionFile: join(directory, "session.json"),
     env: {},
     now: new Date("2029-01-01T00:00:00Z"),
     oktaExecutable: join(directory, "missing-okta"),
@@ -206,7 +206,7 @@ export async function test_valid_cached_session_is_reused_and_expired_session_is
   await fakeOkta(directory, '{"cookies":[{"name":"username","value":"okta-user","domain":"school.example.edu","path":"/"},{"name":"refresh_token","value":"refresh-secret","domain":"school.example.edu","path":"/"}]}');
   const refreshed = await resolveAuthenticatedSession({
     baseUrl: "https://school.example.edu",
-    configDir: directory,
+    sessionFile: join(directory, "session.json"),
     env: {},
     now: new Date("2031-01-01T00:00:00Z"),
     oktaExecutable: fakeOktaPath(directory),
@@ -230,7 +230,7 @@ export async function test_fake_okta_subprocess_success_uses_only_json_output():
   let request: Request | undefined;
   const session = await resolveAuthenticatedSession({
     baseUrl: "https://school.example.edu",
-    configDir: directory,
+    sessionFile: join(directory, "session.json"),
     env: {},
     oktaExecutable: fakeOktaPath(directory),
     fetch: async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
@@ -270,7 +270,7 @@ async function expectAuthFailure(
   await assert.rejects(
     resolveAuthenticatedSession({
       baseUrl: "https://school.example.edu",
-      configDir: directory,
+      sessionFile: join(directory, "session.json"),
       env: {},
       oktaExecutable: executable,
       oktaTimeoutMs: timeoutMs,
@@ -293,7 +293,7 @@ export async function test_null_access_token_response_is_cookie_exchange_failure
   await assert.rejects(
     resolveAuthenticatedSession({
       baseUrl: "https://school.example.edu",
-      configDir: directory,
+      sessionFile: join(directory, "session.json"),
       env: {},
       oktaExecutable: fakeOktaPath(directory),
       fetch: exchangeResponse(null),
@@ -308,7 +308,7 @@ export async function test_abort_cancels_okta_and_cookie_exchange(): Promise<voi
   const oktaController = new AbortController();
   const waitingForOkta = resolveAuthenticatedSession({
     baseUrl: "https://school.example.edu",
-    configDir: directory,
+    sessionFile: join(directory, "session.json"),
     env: {},
     oktaExecutable: fakeOktaPath(directory),
     signal: oktaController.signal,
@@ -320,7 +320,7 @@ export async function test_abort_cancels_okta_and_cookie_exchange(): Promise<voi
   const exchangeController = new AbortController();
   const waitingForExchange = resolveAuthenticatedSession({
     baseUrl: "https://school.example.edu",
-    configDir: directory,
+    sessionFile: join(directory, "session.json"),
     env: {},
     oktaExecutable: fakeOktaPath(directory),
     signal: exchangeController.signal,
@@ -338,7 +338,7 @@ export async function test_cookie_exchange_has_its_own_timeout(): Promise<void> 
   await fakeOkta(directory, '{"cookies":[{"name":"refresh_token","value":"secret","domain":"school.example.edu","path":"/"}]}');
   await assert.rejects(resolveAuthenticatedSession({
     baseUrl: "https://school.example.edu",
-    configDir: directory,
+    sessionFile: join(directory, "session.json"),
     env: {},
     oktaExecutable: fakeOktaPath(directory),
     exchangeTimeoutMs: 5,
@@ -361,7 +361,7 @@ export async function test_skip_cache_bypasses_a_rejected_unexpired_session(): P
 
   const session = await resolveAuthenticatedSession({
     baseUrl: "https://school.example.edu",
-    configDir: directory,
+    sessionFile: join(directory, "session.json"),
     env: {},
     now: new Date("2029-01-01T00:00:00Z"),
     oktaExecutable: fakeOktaPath(directory),

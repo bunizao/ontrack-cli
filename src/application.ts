@@ -11,9 +11,9 @@ export interface SessionState {
 
 export class OnTrackApplication implements CliApplication {
   constructor(
-    readonly sessionState: SessionState,
-    readonly client: OnTrackClient,
-    readonly clock: Clock,
+    private readonly sessionState: SessionState,
+    private readonly client: OnTrackClient,
+    private readonly clock: Clock,
   ) {}
 
   async user(): Promise<unknown> {

@@ -43,7 +43,7 @@ async function createApplication(signal: AbortSignal): Promise<OnTrackApplicatio
   const baseUrl = resolveBaseUrl(env, config);
   let session = await resolveAuthenticatedSession({
     baseUrl,
-    configDir: paths.configDir,
+    sessionFile: paths.sessionFile,
     env,
     config,
     signal,
@@ -56,7 +56,7 @@ async function createApplication(signal: AbortSignal): Promise<OnTrackApplicatio
     refresh: async (refreshSignal) => {
       session = await resolveAuthenticatedSession({
         baseUrl,
-        configDir: paths.configDir,
+        sessionFile: paths.sessionFile,
         env,
         config,
         signal: refreshSignal,

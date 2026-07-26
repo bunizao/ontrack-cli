@@ -9,7 +9,7 @@ export interface AuthMethod {
 }
 
 export class OnTrackClient {
-  constructor(readonly http: HttpClient) {}
+  constructor(private readonly http: HttpClient) {}
 
   async getProjects(includeInactive = false): Promise<ProjectSummary[]> {
     return readProjects(await this.http.request("api/projects", {

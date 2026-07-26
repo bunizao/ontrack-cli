@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 
 import type { Environment, OnTrackConfig } from "./config.js";
 import { resolveCredentialSource } from "./config.js";
@@ -36,7 +36,7 @@ interface CookieRecord {
 
 export interface ResolveAuthenticatedSessionOptions {
   readonly baseUrl: string;
-  readonly configDir: string;
+  readonly sessionFile: string;
   readonly env: Environment;
   readonly config?: OnTrackConfig;
   readonly now?: Date;
@@ -303,7 +303,7 @@ export async function resolveAuthenticatedSession(
   }
 
   const now = options.now ?? new Date();
-  const sessionFile = join(options.configDir, "session.json");
+  const sessionFile = options.sessionFile;
   if (!options.skipCache) {
     const cached = await loadStoredSession(sessionFile, options.baseUrl, now);
     if (cached) return cached;
