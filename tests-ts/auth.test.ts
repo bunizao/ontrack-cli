@@ -14,7 +14,7 @@ async function temporaryDirectory(): Promise<string> {
 
 async function fakeOkta(directory: string, output: string | null, hang = false): Promise<void> {
   const shellBody = hang ? "sleep 5" : output === null ? ":" : `printf '%s' '${output.replaceAll("'", "'\\''")}'`;
-  const cmdBody = hang ? "ping 127.0.0.1 -n 6 > nul" : output === null ? "rem empty" : `<nul set /p =${output}`;
+  const cmdBody = hang ? "ping 127.0.0.1 -n 6 > nul" : output === null ? "rem empty" : `echo ${output}`;
   const shell = `#!/bin/sh\n${shellBody}\n`;
   const cmd = `@echo off\r\n${cmdBody}\r\n`;
   await writeFile(join(directory, "okta"), shell, "utf8");
