@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import glob
+import json
 import logging
 import os
+import subprocess
 import sys
 from urllib.parse import urlparse
 
@@ -131,8 +133,13 @@ def _cookie_record_value(cookies: list[dict[str, str]], domain: str, name: str) 
         if cookie.get("name") != name:
             continue
         value = cookie.get("value")
-        cookie_domain = cookie.get("domain") or ""
-        if isinstance(value, str) and value and domain in cookie_domain:
+        cookie_domain = cookie.get("domain")
+        if (
+            isinstance(value, str)
+            and value
+            and isinstance(cookie_domain, str)
+            and domain in cookie_domain
+        ):
             return value
     return None
 
@@ -197,7 +204,9 @@ def _exchange_refresh_token_from_records(
 
     session = requests.Session()
     for cookie in cookies:
-        cookie_domain = cookie.get("domain") or ""
+        cookie_domain = cookie.get("domain")
+        if not isinstance(cookie_domain, str):
+            continue
         if domain not in cookie_domain:
             continue
         value = cookie.get("value")
@@ -269,37 +278,44 @@ def get_browser_auth(base_url: str) -> tuple[str, str, CachedUser] | None:
 
 
 def get_okta_auth(base_url: str) -> tuple[str, str, CachedUser] | None:
-    """Try to resolve OnTrack auth through okta-auth's local session store."""
+    """Try to resolve OnTrack auth through the installed okta executable."""
     try:
-        from okta_auth.adapter import OktaAdapterError, ensure_login, get_cookies
-    except ImportError:
+        result = subprocess.run(
+            ["okta", "cookies", "--json", base_url],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=DEFAULT_TIMEOUT,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        log.debug("okta executable is unavailable or timed out for %s: %s", base_url, exc)
         return None
 
-    domain = urlparse(base_url).hostname or ""
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
 
-    def resolve_from_okta_cookies() -> tuple[str, str, CachedUser] | None:
-        cookies = get_cookies(base_url)
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        log.debug("okta executable returned malformed JSON for %s", base_url)
+        return None
+
+    if not isinstance(payload, dict) or not isinstance(payload.get("cookies"), list):
+        return None
+
+    cookies = [cookie for cookie in payload["cookies"] if isinstance(cookie, dict)]
+    domain = urlparse(base_url).hostname or ""
+    try:
         exchanged = _exchange_refresh_token_from_records(base_url, cookies, domain)
         if exchanged is None:
             return None
         auth_token, user = exchanged
         username = user.username or _cookie_record_value(cookies, domain, "username")
-        if not username:
+        if not username or not _is_valid_token(base_url, username, auth_token):
             return None
-        if _is_valid_token(base_url, username, auth_token):
-            return username, auth_token, user
+    except requests.RequestException as exc:
+        log.debug("OnTrack cookie exchange failed for %s: %s", base_url, exc)
         return None
 
-    try:
-        existing = resolve_from_okta_cookies()
-        if existing is not None:
-            log.debug("Using OnTrack auth from okta-auth")
-            return existing
-        ensure_login(base_url)
-        refreshed = resolve_from_okta_cookies()
-        if refreshed is not None:
-            log.debug("Using OnTrack auth from okta-auth after automatic login")
-        return refreshed
-    except OktaAdapterError as exc:
-        log.debug("okta-auth could not establish an OnTrack session for %s: %s", base_url, exc)
-        return None
+    log.debug("Using OnTrack auth from okta executable")
+    return username, auth_token, user

@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import json
+import logging
+import os
+import re
+from pathlib import Path
 from typing import Any
 
 import requests
@@ -19,6 +24,172 @@ from ontrack_cli.models import (
     UnitRole,
     UnitSummary,
 )
+
+log = logging.getLogger(__name__)
+
+_RECORDABLE_PATHS = (
+    re.compile(r"^/api/auth/method$"),
+    re.compile(r"^/api/projects$"),
+    re.compile(r"^/api/projects/\d+$"),
+    re.compile(r"^/api/units/\d+$"),
+)
+
+_RECORD_FIELDS = {
+    "abbreviation",
+    "active",
+    "assess_in_portfolio",
+    "code",
+    "compile_portfolio",
+    "completion_date",
+    "description",
+    "discuss_timeout_expiry_at",
+    "due_date",
+    "end_date",
+    "error",
+    "extensions",
+    "grade",
+    "grade_definitions",
+    "id",
+    "include_in_portfolio",
+    "is_graded",
+    "max_quality_pts",
+    "message",
+    "method",
+    "moved_to_discuss_at",
+    "my_role",
+    "name",
+    "portfolio_available",
+    "project_id",
+    "quality_pts",
+    "role",
+    "start_date",
+    "status",
+    "submission_date",
+    "submitted_grade",
+    "target_date",
+    "target_due_date",
+    "target_grade",
+    "target_start_date",
+    "task_definition_id",
+    "task_definitions",
+    "tasks",
+    "times_assessed",
+    "unit",
+    "unit_id",
+    "user_id",
+    "uses_draft_learning_summary",
+}
+
+_ID_FIELDS = {"id", "project_id", "task_definition_id", "unit_id", "user_id"}
+_DATE_FIELDS = {
+    "completion_date",
+    "due_date",
+    "end_date",
+    "start_date",
+    "submission_date",
+    "target_date",
+    "target_due_date",
+    "target_start_date",
+}
+_INSTANT_FIELDS = {"discuss_timeout_expiry_at", "moved_to_discuss_at"}
+_BOOLEAN_FIELDS = {
+    "active",
+    "assess_in_portfolio",
+    "compile_portfolio",
+    "include_in_portfolio",
+    "is_graded",
+    "portfolio_available",
+    "uses_draft_learning_summary",
+}
+_NUMBER_FIELDS = {
+    "extensions",
+    "grade",
+    "max_quality_pts",
+    "quality_pts",
+    "submitted_grade",
+    "target_grade",
+    "times_assessed",
+}
+_ENUM_FIELDS = {"method", "my_role", "role", "status"}
+_TEXT_SUBSTITUTIONS = {
+    "abbreviation": "TASK",
+    "code": "UNIT",
+    "description": "Description",
+    "error": "API error",
+    "message": "API message",
+    "name": "Unit",
+}
+
+
+def _sanitize_record_value(value: Any, field: str | None = None) -> Any:
+    """Rebuild a recorded value from known fields with substituted identifiers."""
+    if isinstance(value, list):
+        return [_sanitize_record_value(item, field) for item in value]
+    if isinstance(value, dict):
+        return {
+            key: _sanitize_record_value(item, key)
+            for key, item in value.items()
+            if key in _RECORD_FIELDS
+        }
+    if field in _ID_FIELDS:
+        return 1 if isinstance(value, int) and not isinstance(value, bool) else None
+    if field in _DATE_FIELDS:
+        return "2000-01-01" if isinstance(value, str) else None
+    if field in _INSTANT_FIELDS:
+        return "2000-01-01T00:00:00Z" if isinstance(value, str) else None
+    if field in _BOOLEAN_FIELDS:
+        return value if isinstance(value, bool) else None
+    if field in _NUMBER_FIELDS:
+        return value if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+    if field in _ENUM_FIELDS:
+        return value if isinstance(value, str) else None
+    if field in _TEXT_SUBSTITUTIONS:
+        return _TEXT_SUBSTITUTIONS[field] if isinstance(value, str) else None
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    return None
+
+
+def _record_http_pair(
+    method: str,
+    path: str,
+    params: dict[str, Any] | None,
+    response_status: int,
+    response_payload: Any,
+) -> None:
+    """Append one sanitized, user-scoped request/response pair when enabled."""
+    destination = os.getenv("ONTRACK_HTTP_RECORD")
+    if not destination or method.upper() != "GET":
+        return
+    if not any(pattern.fullmatch(path) for pattern in _RECORDABLE_PATHS):
+        return
+
+    safe_params = {
+        key: value
+        for key, value in (params or {}).items()
+        if key == "include_inactive" and isinstance(value, bool)
+    }
+    safe_path = re.sub(r"(?<=/)(\d+)(?=$|/)", "1", path)
+    record = {
+        "request": {
+            "method": method.upper(),
+            "path": safe_path,
+            "params": safe_params,
+        },
+        "response": {
+            "status_code": response_status,
+            "json": _sanitize_record_value(response_payload),
+        },
+    }
+    record_path = Path(destination).expanduser()
+    try:
+        record_path.parent.mkdir(parents=True, exist_ok=True)
+        with record_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, sort_keys=True, separators=(",", ":")))
+            handle.write("\n")
+        record_path.chmod(0o600)
+    except OSError as exc:
+        log.warning("Could not write sanitized HTTP record to %s: %s", record_path, exc)
 
 
 def _unit_from_payload(data: dict[str, Any]) -> UnitSummary:
@@ -98,6 +269,12 @@ class OnTrackClient:
             json=json_body,
             timeout=DEFAULT_TIMEOUT,
         )
+
+        try:
+            record_payload = response.json()
+        except ValueError:
+            record_payload = None
+        _record_http_pair(method, path, params, response.status_code, record_payload)
 
         if response.status_code in (401, 419):
             try:
