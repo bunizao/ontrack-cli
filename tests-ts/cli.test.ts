@@ -174,6 +174,17 @@ export async function test_help_and_version_succeed_without_resolving_the_applic
   assert.deepEqual(invocations, []);
 }
 
+export async function test_command_help_does_not_resolve_the_application(): Promise<void> {
+  for (const argv of [["user", "--help"], ["auth", "check", "--help"], ["projects", "--help"], ["project", "--help"], ["tasks", "--help"], ["roles", "--help"]]) {
+    const { app, invocations } = await fakeApplication();
+    const result = await executeCli(argv, { app, version: "0.2.0" });
+    assert.equal(result.exitCode, 0, argv.join(" "));
+    assert.match(result.stdout, /^Usage: ontrack /, argv.join(" "));
+    assert.equal(result.stderr, "", argv.join(" "));
+    assert.deepEqual(invocations, [], argv.join(" "));
+  }
+}
+
 export async function test_invalid_project_id_is_a_usage_error_before_application_work(): Promise<void> {
   const { app, invocations } = await fakeApplication();
   const result = await executeCli(["project", "not-an-id", "--json"], { app, version: "0.2.0" });

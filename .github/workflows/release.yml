@@ -25,7 +25,7 @@ jobs:
           node-version: 24
       - run: npm ci
       - name: Verify release tag
-        run: node -e "const p=require('./package.json');if(process.env.GITHUB_REF_NAME!=='v'+p.version)process.exit(1)"
+        run: node scripts/verify-release-tag.mjs
       - run: npm pack
       - uses: softprops/action-gh-release@v2
         with:

@@ -56,8 +56,12 @@ jobs:
       - run: npm run test:bun
 
   package:
-    name: Packed package smoke
-    runs-on: ubuntu-latest
+    name: Packed package smoke (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -68,10 +72,7 @@ jobs:
         with:
           bun-version: 1.3.14
       - run: npm ci
-      - run: npm pack
-      - run: npm install --prefix "$RUNNER_TEMP/ontrack-smoke" ./bunizao-ontrack-*.tgz
-      - run: node "$RUNNER_TEMP/ontrack-smoke/node_modules/@bunizao/ontrack/dist/cli.js" --help
-      - run: bun "$RUNNER_TEMP/ontrack-smoke/node_modules/@bunizao/ontrack/dist/cli.js" --version
+      - run: node scripts/package-smoke.mjs
 
   runtime-drift:
     name: Current runtime drift

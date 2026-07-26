@@ -125,6 +125,7 @@ export async function executeCli(argv: readonly string[], dependencies: Dependen
   const sensitiveValues = dependencies.sensitiveValues ?? [];
   if (argv.length === 1 && argv[0] === "--help") return { exitCode: 0, stdout: help(), stderr: "" };
   if (argv.length === 1 && argv[0] === "--version") return { exitCode: 0, stdout: `ontrack ${dependencies.version}\n`, stderr: "" };
+  if (argv.includes("--help")) return { exitCode: 0, stdout: help(), stderr: "" };
   try {
     const result = await invoke(argv, dependencies.app);
     const value = sanitized(result.value);

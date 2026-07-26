@@ -20,6 +20,7 @@ export function test_instants_remain_distinct_from_civil_dates(): void {
   assert.equal(instant.toString(), "2026-07-01T02:03:04.000Z");
   assert.equal(instant.compare(Instant.parse("2026-07-01T03:03:04+00:00")), -1);
   assert.throws(() => Instant.parse("2026-07-01"), /instant/i);
+  assert.throws(() => Instant.parse("2026-07-01T02:03:04"), /instant/i);
 }
 
 export function test_clock_override_controls_now_and_local_today(): void {

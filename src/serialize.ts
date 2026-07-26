@@ -1,4 +1,4 @@
-import type { ProjectSnapshot, TaskRow } from "./project-snapshot.js";
+import type { ProjectSnapshot } from "./project-snapshot.js";
 import type { Project, ProjectSummary, Task, TaskDefinition, Unit, UnitRole, UnitSummary, UserView } from "./types.js";
 
 function text(value: { toString(): string } | null | undefined): string | null {
@@ -115,14 +115,10 @@ export function roleToJson(role: UnitRole): Record<string, unknown> {
   };
 }
 
-export function taskRowToJson(row: TaskRow): Record<string, unknown> {
-  return { ...row };
-}
-
 export function snapshotToJson(snapshot: ProjectSnapshot): Record<string, unknown> {
   return {
     project: projectToJson(snapshot.project),
     unit: unitToJson(snapshot.unit),
-    tasks: snapshot.tasks.map(taskRowToJson),
+    tasks: snapshot.tasks.map((task) => ({ ...task })),
   };
 }

@@ -3,6 +3,7 @@ import { posix, win32 } from "node:path";
 
 import { CliError } from "./errors.js";
 import type { UserView } from "./types.js";
+import { safeUserView } from "./user.js";
 
 export type Environment = Readonly<Record<string, string | undefined>>;
 
@@ -166,18 +167,6 @@ function credentials(
   return resolvedUsername && accessToken ? { username: resolvedUsername, accessToken, provenance, user } : undefined;
 }
 
-function safeUser(data: Record<string, unknown>): UserView {
-  const optionalString = (value: unknown): string | null => typeof value === "string" ? value : null;
-  return {
-    id: typeof data.id === "number" && Number.isFinite(data.id) ? data.id : null,
-    username: optionalString(data.username),
-    first_name: optionalString(data.first_name ?? data.firstName),
-    last_name: optionalString(data.last_name ?? data.lastName),
-    email: optionalString(data.email),
-    nickname: optionalString(data.nickname),
-  };
-}
-
 export function resolveCredentialSource(env: Environment, config: OnTrackConfig): CredentialSource | undefined {
   const environment = credentials(env.ONTRACK_USERNAME, env.ONTRACK_AUTH_TOKEN, "environment");
   if (environment) return environment;
@@ -190,6 +179,6 @@ export function resolveCredentialSource(env: Environment, config: OnTrackConfig)
     migration.username,
     migration.authenticationToken ?? migration.authentication_token,
     "migration",
-    safeUser(migration),
+    safeUserView(migration),
   );
 }

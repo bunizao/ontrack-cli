@@ -6,6 +6,7 @@ import type { Environment, OnTrackConfig } from "./config.js";
 import { resolveCredentialSource } from "./config.js";
 import { CliError } from "./errors.js";
 import type { UserView } from "./types.js";
+import { safeUserView } from "./user.js";
 
 export type SessionProvenance = "environment" | "config" | "migration" | "session_cache" | "okta";
 
@@ -119,18 +120,23 @@ interface ProcessResult {
   readonly stdout: string;
 }
 
-function runOkta(executable: string, baseUrl: string, timeoutMs: number): Promise<ProcessResult> {
+function runOkta(executable: string, baseUrl: string, timeoutMs: number, signal?: AbortSignal): Promise<ProcessResult> {
+  if (signal?.aborted) return Promise.reject(new CliError("cancellation", "Authentication cancelled."));
   return new Promise((resolve, reject) => {
     execFile(
       executable,
       ["cookies", "--json", baseUrl],
-      { encoding: "utf8", timeout: timeoutMs, windowsHide: true, maxBuffer: 1024 * 1024 },
+      { encoding: "utf8", timeout: timeoutMs, windowsHide: true, maxBuffer: 1024 * 1024, signal },
       (error, stdout) => {
         if (!error) {
           resolve({ stdout });
           return;
         }
         const code = (error as NodeJS.ErrnoException).code;
+        if (signal?.aborted) {
+          reject(new CliError("cancellation", "Authentication cancelled."));
+          return;
+        }
         if (code === "ENOENT") {
           reject(authError("Okta provider is unavailable."));
           return;
@@ -208,6 +214,7 @@ async function exchangeCookies(
     if (signal) init.signal = signal;
     response = await fetchImplementation(`${baseUrl}/api/auth/access-token`, init);
   } catch {
+    if (signal?.aborted) throw new CliError("cancellation", "Authentication cancelled.");
     throw authError("Cookie exchange failed: OnTrack could not be reached.");
   }
   if (!response.ok) throw authError("Cookie exchange failed: OnTrack rejected the stored session.");
@@ -236,21 +243,13 @@ async function exchangeCookies(
   ) throw authError("Cookie exchange failed: OnTrack returned an incomplete session.");
   if (!isFuture(data.auth_token_expiry, now)) throw authError("The exchanged access token is already expired.");
   const userData = user as Record<string, unknown>;
-  const optionalString = (value: unknown): string | null => typeof value === "string" ? value : null;
   return {
     baseUrl,
     username,
     accessToken: data.auth_token,
     authTokenExpiry: new Date(data.auth_token_expiry).toISOString(),
     provenance: "okta",
-    user: {
-      id: typeof userData.id === "number" && Number.isFinite(userData.id) ? userData.id : null,
-      username,
-      first_name: optionalString(userData.first_name ?? userData.firstName),
-      last_name: optionalString(userData.last_name ?? userData.lastName),
-      email: optionalString(userData.email),
-      nickname: optionalString(userData.nickname),
-    },
+    user: safeUserView(userData, username),
   };
 }
 
@@ -281,6 +280,7 @@ export async function resolveAuthenticatedSession(
     options.oktaExecutable ?? "okta",
     options.baseUrl,
     options.oktaTimeoutMs ?? 30_000,
+    options.signal,
   );
   const cookies = readCookies(processResult.stdout, options.baseUrl);
   const session = await exchangeCookies(

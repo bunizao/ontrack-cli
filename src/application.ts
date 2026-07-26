@@ -2,7 +2,7 @@ import type { AuthenticatedSession } from "./auth.js";
 import type { CliApplication } from "./cli-app.js";
 import type { OnTrackClient } from "./ontrack.js";
 import { buildProjectSnapshot } from "./project-snapshot.js";
-import { projectSummaryToJson, roleToJson, snapshotToJson, taskRowToJson, userToJson } from "./serialize.js";
+import { projectSummaryToJson, roleToJson, snapshotToJson, userToJson } from "./serialize.js";
 import type { Clock } from "./time.js";
 
 export class OnTrackApplication implements CliApplication {
@@ -58,7 +58,7 @@ export class OnTrackApplication implements CliApplication {
       const allowed = new Set(options.statuses);
       tasks = tasks.filter((task) => allowed.has(task.status));
     }
-    return tasks.map(taskRowToJson);
+    return tasks.map((task) => ({ ...task }));
   }
 
   async roles(options: { readonly showAll: boolean }): Promise<unknown> {

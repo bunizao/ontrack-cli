@@ -39,7 +39,7 @@ export class Instant {
   }
 
   static parse(value: string): Instant {
-    if (!value.includes("T")) throw new TypeError(`Invalid instant: ${value}`);
+    if (!/T.*(?:Z|[+-]\d{2}:\d{2})$/i.test(value)) throw new TypeError(`Invalid instant: ${value}`);
     const parsed = new Date(value);
     if (Number.isNaN(parsed.valueOf())) throw new TypeError(`Invalid instant: ${value}`);
     return new Instant(parsed);

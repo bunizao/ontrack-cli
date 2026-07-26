@@ -229,6 +229,37 @@ export async function test_null_access_token_response_is_cookie_exchange_failure
   );
 }
 
+export async function test_abort_cancels_okta_and_cookie_exchange(): Promise<void> {
+  const directory = await temporaryDirectory();
+  await fakeOkta(directory, null, true);
+  const oktaController = new AbortController();
+  const waitingForOkta = resolveAuthenticatedSession({
+    baseUrl: "https://school.example.edu",
+    configDir: directory,
+    env: {},
+    oktaExecutable: fakeOktaPath(directory),
+    signal: oktaController.signal,
+  });
+  oktaController.abort();
+  await assert.rejects(waitingForOkta, (error) => error instanceof CliError && error.category === "cancellation");
+
+  await fakeOkta(directory, '{"cookies":[{"name":"refresh_token","value":"secret","domain":"school.example.edu","path":"/"}]}');
+  const exchangeController = new AbortController();
+  const waitingForExchange = resolveAuthenticatedSession({
+    baseUrl: "https://school.example.edu",
+    configDir: directory,
+    env: {},
+    oktaExecutable: fakeOktaPath(directory),
+    signal: exchangeController.signal,
+    fetch: async (_input, init) => await new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+    }),
+  });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  exchangeController.abort();
+  await assert.rejects(waitingForExchange, (error) => error instanceof CliError && error.category === "cancellation");
+}
+
 export async function test_skip_cache_bypasses_a_rejected_unexpired_session(): Promise<void> {
   const directory = await temporaryDirectory();
   await writeFile(join(directory, "session.json"), JSON.stringify({
