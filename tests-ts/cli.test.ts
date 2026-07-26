@@ -75,6 +75,26 @@ export async function test_six_existing_commands_emit_stable_json(): Promise<voi
   }
 }
 
+export async function test_auth_login_is_an_explicit_cli_command_with_sanitized_json(): Promise<void> {
+  const { app, invocations } = await fakeApplication();
+  let loginCalls = 0;
+  const result = await executeCli(["auth", "login", "--json"], {
+    app,
+    version: "0.2.0",
+    authLogin: async () => {
+      loginCalls += 1;
+      return { username: "alice", auth_token_expiry: "2030-01-01T00:00:00.000Z" };
+    },
+  });
+  assert.deepEqual(result, {
+    exitCode: 0,
+    stdout: jsonText({ username: "alice", auth_token_expiry: "2030-01-01T00:00:00.000Z" }),
+    stderr: "",
+  });
+  assert.equal(loginCalls, 1);
+  assert.deepEqual(invocations, []);
+}
+
 export async function test_command_flags_reach_the_application_seam(): Promise<void> {
   const { app, invocations } = await fakeApplication();
   await executeCli(["projects", "--include-inactive", "--json"], { app, version: "0.2.0" });
@@ -94,6 +114,7 @@ export async function test_yaml_is_a_usage_error_for_every_command(): Promise<vo
   const commands = [
     ["user", "--yaml"],
     ["auth", "check", "--yaml"],
+    ["auth", "login", "--yaml"],
     ["projects", "--yaml"],
     ["project", "7", "--yaml"],
     ["tasks", "7", "--yaml"],
@@ -143,6 +164,7 @@ export async function test_secret_sentinel_is_removed_from_results_and_diagnosti
   const commands = [
     ["user"],
     ["auth", "check"],
+    ["auth", "login"],
     ["projects"],
     ["project", "7"],
     ["tasks", "7"],
@@ -155,6 +177,7 @@ export async function test_secret_sentinel_is_removed_from_results_and_diagnosti
         app: leaking,
         version: "0.2.0",
         sensitiveValues: [secret],
+        authLogin: async () => expose(Promise.resolve({ username: "alice" })),
       });
       assert.equal(success.exitCode, 0, argv.join(" "));
       assert.doesNotMatch(`${success.stdout}${success.stderr}`, new RegExp(secret), argv.join(" "));
@@ -193,7 +216,7 @@ export async function test_help_and_version_succeed_without_resolving_the_applic
 }
 
 export async function test_command_help_does_not_resolve_the_application(): Promise<void> {
-  for (const argv of [["user", "--help"], ["auth", "check", "--help"], ["projects", "--help"], ["project", "--help"], ["tasks", "--help"], ["roles", "--help"]]) {
+  for (const argv of [["user", "--help"], ["auth", "check", "--help"], ["auth", "login", "--help"], ["projects", "--help"], ["project", "--help"], ["tasks", "--help"], ["roles", "--help"]]) {
     const { app, invocations } = await fakeApplication();
     const result = await executeCli(argv, { app, version: "0.2.0" });
     assert.equal(result.exitCode, 0, argv.join(" "));

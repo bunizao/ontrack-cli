@@ -183,9 +183,11 @@ export async function test_every_parser_command_has_a_golden_case(): Promise<voi
     app: await applicationFor(cases[0]!),
     version: "0.2.0",
   });
-  const parserCommands = [...help.stdout.matchAll(/^  (auth check|[a-z][a-z-]*)(?:\s+<[^>]+>)?\s+/gmu)]
+  const parserCommands = [...help.stdout.matchAll(/^  (auth (?:check|login)|[a-z][a-z-]*)(?:\s+<[^>]+>)?\s+/gmu)]
     .map((match) => match[1]!)
+    .filter((command) => command !== "auth login")
     .sort();
+  assert.match(help.stdout, /^  auth login\s+/mu, "interactive login is covered by subprocess tests instead of deterministic goldens");
   const covered = new Set(cases.map((testCase) => commandName(testCase.argv)));
   assert.deepEqual(parserCommands, [...covered].sort());
 }

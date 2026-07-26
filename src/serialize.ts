@@ -49,10 +49,6 @@ export function taskToJson(task: Task): Record<string, unknown> {
 }
 
 export function taskDefinitionToJson(definition: TaskDefinition): Record<string, unknown> {
-  const gradeKeys = new Set([
-    ...Object.keys(definition.grade_due_dates),
-    ...Object.keys(definition.grade_start_dates),
-  ]);
   return {
     id: definition.id,
     abbreviation: definition.abbreviation,
@@ -64,11 +60,6 @@ export function taskDefinitionToJson(definition: TaskDefinition): Record<string,
     due_date: text(definition.due_date),
     is_graded: definition.is_graded,
     max_quality_pts: definition.max_quality_pts,
-    grade_due_dates: [...gradeKeys].sort((left, right) => Number(left) - Number(right)).map((targetGrade) => ({
-      target_grade: Number(targetGrade),
-      target_due_date: definition.grade_due_dates[targetGrade]?.toString() ?? null,
-      start_date: definition.grade_start_dates[targetGrade]?.toString() ?? null,
-    })),
   };
 }
 
@@ -100,12 +91,6 @@ export function unitToJson(unit: Unit): Record<string, unknown> {
   return {
     summary: unitSummaryToJson(unit),
     description: unit.description ?? null,
-    grade_definitions: unit.grade_definitions.map((definition) => ({
-      id: definition.id,
-      value: definition.value,
-      label: definition.name,
-      abbreviation: definition.abbreviation,
-    })),
     task_definitions: unit.task_definitions.map(taskDefinitionToJson),
   };
 }

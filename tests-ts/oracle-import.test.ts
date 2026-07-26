@@ -91,6 +91,33 @@ export async function test_oracle_import_rejects_a_noncanonical_recorded_id(): P
   assert.match(result.stderr, /request path was not sanitized/u);
 }
 
+export async function test_oracle_import_rejects_project_path_response_id_mismatch(): Promise<void> {
+  const record = validRecord();
+  const result = await importRecord({
+    ...record,
+    request: { ...record.request, path: "/api/projects/1", params: {} },
+    response: { ...record.response, json: { id: 2 } },
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /project path does not match its response id/u);
+}
+
+export async function test_oracle_import_rejects_inconsistent_project_unit_references(): Promise<void> {
+  const record = validRecord();
+  const result = await importRecord({
+    ...record,
+    response: {
+      ...record.response,
+      json: [
+        { id: 1, unit: { id: 2, code: "UNIT", name: "Unit" } },
+        { id: 1, unit: { id: 3, code: "UNIT", name: "Unit" } },
+      ],
+    },
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /project pseudonym maps to inconsistent unit pseudonyms/u);
+}
+
 export async function test_oracle_import_rejects_unallowlisted_request_params(): Promise<void> {
   const record = validRecord();
   const result = await importRecord({
@@ -137,6 +164,37 @@ export async function test_oracle_import_accepts_a_python_recorder_shaped_captur
   assert.match(result.stdout, /Imported 1 sanitized record/u);
 }
 
+export async function test_oracle_import_accepts_distinct_stable_id_pseudonyms(): Promise<void> {
+  const record = validRecord();
+  const result = await importRecord({
+    ...record,
+    response: {
+      ...record.response,
+      json: [{ id: 1, unit: { id: 2, code: "UNIT", name: "Unit" } }],
+    },
+  });
+  assert.equal(result.status, 0, result.stderr);
+}
+
+export async function test_oracle_import_accepts_sanitized_custom_grade_definitions(): Promise<void> {
+  const record = validRecord();
+  const result = await importRecord({
+    ...record,
+    request: { ...record.request, path: "/api/units/1", params: {} },
+    response: {
+      ...record.response,
+      json: {
+        id: 1,
+        code: "UNIT",
+        name: "Unit",
+        grade_definitions: [{ abbreviation: "TASK", id: "recorded-grade", name: "Unit", value: 1 }],
+        task_definitions: [],
+      },
+    },
+  });
+  assert.equal(result.status, 0, result.stderr);
+}
+
 export async function test_oracle_import_accepts_a_sanitized_user_roles_capture(): Promise<void> {
   const result = await importRecord(validRolesRecord());
   assert.equal(result.status, 0, result.stderr);
@@ -158,6 +216,29 @@ export async function test_oracle_import_rejects_raw_role_user_pii(): Promise<vo
   });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /was not rebuilt by the Python allowlist sanitizer/u);
+}
+
+export async function test_oracle_import_rejects_identity_text_in_role_and_status_enums(): Promise<void> {
+  const roleRecord = validRolesRecord();
+  const role = (roleRecord.response.json as readonly Record<string, unknown>[])[0]!;
+  const projectRecord = validRecord();
+  for (const record of [
+    {
+      ...roleRecord,
+      response: { ...roleRecord.response, json: [{ ...role, role: "John Doe" }] },
+    },
+    {
+      ...projectRecord,
+      response: {
+        ...projectRecord.response,
+        json: [{ id: 1, tasks: [{ id: 2, task_definition_id: 3, status: "john_doe" }] }],
+      },
+    },
+  ]) {
+    const result = await importRecord(record);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /was not rebuilt by the Python allowlist sanitizer/u);
+  }
 }
 
 export async function test_oracle_import_rejects_a_raw_role_mentor_id(): Promise<void> {

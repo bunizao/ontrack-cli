@@ -70,7 +70,7 @@
     }
   },
   {
-    "request": { "method": "GET", "path": "/api/projects/7", "params": {} },
+    "request": { "method": "GET", "path": "/api/projects/1", "params": {} },
     "response": {
       "status_code": 200,
       "json": {

@@ -12,7 +12,7 @@
     "response": { "status_code": 200, "json": [] }
   },
   {
-    "request": { "method": "GET", "path": "/api/projects/7", "params": {} },
+    "request": { "method": "GET", "path": "/api/projects/1", "params": {} },
     "response": { "status_code": 200, "json": { "id": 7, "unit": { "id": 9, "code": "UNIT", "name": "Unit" }, "tasks": [] } }
   },
   {

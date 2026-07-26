@@ -20,6 +20,7 @@ export interface CliExecution {
 
 interface Dependencies {
   readonly app: CliApplication;
+  readonly authLogin?: () => Promise<unknown>;
   readonly version: string;
   readonly sensitiveValues?: readonly string[];
 }
@@ -59,6 +60,7 @@ function help(): string {
     "Commands:",
     "  user                 Show the resolved signed-in user",
     "  auth check           Validate current credentials",
+    "  auth login           Sign in through OnTrack in a browser",
     "  projects             List current projects",
     "  project <project_id> Show one project",
     "  tasks <project_id>   List project tasks",
@@ -91,7 +93,8 @@ function terminal(value: unknown): string {
   return `${String(value)}\n`;
 }
 
-async function invoke(argv: readonly string[], app: CliApplication): Promise<{ value: unknown; json: boolean }> {
+async function invoke(argv: readonly string[], dependencies: Dependencies): Promise<{ value: unknown; json: boolean }> {
+  const { app } = dependencies;
   const [command, ...rest] = argv;
   const common = { json: { type: "boolean" as const }, help: { type: "boolean" as const } };
   if (command === "user") {
@@ -101,6 +104,11 @@ async function invoke(argv: readonly string[], app: CliApplication): Promise<{ v
   if (command === "auth" && rest[0] === "check") {
     const parsed = parseArgs({ args: rest.slice(1), options: common, allowPositionals: false, strict: true });
     return { value: await app.authCheck(), json: parsed.values.json ?? false };
+  }
+  if (command === "auth" && rest[0] === "login") {
+    const parsed = parseArgs({ args: rest.slice(1), options: common, allowPositionals: false, strict: true });
+    if (!dependencies.authLogin) throw new CliError("config", "Interactive login is unavailable.");
+    return { value: await dependencies.authLogin(), json: parsed.values.json ?? false };
   }
   if (command === "projects") {
     const parsed = parseArgs({ args: rest, options: { ...common, "include-inactive": { type: "boolean" } }, allowPositionals: false, strict: true });
@@ -129,10 +137,10 @@ export async function executeCli(argv: readonly string[], dependencies: Dependen
   if (argv.length === 1 && argv[0] === "--version") return { exitCode: 0, stdout: `ontrack ${dependencies.version}\n`, stderr: "" };
   const command = argv[0];
   const knownHelpTarget = ["user", "projects", "project", "tasks", "roles"].includes(command ?? "")
-    || (command === "auth" && (argv[1] === "check" || argv[1] === "--help"));
+    || (command === "auth" && (["check", "login", "--help"].includes(argv[1] ?? "")));
   if (argv.includes("--help") && knownHelpTarget) return { exitCode: 0, stdout: help(), stderr: "" };
   try {
-    const result = await invoke(argv, dependencies.app);
+    const result = await invoke(argv, dependencies);
     const value = sanitized(result.value);
     const stdout = result.json ? renderJson(value) : terminal(value);
     return { exitCode: 0, stdout: redact(stdout, sensitiveValues), stderr: "" };

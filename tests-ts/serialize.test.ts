@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 
-import { taskDefinitionToJson } from "../src/serialize.js";
+import { taskDefinitionToJson, unitToJson } from "../src/serialize.js";
 import { CivilDate } from "../src/time.js";
 
-export function test_start_only_grade_override_survives_serialization(): void {
+export function test_task_definition_keeps_grade_overrides_internal(): void {
   const json = taskDefinitionToJson({
     id: 1,
     abbreviation: "1",
@@ -18,5 +18,21 @@ export function test_start_only_grade_override_survives_serialization(): void {
     grade_due_dates: {},
     grade_start_dates: { "2": CivilDate.parse("2026-07-01") },
   });
-  assert.deepEqual(json.grade_due_dates, [{ target_grade: 2, target_due_date: null, start_date: "2026-07-01" }]);
+  assert.equal("grade_due_dates" in json, false);
+}
+
+export function test_unit_keeps_grade_definitions_internal(): void {
+  const json = unitToJson({
+    id: 1,
+    code: "FIT0001",
+    name: "Example Unit",
+    my_role: null,
+    start_date: null,
+    end_date: null,
+    active: true,
+    description: null,
+    grade_definitions: [{ id: "mastery", value: 1, name: "Mastery", abbreviation: "M" }],
+    task_definitions: [],
+  });
+  assert.equal("grade_definitions" in json, false);
 }
