@@ -1,15 +1,28 @@
 import assert from "node:assert/strict";
 import { chmod, mkdir, readFile, stat, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdtemp } from "node:fs/promises";
 
-import { resolveAuthenticatedSession } from "../src/auth.js";
+import {
+  loginAuthenticatedSession,
+  resolveAuthenticatedSession as resolveAuthenticatedSessionWithRuntime,
+  type ResolveAuthenticatedSessionOptions,
+} from "../src/auth.js";
 import { loadConfig, resolveConfigPaths, resolveCredentialSource } from "../src/config.js";
 import { CliError } from "../src/errors.js";
 
 async function temporaryDirectory(): Promise<string> {
   return mkdtemp(join(tmpdir(), "ontrack-auth-test-"));
+}
+
+function resolveAuthenticatedSession(
+  options: Omit<ResolveAuthenticatedSessionOptions, "platform">,
+) {
+  return resolveAuthenticatedSessionWithRuntime({
+    ...options,
+    platform: process.platform,
+  });
 }
 
 async function fakeOkta(directory: string, output: string | null, hang = false, failure?: string): Promise<void> {
@@ -30,6 +43,78 @@ async function fakeOkta(directory: string, output: string | null, hang = false, 
 
 function fakeOktaPath(directory: string): string {
   return join(directory, process.platform === "win32" ? "okta.cmd" : "okta");
+}
+
+async function fakeInteractiveOkta(directory: string, argumentsFile: string): Promise<string> {
+  const cookies = JSON.stringify({ cookies: [
+    { name: "refresh_token", value: "refresh-secret", domain: "school.example.edu", path: "/" },
+  ] });
+  const executable = join(directory, "interactive-okta");
+  const shell = [
+    "#!/bin/sh",
+    "if [ \"$1\" = cookies ] && [ \"$3\" = https://school.example.edu ]; then echo 'No stored session' >&2; exit 1; fi",
+    `printf '%s\\n' \"$*\" >> '${argumentsFile.replaceAll("'", "'\\''")}'`,
+    `if [ \"$1\" = login ]; then printf '%s' 'Username: TOTP secret (optional): {"success":true}'; else printf '%s' '${cookies}'; fi`,
+    "",
+  ].join("\n");
+  await writeFile(executable, shell, "utf8");
+  await chmod(executable, 0o755);
+  return executable;
+}
+
+async function fakeRedirectOnlyOkta(directory: string, argumentsFile: string): Promise<string> {
+  const cookies = JSON.stringify({ cookies: [
+    { name: "refresh_token", value: "refresh-secret", domain: "school.example.edu", path: "/" },
+  ] });
+  const executable = join(directory, "redirect-only-okta");
+  const shell = [
+    "#!/bin/sh",
+    `printf '%s\\n' \"$*\" >> '${argumentsFile.replaceAll("'", "'\\''")}'`,
+    "if [ \"$3\" = https://school.example.edu ]; then echo 'No stored session' >&2; exit 1; fi",
+    `printf '%s' '${cookies}'`,
+    "",
+  ].join("\n");
+  await writeFile(executable, shell, "utf8");
+  await chmod(executable, 0o755);
+  return executable;
+}
+
+async function fakeBrowserSessionOkta(directory: string, argumentsFile: string): Promise<string> {
+  const cookies = JSON.stringify({ cookies: [
+    { name: "username", value: "alice", domain: "school.example.edu", path: "/" },
+    { name: "refresh_token", value: "refresh-secret", domain: "school.example.edu", path: "/api/auth" },
+  ] });
+  const executable = join(directory, "browser-session-okta");
+  const shell = [
+    "#!/bin/sh",
+    `printf '%s\n' "$*" >> '${argumentsFile.replaceAll("'", "'\\''")}'`,
+    "if [ \"$1\" = login ]; then echo 'unexpected interactive login' >&2; exit 1; fi",
+    `printf '%s' '${cookies}'`,
+    "",
+  ].join("\n");
+  await writeFile(executable, shell, "utf8");
+  await chmod(executable, 0o755);
+  return executable;
+}
+
+async function fakeStaleBaseOkta(directory: string, argumentsFile: string): Promise<string> {
+  const stale = JSON.stringify({ cookies: [
+    { name: "TS-cookie", value: "stale", domain: "school.example.edu", path: "/" },
+  ] });
+  const fresh = JSON.stringify({ cookies: [
+    { name: "username", value: "alice", domain: "school.example.edu", path: "/api/auth" },
+    { name: "refresh_token", value: "refresh-secret", domain: "school.example.edu", path: "/api/auth" },
+  ] });
+  const executable = join(directory, "stale-base-okta");
+  const shell = [
+    "#!/bin/sh",
+    `printf '%s\\n' "$*" >> '${argumentsFile.replaceAll("'", "'\\''")}'`,
+    `if [ "$3" = https://school.example.edu ]; then printf '%s' '${stale}'; else printf '%s' '${fresh}'; fi`,
+    "",
+  ].join("\n");
+  await writeFile(executable, shell, "utf8");
+  await chmod(executable, 0o755);
+  return executable;
 }
 
 function exchangeResponse(payload: unknown): typeof fetch {
@@ -297,6 +382,277 @@ export async function test_fake_okta_subprocess_success_uses_only_json_output():
   assert.equal(request?.method, "POST");
   assert.equal(new URL(request?.url ?? "").pathname, "/api/auth/access-token");
   assert.match(request?.headers.get("cookie") ?? "", /refresh_token=refresh-secret/);
+}
+
+export async function test_interactive_login_follows_ontrack_sign_in_redirect_before_cookie_exchange(): Promise<void> {
+  if (process.platform === "win32") return;
+  const directory = await temporaryDirectory();
+  const argumentsFile = join(directory, "arguments.txt");
+  const executable = await fakeInteractiveOkta(directory, argumentsFile);
+  const requests: Request[] = [];
+  let prompts = "";
+  const session = await loginAuthenticatedSession({
+    baseUrl: "https://school.example.edu",
+    sessionFile: join(directory, "session.json"),
+    env: { ONTRACK_USERNAME: "must-not-short-circuit", ONTRACK_AUTH_TOKEN: "must-not-short-circuit" },
+    platform: process.platform,
+    oktaExecutable: executable,
+    promptOutput: (text) => { prompts += text; },
+    now: new Date("2029-01-01T00:00:00Z"),
+    fetch: async (input, init) => {
+      const request = new Request(input, init);
+      requests.push(request);
+      if (request.url === "https://school.example.edu/api/auth/method") {
+        return new Response(JSON.stringify({
+          method: "saml",
+          redirect_to: "https://monash.okta.com/app/ontrack/sso/saml",
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return exchangeResponse({
+        auth_token: "access-secret",
+        auth_token_expiry: "2030-01-01T00:00:00Z",
+        user: { username: "alice" },
+      })(input, init);
+    },
+  });
+
+  assert.equal(session.username, "alice");
+  assert.equal(session.provenance, "okta");
+  assert.equal(prompts, "Username: TOTP secret (optional): ");
+  assert.deepEqual((await readFile(argumentsFile, "utf8")).trim().split("\n"), [
+    "login --headed --timeout-ms 120000 --settle-ms 5000 --json https://monash.okta.com/app/ontrack/sso/saml",
+    "cookies --json https://monash.okta.com/app/ontrack/sso/saml",
+  ]);
+  assert.deepEqual(requests.map((request) => `${request.method} ${request.url}`), [
+    "GET https://school.example.edu/api/auth/method",
+    "POST https://school.example.edu/api/auth/access-token",
+  ]);
+  assert.match(requests[1]?.headers.get("cookie") ?? "", /refresh_token=refresh-secret/u);
+  const stored = JSON.parse(await readFile(join(directory, "session.json"), "utf8")) as Record<string, unknown>;
+  assert.equal(stored.access_token, "access-secret");
+}
+
+export async function test_auth_login_reuses_browser_cookies_without_starting_interactive_login(): Promise<void> {
+  if (process.platform === "win32") return;
+  const directory = await temporaryDirectory();
+  const argumentsFile = join(directory, "arguments.txt");
+  const executable = await fakeBrowserSessionOkta(directory, argumentsFile);
+  const requests: Request[] = [];
+  const session = await loginAuthenticatedSession({
+    baseUrl: "https://school.example.edu",
+    sessionFile: join(directory, "session.json"),
+    env: {},
+    platform: process.platform,
+    oktaExecutable: executable,
+    now: new Date("2029-01-01T00:00:00Z"),
+    fetch: async (input, init) => {
+      const request = new Request(input, init);
+      requests.push(request);
+      return exchangeResponse({
+        auth_token: "access-secret",
+        auth_token_expiry: "2030-01-01T00:00:00Z",
+        user: { username: "alice" },
+      })(input, init);
+    },
+  });
+
+  assert.equal(session.username, "alice");
+  assert.deepEqual((await readFile(argumentsFile, "utf8")).trim().split("\n"), [
+    "cookies --json https://school.example.edu",
+  ]);
+  assert.deepEqual(requests.map((request) => `${request.method} ${request.url}`), [
+    "POST https://school.example.edu/api/auth/access-token",
+  ]);
+}
+
+export async function test_auth_login_exchanges_default_browser_cookie_pair_before_okta(): Promise<void> {
+  const directory = await temporaryDirectory();
+  let request: Request | undefined;
+  const session = await loginAuthenticatedSession({
+    baseUrl: "https://school.example.edu",
+    sessionFile: join(directory, "session.json"),
+    env: {},
+    platform: process.platform,
+    oktaExecutable: join(directory, "must-not-run"),
+    browserCookieProvider: async () => [{
+      source: "Chrome:Default",
+      cookies: [
+        { name: "username", value: "alice", domain: "school.example.edu", path: "/api/auth" },
+        { name: "refresh_token", value: "refresh-secret", domain: "school.example.edu", path: "/api/auth" },
+      ],
+    }],
+    now: new Date("2029-01-01T00:00:00Z"),
+    fetch: async (input, init) => {
+      request = new Request(input, init);
+      return exchangeResponse({
+        auth_token: "access-secret",
+        auth_token_expiry: "2030-01-01T00:00:00Z",
+        user: { username: "alice" },
+      })(input, init);
+    },
+  });
+
+  assert.equal(session.provenance, "browser");
+  assert.equal(request?.url, "https://school.example.edu/api/auth/access-token");
+  assert.equal(request?.headers.get("cookie"), "username=alice; refresh_token=refresh-secret");
+  const stored = JSON.parse(await readFile(join(directory, "session.json"), "utf8")) as Record<string, unknown>;
+  assert.equal(stored.provenance, "browser");
+  assert.equal(stored.access_token, "access-secret");
+  assert.equal("refresh_token" in stored, false);
+}
+
+export async function test_interactive_login_rejects_missing_redirect_without_starting_okta(): Promise<void> {
+  const directory = await temporaryDirectory();
+  await assert.rejects(loginAuthenticatedSession({
+    baseUrl: "https://school.example.edu",
+    sessionFile: join(directory, "session.json"),
+    env: {},
+    platform: process.platform,
+    oktaExecutable: join(directory, "must-not-run"),
+    fetch: async () => new Response(JSON.stringify({ method: "saml", redirect_to: null }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }),
+  }), (error) => error instanceof CliError
+    && error.category === "upstream_contract"
+    && /no SAML sign-in URL/i.test(error.message));
+}
+
+export async function test_interactive_login_rejects_an_insecure_sign_in_redirect(): Promise<void> {
+  const directory = await temporaryDirectory();
+  await assert.rejects(loginAuthenticatedSession({
+    baseUrl: "https://school.example.edu",
+    sessionFile: join(directory, "session.json"),
+    env: {},
+    platform: process.platform,
+    oktaExecutable: join(directory, "must-not-run"),
+    fetch: async () => new Response(JSON.stringify({
+      method: "saml",
+      redirect_to: "http://identity.example.edu/saml",
+    }), { status: 200, headers: { "content-type": "application/json" } }),
+  }), (error) => error instanceof CliError
+    && error.category === "upstream_contract"
+    && /sign-in URL is invalid/i.test(error.message));
+}
+
+export async function test_interactive_login_reports_provider_failure_without_exposing_output(): Promise<void> {
+  const directory = await temporaryDirectory();
+  await fakeOkta(directory, null, false, "private-provider-detail");
+  await assert.rejects(loginAuthenticatedSession({
+    baseUrl: "https://school.example.edu",
+    sessionFile: join(directory, "session.json"),
+    env: {},
+    platform: process.platform,
+    oktaExecutable: fakeOktaPath(directory),
+    fetch: async () => new Response(JSON.stringify({
+      method: "saml",
+      redirect_to: "https://monash.okta.com/app/ontrack/sso/saml",
+    }), { status: 200, headers: { "content-type": "application/json" } }),
+  }), (error) => error instanceof CliError
+    && error.category === "auth"
+    && error.message === "Okta login failed."
+    && !error.message.includes("private-provider-detail"));
+}
+
+export async function test_normal_auth_reuses_a_session_keyed_by_the_discovered_sign_in_url(): Promise<void> {
+  if (process.platform === "win32") return;
+  const directory = await temporaryDirectory();
+  const argumentsFile = join(directory, "arguments.txt");
+  const executable = await fakeRedirectOnlyOkta(directory, argumentsFile);
+  const session = await resolveAuthenticatedSession({
+    baseUrl: "https://school.example.edu",
+    sessionFile: join(directory, "session.json"),
+    env: {},
+    oktaExecutable: executable,
+    now: new Date("2029-01-01T00:00:00Z"),
+    fetch: async (input, init) => {
+      if (new Request(input, init).url.endsWith("/api/auth/method")) {
+        return new Response(JSON.stringify({
+          method: "saml",
+          redirect_to: "https://monash.okta.com/app/ontrack/sso/saml",
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return exchangeResponse({
+        auth_token: "access-secret",
+        auth_token_expiry: "2030-01-01T00:00:00Z",
+        user: { username: "alice" },
+      })(input, init);
+    },
+  });
+
+  assert.equal(session.username, "alice");
+  assert.deepEqual((await readFile(argumentsFile, "utf8")).trim().split("\n"), [
+    "cookies --json https://school.example.edu",
+    "cookies --json https://monash.okta.com/app/ontrack/sso/saml",
+  ]);
+}
+
+export async function test_normal_auth_falls_back_from_stale_base_cookies_to_the_saml_browser_session(): Promise<void> {
+  if (process.platform === "win32") return;
+  const directory = await temporaryDirectory();
+  const argumentsFile = join(directory, "arguments.txt");
+  const executable = await fakeStaleBaseOkta(directory, argumentsFile);
+  const requests: Request[] = [];
+  const session = await resolveAuthenticatedSession({
+    baseUrl: "https://school.example.edu",
+    sessionFile: join(directory, "session.json"),
+    env: {},
+    oktaExecutable: executable,
+    now: new Date("2029-01-01T00:00:00Z"),
+    fetch: async (input, init) => {
+      const request = new Request(input, init);
+      requests.push(request);
+      if (request.url.endsWith("/api/auth/method")) {
+        return new Response(JSON.stringify({
+          method: "saml",
+          redirect_to: "https://monash.okta.com/app/ontrack/sso/saml",
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if ((request.headers.get("cookie") ?? "").includes("TS-cookie=stale")) {
+        return new Response("null", { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return exchangeResponse({
+        auth_token: "access-secret",
+        auth_token_expiry: "2030-01-01T00:00:00Z",
+        user: { username: "alice" },
+      })(input, init);
+    },
+  });
+
+  assert.equal(session.username, "alice");
+  assert.deepEqual((await readFile(argumentsFile, "utf8")).trim().split("\n"), [
+    "cookies --json https://school.example.edu",
+    "cookies --json https://monash.okta.com/app/ontrack/sso/saml",
+  ]);
+  assert.deepEqual(requests.map((request) => `${request.method} ${request.url}`), [
+    "POST https://school.example.edu/api/auth/access-token",
+    "GET https://school.example.edu/api/auth/method",
+    "POST https://school.example.edu/api/auth/access-token",
+  ]);
+}
+
+export async function test_okta_subprocess_uses_only_the_injected_platform_and_environment(): Promise<void> {
+  const directory = await temporaryDirectory();
+  const executableName = "ontrack-injected-okta-test";
+  const output = '{"cookies":[{"name":"refresh_token","value":"refresh-secret","domain":"school.example.edu","path":"/"}]}';
+  await writeFile(join(directory, executableName), `#!/bin/sh\nprintf '%s' '${output}'\n`, "utf8");
+  await chmod(join(directory, executableName), 0o755);
+  await writeFile(join(directory, `${executableName}.cmd`), `@echo off\r\necho ${output}\r\n`, "utf8");
+
+  const session = await resolveAuthenticatedSessionWithRuntime({
+    baseUrl: "https://school.example.edu",
+    sessionFile: join(directory, "session.json"),
+    env: { ...process.env, PATH: `${directory}${delimiter}${process.env.PATH ?? ""}` },
+    platform: process.platform,
+    oktaExecutable: process.platform === "win32" ? `${executableName}.cmd` : executableName,
+    now: new Date("2029-01-01T00:00:00Z"),
+    fetch: exchangeResponse({
+      auth_token: "access-secret",
+      auth_token_expiry: "2030-01-01T00:00:00Z",
+      user: { username: "alice" },
+    }),
+  });
+  assert.equal(session.provenance, "okta");
 }
 
 async function expectAuthFailure(

@@ -5,18 +5,19 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { OnTrackApplication } from "./application.js";
-import { resolveAuthenticatedSession } from "./auth.js";
+import { loginAuthenticatedSession, resolveAuthenticatedSession } from "./auth.js";
+import { browserCookieCandidates } from "./browser-cookies.js";
 import { executeCli, type CliApplication } from "./cli-app.js";
-import { loadConfig, resolveBaseUrl, resolveConfigPaths } from "./config.js";
+import { loadConfig, resolveBaseUrl, resolveConfigPaths, type Environment } from "./config.js";
 import { HttpClient } from "./http.js";
 import { OnTrackClient } from "./ontrack.js";
 import { createClock } from "./time.js";
 import { VERSION } from "./version.js";
 
-function lazyApplication(signal: AbortSignal): CliApplication {
+function lazyApplication(signal: AbortSignal, env: Environment, platform: NodeJS.Platform): CliApplication {
   let application: Promise<OnTrackApplication> | undefined;
   const resolve = (): Promise<OnTrackApplication> => {
-    application ??= createApplication(signal);
+    application ??= createApplication(signal, env, platform);
     return application;
   };
   return {
@@ -29,12 +30,38 @@ function lazyApplication(signal: AbortSignal): CliApplication {
   };
 }
 
-async function createApplication(signal: AbortSignal): Promise<OnTrackApplication> {
-  const env = process.env;
+async function authLogin(signal: AbortSignal, env: Environment, platform: NodeJS.Platform): Promise<unknown> {
   const cwd = process.cwd();
   const paths = resolveConfigPaths({
     env,
-    platform: process.platform,
+    platform,
+    homeDir: homedir(),
+    cwd,
+    cwdConfigExists: existsSync(join(cwd, "config.yaml")),
+  });
+  const config = loadConfig(paths);
+  const baseUrl = resolveBaseUrl(env, config);
+  const session = await loginAuthenticatedSession({
+    baseUrl,
+    sessionFile: paths.sessionFile,
+    env,
+    platform,
+    config,
+    signal,
+    browserCookieProvider: () => browserCookieCandidates(baseUrl, { platform }),
+    promptOutput: (text) => process.stderr.write(text),
+  });
+  return {
+    username: session.username,
+    auth_token_expiry: session.authTokenExpiry,
+  };
+}
+
+async function createApplication(signal: AbortSignal, env: Environment, platform: NodeJS.Platform): Promise<OnTrackApplication> {
+  const cwd = process.cwd();
+  const paths = resolveConfigPaths({
+    env,
+    platform,
     homeDir: homedir(),
     cwd,
     cwdConfigExists: existsSync(join(cwd, "config.yaml")),
@@ -45,8 +72,10 @@ async function createApplication(signal: AbortSignal): Promise<OnTrackApplicatio
     baseUrl,
     sessionFile: paths.sessionFile,
     env,
+    platform,
     config,
     signal,
+    browserCookieProvider: () => browserCookieCandidates(baseUrl, { platform }),
   });
   const sessionState = { current: session };
   const http = new HttpClient({
@@ -58,9 +87,11 @@ async function createApplication(signal: AbortSignal): Promise<OnTrackApplicatio
         baseUrl,
         sessionFile: paths.sessionFile,
         env,
+        platform,
         config,
         signal: refreshSignal,
         skipCache: true,
+        browserCookieProvider: () => browserCookieCandidates(baseUrl, { platform }),
       });
       sessionState.current = session;
       return { username: session.username, accessToken: session.accessToken };
@@ -70,13 +101,16 @@ async function createApplication(signal: AbortSignal): Promise<OnTrackApplicatio
 }
 
 export async function main(argv = process.argv.slice(2)): Promise<number> {
+  const env = process.env;
+  const platform = process.platform;
   const controller = new AbortController();
   const cancel = (): void => controller.abort();
   process.once("SIGINT", cancel);
-  if (process.platform === "win32") process.once("SIGBREAK", cancel);
+  if (platform === "win32") process.once("SIGBREAK", cancel);
   try {
     const result = await executeCli(argv, {
-      app: lazyApplication(controller.signal),
+      app: lazyApplication(controller.signal, env, platform),
+      authLogin: () => authLogin(controller.signal, env, platform),
       version: VERSION,
     });
     if (result.stdout) process.stdout.write(result.stdout);
@@ -84,7 +118,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     return result.exitCode;
   } finally {
     process.removeListener("SIGINT", cancel);
-    if (process.platform === "win32") process.removeListener("SIGBREAK", cancel);
+    if (platform === "win32") process.removeListener("SIGBREAK", cancel);
   }
 }
 

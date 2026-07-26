@@ -211,7 +211,7 @@ Authentication source precedence is explicit and testable:
 2. explicit config credentials;
 3. migration-only cached-user JSON;
 4. an existing Okta session exposed by the `okta` executable;
-5. an optional direct-browser provider when one has passed cross-platform proof.
+5. a best-effort direct-browser provider, isolated by profile and followed by the Okta provider when unavailable.
 
 `ONTRACK_DOUBTFIRE_USER_JSON` remains a migration-only compatibility input for the cutover release, but the obsolete browser-local-storage copy procedure is removed from primary documentation.
 
@@ -223,7 +223,7 @@ A resolved Authenticated Session is cached at the configured config directory as
 
 Storage and output are distinct policies. Tokens are written to this file and to nowhere else — never to stdout, stderr, diagnostics, fixtures, golden files, or logs.
 
-Direct Chrome/Firefox/Brave/Edge database extraction is deferred until a cross-platform spike covers macOS Keychain, Linux keyrings, Windows DPAPI, browser schema drift, and both runtimes. The TypeScript release must not repeat the current unverified "automatic browser auth" claim.
+The 2026-07-27 authentication closeout added the direct-browser provider after a Node/Bun spike. It reads only the `username` and `refresh_token` pair for the access-token endpoint, never merges profiles, and treats every read/decryption failure as an unavailable provider. macOS Chromium uses Keychain plus the browser's SQLite database without a native dependency; Firefox uses read-only SQLite on supported platforms. Linux and Windows Chromium decryption remain unsupported and fall through to the `okta` subprocess provider.
 
 ### Capability order
 

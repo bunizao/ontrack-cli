@@ -66,10 +66,12 @@ For normal interactive use, install and configure `okta-auth`, then establish th
 ```bash
 uv tool install okta-auth-cli
 okta config
-okta login https://ontrack.example.edu
+ontrack auth login
 ```
 
-Normal `ontrack` commands only call `okta cookies --json`; they never start an interactive login and never read private `okta-auth` storage files. OnTrack access sessions are cached in `session.json` beside the selected config with mode `0600` until expiry.
+`ontrack auth login` first looks for a matching `username` and `refresh_token` pair in local Chrome, Brave, Edge, and Firefox profiles. It exchanges the pair for an OnTrack access token without printing either credential. On macOS, Chromium access uses the system Keychain and may require Files and Folders permission; Firefox requires the `sqlite3` command. Unsupported or inaccessible profiles are skipped.
+
+If browser import does not yield a usable pair, the command follows the deployment's advertised SAML sign-in URL and starts a visible `okta login`. It waits for OnTrack's application-side sign-in to finish before exporting cookies, so the landing page's manual **Sign in** redirect is not required. Normal commands never start an interactive login. Access sessions are cached in `session.json` beside the selected config with mode `0600` until expiry.
 
 Automation can use an atomic credential pair:
 
@@ -78,7 +80,7 @@ export ONTRACK_USERNAME='your_username'
 export ONTRACK_AUTH_TOKEN='your_auth_token'
 ```
 
-Credential precedence is environment pair, config pair, migration-only `ONTRACK_DOUBTFIRE_USER_JSON`, cached session, then the `okta` subprocess provider. Access and refresh tokens are never included in command output or diagnostics.
+Credential precedence is environment pair, config pair, migration-only `ONTRACK_DOUBTFIRE_USER_JSON`, cached access session, direct browser cookies, then the `okta` subprocess provider. Access and refresh tokens are never included in command output or diagnostics; refresh cookies are exchanged in memory and are not copied into the OnTrack session cache.
 
 ## Development
 
