@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "kind": "synthetic",
+  "live_recorded": false,
+  "description": "Invented maximal cutover payloads covering schedules, custom grades, roles, and unknown task status passthrough.",
+  "fixture": "http.json",
+  "session": "session.json"
+}

@@ -1,0 +1,23 @@
+[
+  {
+    "id": 4,
+    "role": "Tutor",
+    "unit": {
+      "id": 9,
+      "code": "FIT9999",
+      "name": "Example Unit",
+      "my_role": null,
+      "start_date": null,
+      "end_date": null,
+      "active": true
+    },
+    "user": {
+      "id": 42,
+      "username": "synthetic-student",
+      "first_name": "Example",
+      "last_name": "Student",
+      "email": "student@example.invalid",
+      "nickname": null
+    }
+  }
+]

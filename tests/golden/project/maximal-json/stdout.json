@@ -1,0 +1,171 @@
+{
+  "project": {
+    "id": 7,
+    "unit": {
+      "id": 9,
+      "code": "FIT9999",
+      "name": "Example Unit",
+      "my_role": "Student",
+      "start_date": "2026-07-01",
+      "end_date": "2026-10-31",
+      "active": true
+    },
+    "target_grade": 1,
+    "submitted_grade": null,
+    "compile_portfolio": false,
+    "portfolio_available": false,
+    "uses_draft_learning_summary": false,
+    "tasks": [
+      {
+        "id": 11,
+        "task_definition_id": 12,
+        "status": "rediscuss",
+        "due_date": "2026-08-02",
+        "target_due_date": "2026-07-30",
+        "target_start_date": "2026-07-20",
+        "submission_date": "2026-07-29",
+        "completion_date": null,
+        "moved_to_discuss_at": "2026-07-25T01:00:00.000Z",
+        "discuss_timeout_expiry_at": "2026-07-26T01:00:00.000Z",
+        "extensions": 1,
+        "times_assessed": 2,
+        "grade": null,
+        "quality_pts": 4,
+        "include_in_portfolio": true
+      },
+      {
+        "id": 13,
+        "task_definition_id": 14,
+        "status": "future_status_2027",
+        "due_date": null,
+        "target_due_date": null,
+        "target_start_date": null,
+        "submission_date": null,
+        "completion_date": null,
+        "moved_to_discuss_at": null,
+        "discuss_timeout_expiry_at": null,
+        "extensions": null,
+        "times_assessed": null,
+        "grade": 2,
+        "quality_pts": null,
+        "include_in_portfolio": false
+      }
+    ]
+  },
+  "unit": {
+    "summary": {
+      "id": 9,
+      "code": "FIT9999",
+      "name": "Example Unit",
+      "my_role": "Student",
+      "start_date": "2026-07-01",
+      "end_date": "2026-10-31",
+      "active": true
+    },
+    "description": "Synthetic fixture unit",
+    "grade_definitions": [
+      {
+        "id": "mastery",
+        "value": 1,
+        "label": "Mastery",
+        "abbreviation": "M"
+      },
+      {
+        "id": "distinction",
+        "value": 2,
+        "label": "Distinction",
+        "abbreviation": "D"
+      }
+    ],
+    "task_definitions": [
+      {
+        "id": 12,
+        "abbreviation": "1.1",
+        "name": "Discuss task",
+        "description": "A synthetic task",
+        "target_grade": 1,
+        "start_date": "2026-07-10",
+        "target_date": "2026-07-28",
+        "due_date": "2026-08-01",
+        "is_graded": true,
+        "max_quality_pts": 5,
+        "grade_due_dates": [
+          {
+            "target_grade": 1,
+            "target_due_date": "2026-07-30",
+            "start_date": "2026-07-20"
+          }
+        ]
+      },
+      {
+        "id": 14,
+        "abbreviation": "1.2",
+        "name": "Future task",
+        "description": null,
+        "target_grade": 2,
+        "start_date": "2026-08-01",
+        "target_date": "2026-08-10",
+        "due_date": "2026-08-12",
+        "is_graded": true,
+        "max_quality_pts": null,
+        "grade_due_dates": []
+      }
+    ]
+  },
+  "tasks": [
+    {
+      "id": 11,
+      "task_definition_id": 12,
+      "abbreviation": "1.1",
+      "name": "Discuss task",
+      "status": "rediscuss",
+      "status_label": "Rediscuss",
+      "target_grade": 1,
+      "target_grade_label": "M (Mastery)",
+      "start_date": "2026-07-20",
+      "target_date": "2026-07-28",
+      "target_start_date": "2026-07-20",
+      "target_due_date": "2026-07-30",
+      "due_date": "2026-07-30",
+      "deadline": "2026-08-03",
+      "submission_date": "2026-07-29",
+      "completion_date": null,
+      "moved_to_discuss_at": "2026-07-25T01:00:00.000Z",
+      "discuss_timeout_expiry_at": "2026-07-26T01:00:00.000Z",
+      "extensions": 1,
+      "grade": null,
+      "grade_label": "-",
+      "quality_pts": 4,
+      "include_in_portfolio": true,
+      "is_overdue": false,
+      "is_discuss_overdue": true
+    },
+    {
+      "id": 13,
+      "task_definition_id": 14,
+      "abbreviation": "1.2",
+      "name": "Future task",
+      "status": "future_status_2027",
+      "status_label": "future_status_2027",
+      "target_grade": 2,
+      "target_grade_label": "D (Distinction)",
+      "start_date": "2026-08-01",
+      "target_date": "2026-08-10",
+      "target_start_date": null,
+      "target_due_date": null,
+      "due_date": "2026-08-10",
+      "deadline": "2026-08-14",
+      "submission_date": null,
+      "completion_date": null,
+      "moved_to_discuss_at": null,
+      "discuss_timeout_expiry_at": null,
+      "extensions": null,
+      "grade": 2,
+      "grade_label": "D (Distinction)",
+      "quality_pts": null,
+      "include_in_portfolio": false,
+      "is_overdue": false,
+      "is_discuss_overdue": false
+    }
+  ]
+}

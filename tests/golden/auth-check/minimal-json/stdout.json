@@ -1,0 +1,8 @@
+{
+  "base_url": "https://school.example.invalid",
+  "username": "synthetic-student",
+  "auth_method": "saml",
+  "projects": 0,
+  "unit_roles": 0,
+  "cached_user": null
+}

@@ -1,0 +1,218 @@
+[
+  {
+    "request": { "method": "GET", "path": "/api/auth/method", "params": {} },
+    "response": { "status_code": 200, "json": { "method": "saml" } }
+  },
+  {
+    "request": { "method": "GET", "path": "/api/projects", "params": { "include_inactive": false } },
+    "response": {
+      "status_code": 200,
+      "json": [
+        {
+          "id": 7,
+          "unit": {
+            "id": 9,
+            "code": "FIT9999",
+            "name": "Example Unit",
+            "my_role": "Student",
+            "start_date": "2026-07-01",
+            "end_date": "2026-10-31",
+            "active": true,
+            "allow_flexible_dates": true
+          },
+          "target_grade": 1,
+          "portfolio_available": false,
+          "user_id": 42,
+          "unit_id": 9
+        }
+      ]
+    }
+  },
+  {
+    "request": { "method": "GET", "path": "/api/projects", "params": { "include_inactive": true } },
+    "response": {
+      "status_code": 200,
+      "json": [
+        {
+          "id": 7,
+          "unit": {
+            "id": 9,
+            "code": "FIT9999",
+            "name": "Example Unit",
+            "my_role": "Student",
+            "start_date": "2026-07-01",
+            "end_date": "2026-10-31",
+            "active": true,
+            "allow_flexible_dates": true
+          },
+          "target_grade": 1,
+          "portfolio_available": false,
+          "user_id": 42,
+          "unit_id": 9
+        },
+        {
+          "id": 8,
+          "unit": {
+            "id": 10,
+            "code": "FIT0000",
+            "name": "Inactive Unit",
+            "my_role": "Student",
+            "start_date": "2025-07-01",
+            "end_date": "2025-10-31",
+            "active": false
+          },
+          "target_grade": null,
+          "portfolio_available": null,
+          "user_id": 42,
+          "unit_id": 10
+        }
+      ]
+    }
+  },
+  {
+    "request": { "method": "GET", "path": "/api/projects/7", "params": {} },
+    "response": {
+      "status_code": 200,
+      "json": {
+        "id": 7,
+        "unit": {
+          "id": 9,
+          "code": "FIT9999",
+          "name": "Example Unit",
+          "my_role": "Student",
+          "start_date": "2026-07-01",
+          "end_date": "2026-10-31",
+          "active": true,
+          "allow_flexible_dates": true
+        },
+        "target_grade": 1,
+        "submitted_grade": null,
+        "compile_portfolio": false,
+        "portfolio_available": false,
+        "uses_draft_learning_summary": false,
+        "spec_con_days": 2,
+        "tasks": [
+          {
+            "id": 11,
+            "task_definition_id": 12,
+            "status": "rediscuss",
+            "due_date": "2026-08-02",
+            "target_due_date": "2026-07-30",
+            "target_start_date": "2026-07-20",
+            "submission_date": "2026-07-29",
+            "completion_date": null,
+            "moved_to_discuss_at": "2026-07-25T01:00:00Z",
+            "discuss_timeout_expiry_at": "2026-07-26T01:00:00Z",
+            "extensions": 1,
+            "times_assessed": 2,
+            "grade": null,
+            "quality_pts": 4,
+            "include_in_portfolio": true
+          },
+          {
+            "id": 13,
+            "task_definition_id": 14,
+            "status": "future_status_2027",
+            "due_date": null,
+            "target_due_date": null,
+            "target_start_date": null,
+            "submission_date": null,
+            "completion_date": null,
+            "moved_to_discuss_at": null,
+            "discuss_timeout_expiry_at": null,
+            "extensions": null,
+            "times_assessed": null,
+            "grade": 2,
+            "quality_pts": null,
+            "include_in_portfolio": false
+          }
+        ]
+      }
+    }
+  },
+  {
+    "request": { "method": "GET", "path": "/api/units/9", "params": {} },
+    "response": {
+      "status_code": 200,
+      "json": {
+        "id": 9,
+        "code": "FIT9999",
+        "name": "Example Unit",
+        "description": "Synthetic fixture unit",
+        "my_role": "Student",
+        "start_date": "2026-07-01",
+        "end_date": "2026-10-31",
+        "active": true,
+        "allow_flexible_dates": true,
+        "grade_definitions": [
+          { "id": "mastery", "value": 1, "name": "Mastery", "abbreviation": "M" },
+          { "id": "distinction", "value": 2, "name": "Distinction", "abbreviation": "D" }
+        ],
+        "task_definitions": [
+          {
+            "id": 12,
+            "abbreviation": "1.1",
+            "name": "Discuss task",
+            "description": "A synthetic task",
+            "target_grade": 1,
+            "start_date": "2026-07-10",
+            "target_date": "2026-07-28",
+            "due_date": "2026-08-01",
+            "is_graded": true,
+            "max_quality_pts": 5,
+            "grade_due_dates": [
+              { "target_grade": 1, "target_due_date": "2026-07-30", "start_date": "2026-07-20" }
+            ]
+          },
+          {
+            "id": 14,
+            "abbreviation": "1.2",
+            "name": "Future task",
+            "description": null,
+            "target_grade": 2,
+            "start_date": "2026-08-01",
+            "target_date": "2026-08-10",
+            "due_date": "2026-08-12",
+            "is_graded": true,
+            "max_quality_pts": null,
+            "grade_due_dates": []
+          }
+        ]
+      }
+    }
+  },
+  {
+    "request": { "method": "GET", "path": "/api/unit_roles", "params": { "active_only": true } },
+    "response": {
+      "status_code": 200,
+      "json": [
+        {
+          "id": 4,
+          "role": "Tutor",
+          "unit": { "id": 9, "code": "FIT9999", "name": "Example Unit", "active": true },
+          "user": { "id": 42, "username": "synthetic-student", "first_name": "Example", "last_name": "Student", "email": "student@example.invalid", "nickname": null }
+        }
+      ]
+    }
+  },
+  {
+    "request": { "method": "GET", "path": "/api/unit_roles", "params": { "active_only": false } },
+    "response": {
+      "status_code": 200,
+      "json": [
+        {
+          "id": 4,
+          "role": "Tutor",
+          "unit": { "id": 9, "code": "FIT9999", "name": "Example Unit", "active": true },
+          "user": { "id": 42, "username": "synthetic-student", "first_name": "Example", "last_name": "Student", "email": "student@example.invalid", "nickname": null }
+        },
+        {
+          "id": 5,
+          "role": "Auditor",
+          "unit": { "id": 10, "code": "FIT0000", "name": "Inactive Unit", "active": false },
+          "user": null
+        }
+      ]
+    }
+  }
+]

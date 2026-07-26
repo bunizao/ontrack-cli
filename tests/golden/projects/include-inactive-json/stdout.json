@@ -1,0 +1,34 @@
+[
+  {
+    "id": 7,
+    "unit": {
+      "id": 9,
+      "code": "FIT9999",
+      "name": "Example Unit",
+      "my_role": "Student",
+      "start_date": "2026-07-01",
+      "end_date": "2026-10-31",
+      "active": true
+    },
+    "target_grade": 1,
+    "portfolio_available": false,
+    "user_id": 42,
+    "unit_id": 9
+  },
+  {
+    "id": 8,
+    "unit": {
+      "id": 10,
+      "code": "FIT0000",
+      "name": "Inactive Unit",
+      "my_role": "Student",
+      "start_date": "2025-07-01",
+      "end_date": "2025-10-31",
+      "active": false
+    },
+    "target_grade": null,
+    "portfolio_available": null,
+    "user_id": 42,
+    "unit_id": 10
+  }
+]
