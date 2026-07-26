@@ -1,6 +1,10 @@
 param(
     [Parameter(Mandatory = $true)][string]$RuntimePath,
-    [Parameter(Mandatory = $true)][string]$ArgumentsJson
+    [Parameter(Mandatory = $true)][string]$ArgumentsJson,
+    [Parameter(Mandatory = $true)][string]$ReadyPath,
+    [Parameter(Mandatory = $true)][string]$InterruptPath,
+    [Parameter(Mandatory = $true)][string]$StdoutPath,
+    [Parameter(Mandatory = $true)][string]$StderrPath
 )
 
 $ErrorActionPreference = "Stop"
@@ -245,36 +249,24 @@ public static class ConsoleHost
 "@
 
 $arguments = @((ConvertFrom-Json -InputObject $ArgumentsJson))
-$parentInput = [Console]::In
-$parentOutput = [Console]::Out
-$parentError = [Console]::Error
-$stdoutPath = $null
-$stderrPath = $null
 $process = $null
 try {
-    $stdoutPath = [IO.Path]::GetTempFileName()
-    $stderrPath = [IO.Path]::GetTempFileName()
     [ConsoleHost]::EnsureConsole()
     $process = [ConsoleProcess]::Start($RuntimePath, [string[]]$arguments, $stdoutPath, $stderrPath)
-    $parentOutput.WriteLine("ONTRACK_INTERRUPT_READY")
-    $parentOutput.Flush()
-    if ($parentInput.ReadLine() -ne "interrupt") {
-        throw "Console harness did not receive the interrupt command."
+    [IO.File]::WriteAllText($ReadyPath, "ready")
+    $deadline = [DateTime]::UtcNow.AddSeconds(15)
+    while (-not [IO.File]::Exists($InterruptPath)) {
+        if ([DateTime]::UtcNow -ge $deadline) {
+            throw "Console harness did not receive the interrupt marker within 15 seconds."
+        }
+        Start-Sleep -Milliseconds 25
     }
     $process.Interrupt()
     $exitCode = $process.Wait()
-    $parentOutput.Write([IO.File]::ReadAllText($stdoutPath))
-    $parentError.Write([IO.File]::ReadAllText($stderrPath))
 }
 finally {
     if ($null -ne $process) {
         $process.Dispose()
-    }
-    if ($null -ne $stdoutPath) {
-        Remove-Item -LiteralPath $stdoutPath -Force -ErrorAction SilentlyContinue
-    }
-    if ($null -ne $stderrPath) {
-        Remove-Item -LiteralPath $stderrPath -Force -ErrorAction SilentlyContinue
     }
 }
 exit $exitCode

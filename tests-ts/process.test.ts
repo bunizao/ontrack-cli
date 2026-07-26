@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { once } from "node:events";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 interface ProcessResult {
   readonly code: number | null;
@@ -32,25 +34,40 @@ async function listen(server: Server): Promise<number> {
   return address.port;
 }
 
-async function interrupt(child: ChildProcessWithoutNullStreams): Promise<void> {
+async function interrupt(child: ChildProcessWithoutNullStreams, interruptPath?: string): Promise<void> {
   if (process.platform !== "win32") {
     child.kill("SIGINT");
     return;
   }
-  child.stdin.write("interrupt\n");
+  assert.ok(interruptPath);
+  writeFileSync(interruptPath, "interrupt");
+}
+
+interface InterruptibleProcess {
+  readonly child: ChildProcessWithoutNullStreams;
+  readonly ready: Promise<void>;
+  readonly controlDirectory?: string;
+  readonly interruptPath?: string;
+  readonly stdoutPath?: string;
+  readonly stderrPath?: string;
 }
 
 function spawnInterruptible(
   executable: string,
   args: readonly string[],
   env: NodeJS.ProcessEnv,
-): { child: ChildProcessWithoutNullStreams; ready: Promise<void> } {
+): InterruptibleProcess {
   if (process.platform !== "win32") {
     return {
       child: spawn(executable, [...args], { env, stdio: ["pipe", "pipe", "pipe"] }),
       ready: Promise.resolve(),
     };
   }
+  const controlDirectory = mkdtempSync(join(tmpdir(), "ontrack-interrupt-"));
+  const readyPath = join(controlDirectory, "ready");
+  const interruptPath = join(controlDirectory, "interrupt");
+  const stdoutPath = join(controlDirectory, "stdout");
+  const stderrPath = join(controlDirectory, "stderr");
   const child = spawn("powershell.exe", [
     "-NoProfile",
     "-ExecutionPolicy",
@@ -61,26 +78,34 @@ function spawnInterruptible(
     executable,
     "-ArgumentsJson",
     JSON.stringify(args),
+    "-ReadyPath",
+    readyPath,
+    "-InterruptPath",
+    interruptPath,
+    "-StdoutPath",
+    stdoutPath,
+    "-StderrPath",
+    stderrPath,
   ], { env, stdio: ["pipe", "pipe", "pipe"] });
   const ready = new Promise<void>((resolve, reject) => {
-    let output = "";
     let settled = false;
+    let poll: ReturnType<typeof setTimeout> | undefined;
     const finish = (error?: Error): void => {
       if (settled) return;
       settled = true;
-      child.stdout.off("data", onData);
+      clearTimeout(poll);
       if (error) reject(error);
       else resolve();
     };
-    const onData = (chunk: Buffer): void => {
-      output += chunk.toString("utf8");
-      if (output.includes("ONTRACK_INTERRUPT_READY\n")) finish();
+    const check = (): void => {
+      if (existsSync(readyPath)) finish();
+      else poll = setTimeout(check, 25);
     };
-    child.stdout.on("data", onData);
+    check();
     child.once("error", (error) => finish(error));
     child.once("exit", (code) => finish(new Error(`Console harness exited before launch with code ${code ?? "unknown"}`)));
   });
-  return { child, ready };
+  return { child, ready, controlDirectory, interruptPath, stdoutPath, stderrPath };
 }
 
 async function waitForInterruptReadiness(
@@ -178,7 +203,7 @@ export async function test_console_interrupt_aborts_in_flight_request_with_exit_
   const started = new Promise<void>((resolve) => { requestStarted = resolve; });
   const server = createServer(() => requestStarted());
   const port = await listen(server);
-  const { child, ready } = spawnInterruptible(
+  const { child, ready, controlDirectory, interruptPath, stdoutPath, stderrPath } = spawnInterruptible(
     process.execPath,
     ["dist/cli.js", "projects", "--json"],
     {
@@ -188,14 +213,14 @@ export async function test_console_interrupt_aborts_in_flight_request_with_exit_
       ONTRACK_AUTH_TOKEN: "cancel-secret",
     },
   );
-  let stdout = "";
-  let stderr = "";
-  child.stdout.setEncoding("utf8").on("data", (chunk: string) => { stdout += chunk; });
-  child.stderr.setEncoding("utf8").on("data", (chunk: string) => { stderr += chunk; });
+  let wrapperStdout = "";
+  let wrapperStderr = "";
+  child.stdout.setEncoding("utf8").on("data", (chunk: string) => { wrapperStdout += chunk; });
+  child.stderr.setEncoding("utf8").on("data", (chunk: string) => { wrapperStderr += chunk; });
   try {
     await waitForInterruptReadiness(child, [started, ready]);
     const exited = once(child, "exit") as Promise<[number | null, NodeJS.Signals | null]>;
-    await interrupt(child);
+    await interrupt(child, interruptPath);
     const outcome = await Promise.race([
       exited,
       new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), 10_000)),
@@ -203,12 +228,15 @@ export async function test_console_interrupt_aborts_in_flight_request_with_exit_
     if (outcome === "timeout") child.kill();
     assert.notEqual(outcome, "timeout", "console interrupt did not stop the process");
     const [code, signal] = outcome as [number | null, NodeJS.Signals | null];
+    const stdout = stdoutPath ? readFileSync(stdoutPath, "utf8") : wrapperStdout;
+    const stderr = stderrPath ? readFileSync(stderrPath, "utf8") : wrapperStderr;
     assert.equal(code, 130);
     assert.equal(signal, null);
-    assert.equal(stdout.replace(/^ONTRACK_INTERRUPT_READY\r?\n/u, ""), "");
+    assert.equal(stdout, "", wrapperStdout);
     assert.match(stderr, /cancellation/i);
     assert.doesNotMatch(stderr, /\n\s+at\s/u);
   } finally {
+    if (controlDirectory) rmSync(controlDirectory, { recursive: true, force: true });
     server.closeAllConnections();
     server.close();
     await once(server, "close");
