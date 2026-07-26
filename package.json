@@ -1,0 +1,33 @@
+{
+  "name": "@bunizao/ontrack",
+  "version": "0.2.0",
+  "description": "Terminal-first CLI for OnTrack and Doubtfire",
+  "type": "module",
+  "bin": {
+    "ontrack": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && tsc -p tsconfig.json && node .build/tests-ts/harness.js",
+    "test:bun": "npm run build && tsc -p tsconfig.json && bun .build/tests-ts/harness.js",
+    "prepack": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "24.1.0",
+    "typescript": "7.0.2"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bunizao/ontrack-cli.git"
+  }
+}
