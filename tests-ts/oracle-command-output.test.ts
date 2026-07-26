@@ -28,6 +28,7 @@ async function fixtureWorkspace(
   goldenStdout = stdout,
   caseName = "projects/current-json",
   argv: readonly string[] = ["projects", "--json"],
+  env: Readonly<Record<string, string>> = {},
 ): Promise<FixtureWorkspace> {
   const directory = await mkdtemp(join(tmpdir(), "ontrack-command-oracle-"));
   const sourceDirectory = join(directory, "tests", "golden", "sources", "oracle-test");
@@ -57,7 +58,7 @@ async function fixtureWorkspace(
       capture_sha256: createHash("sha256").update(fixture).digest("hex"),
     }, null, 2)}\n`, "utf8"),
     writeFile(join(caseDirectory, "argv"), `${JSON.stringify(argv)}\n`, "utf8"),
-    writeFile(join(caseDirectory, "env"), "{}\n", "utf8"),
+    writeFile(join(caseDirectory, "env"), `${JSON.stringify(env)}\n`, "utf8"),
     writeFile(join(caseDirectory, "exit"), "0\n", "utf8"),
     writeFile(join(caseDirectory, "source.json"), "{\"id\":\"oracle-test\"}\n", "utf8"),
     writeFile(join(caseDirectory, "stderr.txt"), "", "utf8"),
@@ -78,8 +79,8 @@ async function fixtureWorkspace(
       session_sha256: createHash("sha256").update(session).digest("hex"),
       replay_harness_sha256: createHash("sha256").update(await readFile(replayHarness)).digest("hex"),
       argv,
-      env_allowlist: [],
-      env: {},
+      env_allowlist: Object.keys(env).sort(),
+      env: Object.fromEntries(Object.entries(env).sort(([left], [right]) => left.localeCompare(right))),
       stdout_sha256: createHash("sha256").update(stdout).digest("hex"),
       stderr_sha256: createHash("sha256").update("").digest("hex"),
       exit: 0,
@@ -170,6 +171,22 @@ export async function test_command_output_import_binds_python_bytes_to_source_an
     assert.equal(artifact.stdout_sha256, createHash("sha256").update("[]\n").digest("hex"));
     assert.equal(await readFile(join(workspace.caseDirectory, "stdout.json"), "utf8"), "[]\n");
     assert.equal(verify(workspace).status, 0);
+  } finally {
+    await rm(workspace.directory, { recursive: true, force: true });
+  }
+}
+
+export async function test_command_output_import_ignores_environment_key_order(): Promise<void> {
+  const workspace = await fixtureWorkspace("[]\n", "[]\n", "projects/current-json", ["projects", "--json"], {
+    ONTRACK_NOW: "2026-07-26T12:00:00+08:00",
+    COLUMNS: "120",
+    NO_COLOR: "1",
+  });
+  try {
+    const imported = importOutput(workspace);
+    assert.equal(imported.status, 0, imported.stderr);
+    const verified = verify(workspace);
+    assert.equal(verified.status, 0, verified.stderr);
   } finally {
     await rm(workspace.directory, { recursive: true, force: true });
   }

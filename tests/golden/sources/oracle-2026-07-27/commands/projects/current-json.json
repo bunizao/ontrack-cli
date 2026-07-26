@@ -1,0 +1,88 @@
+{
+  "schema": 4,
+  "kind": "python_command_output",
+  "evidence_kind": "reproducible_fixture_replay",
+  "source_id": "oracle-2026-07-27",
+  "case": "projects/current-json",
+  "oracle_commit": "2741e6f9c60089edbb04053f28e27a19f0b63cde",
+  "source_capture_sha256": "fe7900ea2ef17956c5f706e7fb61072264f4963fe9ccc2c61786ae09f70dfa6c",
+  "recorded_at": "2026-07-26T18:50:00.000Z",
+  "argv": [
+    "projects",
+    "--json"
+  ],
+  "env": {
+    "ONTRACK_NOW": "2026-07-26T12:00:00+08:00",
+    "COLUMNS": "120",
+    "NO_COLOR": "1"
+  },
+  "replay_entrypoint": "ontrack_cli.cli",
+  "replay_harness_sha256": "b0ee75f038c00fb8f334cc67684763378cff4013896a2ff0f51752c53e4b2106",
+  "replay_session_sha256": "cd923d4b5bc9bb57add332eae1019b3657801286d43a5ac33b6a042a9753da6b",
+  "stdout_sha256": "b243932df4e2eac5ea80eb5ea2dcfa6a15a71e3d86ace4977bd159e08c6e220d",
+  "stdout": "[\n  {\n    \"id\": 1,\n    \"unit\": {\n      \"id\": 2,\n      \"code\": \"UNIT\",\n      \"name\": \"Unit\",\n      \"my_role\": \"Student\",\n      \"start_date\": \"2000-01-01\",\n      \"end_date\": \"2000-01-01\",\n      \"active\": true\n    },\n    \"target_grade\": 3,\n    \"portfolio_available\": true,\n    \"user_id\": 3,\n    \"unit_id\": null\n  },\n  {\n    \"id\": 4,\n    \"unit\": {\n      \"id\": 5,\n      \"code\": \"UNIT\",\n      \"name\": \"Unit\",\n      \"my_role\": \"Student\",\n      \"start_date\": \"2000-01-01\",\n      \"end_date\": \"2000-01-01\",\n      \"active\": true\n    },\n    \"target_grade\": 3,\n    \"portfolio_available\": false,\n    \"user_id\": 3,\n    \"unit_id\": null\n  }\n]\n",
+  "replay_provenance": {
+    "schema": 1,
+    "kind": "python_fixture_replay",
+    "python_commit": "2741e6f9c60089edbb04053f28e27a19f0b63cde",
+    "replay_tool_commit": "9b93475b63879ce78901b5c49b0651c3a548aaeb",
+    "entrypoint": "ontrack_cli.cli",
+    "fixture_sha256": "fe7900ea2ef17956c5f706e7fb61072264f4963fe9ccc2c61786ae09f70dfa6c",
+    "session_sha256": "cd923d4b5bc9bb57add332eae1019b3657801286d43a5ac33b6a042a9753da6b",
+    "replay_harness_sha256": "b0ee75f038c00fb8f334cc67684763378cff4013896a2ff0f51752c53e4b2106",
+    "argv": [
+      "projects",
+      "--json"
+    ],
+    "env_allowlist": [
+      "COLUMNS",
+      "NO_COLOR",
+      "ONTRACK_NOW"
+    ],
+    "env": {
+      "COLUMNS": "120",
+      "NO_COLOR": "1",
+      "ONTRACK_NOW": "2026-07-26T12:00:00+08:00"
+    },
+    "stdout_sha256": "b243932df4e2eac5ea80eb5ea2dcfa6a15a71e3d86ace4977bd159e08c6e220d",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "exit": 0
+  },
+  "projection": [
+    {
+      "id": 1,
+      "unit": {
+        "id": 2,
+        "code": "UNIT",
+        "name": "Unit",
+        "my_role": "Student",
+        "start_date": "2000-01-01",
+        "end_date": "2000-01-01",
+        "active": true
+      },
+      "target_grade": 3,
+      "portfolio_available": true,
+      "user_id": 3,
+      "unit_id": null
+    },
+    {
+      "id": 4,
+      "unit": {
+        "id": 5,
+        "code": "UNIT",
+        "name": "Unit",
+        "my_role": "Student",
+        "start_date": "2000-01-01",
+        "end_date": "2000-01-01",
+        "active": true
+      },
+      "target_grade": 3,
+      "portfolio_available": false,
+      "user_id": 3,
+      "unit_id": null
+    }
+  ],
+  "projection_sha256": "b243932df4e2eac5ea80eb5ea2dcfa6a15a71e3d86ace4977bd159e08c6e220d",
+  "stderr": "",
+  "exit": 0
+}

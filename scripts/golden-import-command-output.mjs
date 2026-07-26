@@ -126,8 +126,13 @@ if (replay.replay_harness_sha256 !== sha256(replayHarness)) {
 if (replay.replay_tool_commit !== replayToolCommit) {
   throw new Error("replay provenance is not bound to the current clean tool checkout");
 }
+const replayEnvironmentMatches = replay.env !== null
+  && typeof replay.env === "object"
+  && !Array.isArray(replay.env)
+  && JSON.stringify(Object.entries(replay.env).sort(([left], [right]) => left.localeCompare(right)))
+    === JSON.stringify(Object.entries(env).sort(([left], [right]) => left.localeCompare(right)));
 if (JSON.stringify(replay.argv) !== JSON.stringify(argv)
-  || JSON.stringify(replay.env) !== JSON.stringify(env)
+  || !replayEnvironmentMatches
   || JSON.stringify(replay.env_allowlist) !== JSON.stringify(Object.keys(env).sort())) {
   throw new Error("replay provenance argv or environment differs from the golden case");
 }

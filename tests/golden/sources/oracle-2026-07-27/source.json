@@ -7,5 +7,16 @@
   "session": "session.json",
   "oracle_commit": "2741e6f9c60089edbb04053f28e27a19f0b63cde",
   "recorded_at": "2026-07-26T18:42:11.000Z",
-  "capture_sha256": "fe7900ea2ef17956c5f706e7fb61072264f4963fe9ccc2c61786ae09f70dfa6c"
+  "capture_sha256": "fe7900ea2ef17956c5f706e7fb61072264f4963fe9ccc2c61786ae09f70dfa6c",
+  "command_outputs": [
+    "commands/auth-check/maximal-json.json",
+    "commands/project/maximal-json.json",
+    "commands/projects/current-json.json",
+    "commands/projects/include-inactive-json.json",
+    "commands/roles/active-json.json",
+    "commands/roles/all-json.json",
+    "commands/tasks/all-json.json",
+    "commands/tasks/filter-rediscuss-json.json",
+    "commands/user/maximal-json.json"
+  ]
 }

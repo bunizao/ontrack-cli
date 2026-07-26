@@ -1,0 +1,57 @@
+{
+  "schema": 4,
+  "kind": "python_command_output",
+  "evidence_kind": "reproducible_fixture_replay",
+  "source_id": "oracle-2026-07-27",
+  "case": "roles/all-json",
+  "oracle_commit": "2741e6f9c60089edbb04053f28e27a19f0b63cde",
+  "source_capture_sha256": "fe7900ea2ef17956c5f706e7fb61072264f4963fe9ccc2c61786ae09f70dfa6c",
+  "recorded_at": "2026-07-26T18:50:00.000Z",
+  "argv": [
+    "roles",
+    "--all",
+    "--json"
+  ],
+  "env": {
+    "ONTRACK_NOW": "2026-07-26T12:00:00+08:00",
+    "COLUMNS": "120",
+    "NO_COLOR": "1"
+  },
+  "replay_entrypoint": "ontrack_cli.cli",
+  "replay_harness_sha256": "b0ee75f038c00fb8f334cc67684763378cff4013896a2ff0f51752c53e4b2106",
+  "replay_session_sha256": "cd923d4b5bc9bb57add332eae1019b3657801286d43a5ac33b6a042a9753da6b",
+  "stdout_sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+  "stdout": "[]\n",
+  "replay_provenance": {
+    "schema": 1,
+    "kind": "python_fixture_replay",
+    "python_commit": "2741e6f9c60089edbb04053f28e27a19f0b63cde",
+    "replay_tool_commit": "9b93475b63879ce78901b5c49b0651c3a548aaeb",
+    "entrypoint": "ontrack_cli.cli",
+    "fixture_sha256": "fe7900ea2ef17956c5f706e7fb61072264f4963fe9ccc2c61786ae09f70dfa6c",
+    "session_sha256": "cd923d4b5bc9bb57add332eae1019b3657801286d43a5ac33b6a042a9753da6b",
+    "replay_harness_sha256": "b0ee75f038c00fb8f334cc67684763378cff4013896a2ff0f51752c53e4b2106",
+    "argv": [
+      "roles",
+      "--all",
+      "--json"
+    ],
+    "env_allowlist": [
+      "COLUMNS",
+      "NO_COLOR",
+      "ONTRACK_NOW"
+    ],
+    "env": {
+      "COLUMNS": "120",
+      "NO_COLOR": "1",
+      "ONTRACK_NOW": "2026-07-26T12:00:00+08:00"
+    },
+    "stdout_sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "exit": 0
+  },
+  "projection": [],
+  "projection_sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+  "stderr": "",
+  "exit": 0
+}

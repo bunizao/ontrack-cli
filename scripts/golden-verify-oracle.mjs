@@ -151,12 +151,20 @@ for (const sourceId of await directories(sourcesRoot)) {
       } catch {
         throw new Error("stored replay tool commit is not resolvable");
       }
+      const replayEnvironmentMatches = replay.env !== null
+        && typeof replay.env === "object"
+        && !Array.isArray(replay.env)
+        && artifact.env !== null
+        && typeof artifact.env === "object"
+        && !Array.isArray(artifact.env)
+        && JSON.stringify(Object.entries(replay.env).sort(([left], [right]) => left.localeCompare(right)))
+          === JSON.stringify(Object.entries(artifact.env).sort(([left], [right]) => left.localeCompare(right)));
       if (replay.python_commit !== oracleCommit || replay.entrypoint !== artifact.replay_entrypoint
         || replay.fixture_sha256 !== source.capture_sha256 || replay.session_sha256 !== artifact.replay_session_sha256
         || replay.replay_harness_sha256 !== artifact.replay_harness_sha256
         || sha256(replayCommitHarness) !== artifact.replay_harness_sha256
         || JSON.stringify(replay.argv) !== JSON.stringify(artifact.argv)
-        || JSON.stringify(replay.env) !== JSON.stringify(artifact.env)
+        || !replayEnvironmentMatches
         || JSON.stringify(replay.env_allowlist) !== JSON.stringify(Object.keys(artifact.env).sort())
         || replay.exit !== artifact.exit || replay.stderr_sha256 !== sha256(artifact.stderr)
         || replay.stdout_sha256 !== artifact.stdout_sha256) {
