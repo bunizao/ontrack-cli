@@ -125,9 +125,10 @@ function cookieApplies(cookie: BrowserCookie, requestUrl: string, now: Date): bo
 }
 
 function domainMatches(hostname: string, domain: string): boolean {
+  const isDomainCookie = domain.startsWith(".");
   const normalized = domain.toLowerCase().replace(/^\./u, "");
   const host = hostname.toLowerCase();
-  return Boolean(normalized) && (host === normalized || host.endsWith(`.${normalized}`));
+  return Boolean(normalized) && (host === normalized || (isDomainCookie && host.endsWith(`.${normalized}`)));
 }
 
 function pathMatches(requestPath: string, cookiePath: string): boolean {

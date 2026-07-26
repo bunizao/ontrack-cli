@@ -98,6 +98,22 @@ export async function test_browser_cookie_boundary_keeps_only_a_valid_pair(): Pr
   ]);
 }
 
+export async function test_host_only_browser_cookies_do_not_match_a_subdomain(): Promise<void> {
+  const homeDir = await temporaryDirectory();
+  await touch(join(homeDir, "Library/Application Support/Google/Chrome/Default/Network/Cookies"));
+  const candidates = await browserCookieCandidates("https://ontrack.example.edu", {
+    homeDir,
+    platform: "darwin",
+    chromiumCookieReader: async () => [
+      { name: "username", value: "alice", domain: "example.edu", path: "/api/auth" },
+      { name: "refresh_token", value: "refresh", domain: "example.edu", path: "/api/auth" },
+    ],
+    firefoxCookieReader: async () => [],
+  });
+
+  assert.deepEqual(candidates, []);
+}
+
 export async function test_incomplete_or_failed_profile_is_skipped_without_mixing(): Promise<void> {
   const homeDir = await temporaryDirectory();
   await touch(join(homeDir, "Library/Application Support/Google/Chrome/Default/Network/Cookies"));

@@ -210,8 +210,8 @@ Authentication source precedence is explicit and testable:
 1. explicit environment credentials;
 2. explicit config credentials;
 3. migration-only cached-user JSON;
-4. an existing Okta session exposed by the `okta` executable;
-5. a best-effort direct-browser provider, isolated by profile and followed by the Okta provider when unavailable.
+4. a best-effort direct-browser provider, isolated by profile;
+5. an existing Okta session exposed by the `okta` executable.
 
 `ONTRACK_DOUBTFIRE_USER_JSON` remains a migration-only compatibility input for the cutover release, but the obsolete browser-local-storage copy procedure is removed from primary documentation.
 

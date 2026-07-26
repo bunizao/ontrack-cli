@@ -290,9 +290,10 @@ async function discoverLoginUrl(
 }
 
 function domainMatches(hostname: string, cookieDomain: string): boolean {
+  const isDomainCookie = cookieDomain.startsWith(".");
   const normalized = cookieDomain.toLowerCase().replace(/^\./, "");
   const host = hostname.toLowerCase();
-  return normalized === host || host.endsWith(`.${normalized}`);
+  return normalized === host || (isDomainCookie && host.endsWith(`.${normalized}`));
 }
 
 function cookiePathMatches(requestPath: string, cookiePath: string): boolean {
