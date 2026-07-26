@@ -111,10 +111,13 @@ export function test_project_snapshot_applies_schedule_precedence_and_total_orde
         id: 101,
         abbreviation: "A",
         name: "First",
+        description: null,
         target_grade: 1,
         start_date: null,
         target_date: CivilDate.parse("2026-07-01"),
         due_date: CivilDate.parse("2026-07-01"),
+        is_graded: null,
+        max_quality_pts: null,
         grade_due_dates: { "1": CivilDate.parse("2026-07-05") },
         grade_start_dates: {},
       },
@@ -122,10 +125,13 @@ export function test_project_snapshot_applies_schedule_precedence_and_total_orde
         id: 102,
         abbreviation: "B",
         name: "Second",
+        description: null,
         target_grade: 1,
         start_date: null,
         target_date: CivilDate.parse("2026-08-20"),
         due_date: CivilDate.parse("2026-08-20"),
+        is_graded: null,
+        max_quality_pts: null,
         grade_due_dates: { "1": CivilDate.parse("2026-08-15") },
         grade_start_dates: {},
       },
@@ -139,4 +145,58 @@ export function test_project_snapshot_applies_schedule_precedence_and_total_orde
   assert.equal(rows[0]?.is_overdue, false);
   assert.equal(rows[1]?.due_date, "2026-08-04");
   assert.equal(rows[1]?.deadline, "2026-08-22");
+}
+
+export function test_non_flexible_negative_extensions_shift_start_by_weeks(): void {
+  const project: Project = {
+    id: 1,
+    unit: { id: 1, code: "UNIT", name: "Unit" },
+    target_grade: null,
+    submitted_grade: null,
+    compile_portfolio: null,
+    portfolio_available: null,
+    uses_draft_learning_summary: null,
+    flexible_dates: false,
+    special_consideration_days: 0,
+    tasks: [{
+      id: 1,
+      task_definition_id: 1,
+      status: "not_started",
+      due_date: CivilDate.parse("2026-08-01"),
+      target_due_date: null,
+      target_start_date: null,
+      submission_date: null,
+      completion_date: null,
+      moved_to_discuss_at: null,
+      discuss_timeout_expiry_at: null,
+      extensions: -1,
+      times_assessed: null,
+      grade: null,
+      quality_pts: null,
+      include_in_portfolio: null,
+    }],
+  };
+  const unit: Unit = {
+    id: 1,
+    code: "UNIT",
+    name: "Unit",
+    grade_definitions: [],
+    task_definitions: [{
+      id: 1,
+      abbreviation: "1",
+      name: "Task",
+      description: null,
+      target_grade: null,
+      start_date: CivilDate.parse("2026-07-15"),
+      target_date: CivilDate.parse("2026-08-01"),
+      due_date: CivilDate.parse("2026-08-03"),
+      is_graded: null,
+      max_quality_pts: null,
+      grade_due_dates: {},
+      grade_start_dates: {},
+    }],
+  };
+  const [row] = buildProjectSnapshot(project, unit, createClock("2026-07-01T00:00:00Z")).tasks;
+  assert.equal(row?.start_date, "2026-07-08");
+  assert.equal(row?.due_date, "2026-08-01");
 }

@@ -125,10 +125,13 @@ function readTaskDefinition(value: unknown): TaskDefinition {
     id: requiredNumber(data.id, "task definition id"),
     abbreviation: requiredString(data.abbreviation, "task definition abbreviation"),
     name: requiredString(data.name, "task definition name"),
+    description: nullableString(data.description, "task definition description"),
     target_grade: nullableNumber(data.target_grade, "task definition target_grade"),
     start_date: civilDate(data.start_date, "task definition start_date"),
     target_date: civilDate(data.target_date, "task definition target_date"),
     due_date: civilDate(data.due_date, "task definition due_date"),
+    is_graded: nullableBoolean(data.is_graded, "task definition is_graded"),
+    max_quality_pts: nullableNumber(data.max_quality_pts, "task definition max_quality_pts"),
     grade_due_dates: gradeDueDates,
     grade_start_dates: gradeStartDates,
   };

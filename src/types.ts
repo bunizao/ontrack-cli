@@ -16,10 +16,13 @@ export interface TaskDefinition {
   readonly id: number;
   readonly abbreviation: string;
   readonly name: string;
+  readonly description: string | null;
   readonly target_grade: number | null;
   readonly start_date: CivilDate | null;
   readonly target_date: CivilDate | null;
   readonly due_date: CivilDate | null;
+  readonly is_graded: boolean | null;
+  readonly max_quality_pts: number | null;
   readonly grade_due_dates: Readonly<Record<string, CivilDate>>;
   readonly grade_start_dates: Readonly<Record<string, CivilDate>>;
 }

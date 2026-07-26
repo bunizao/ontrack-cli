@@ -52,7 +52,11 @@ function effectiveStart(project: Project, task: Task, definition: TaskDefinition
     const gradeStart = definition?.grade_start_dates[String(project.target_grade)];
     if (gradeStart) return gradeStart;
   }
-  return definition?.start_date ?? null;
+  const base = definition?.start_date ?? null;
+  if (!project.flexible_dates && base && task.extensions !== null && task.extensions < 0) {
+    return base.addDays(task.extensions * 7);
+  }
+  return base;
 }
 
 function text(value: { toString(): string } | null | undefined): string | null {

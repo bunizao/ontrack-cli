@@ -1,0 +1,77 @@
+import type { AuthenticatedSession } from "./auth.js";
+import type { CliApplication } from "./cli-app.js";
+import type { OnTrackClient } from "./ontrack.js";
+import { buildProjectSnapshot } from "./project-snapshot.js";
+import { projectSummaryToJson, roleToJson, snapshotToJson, taskRowToJson, userToJson } from "./serialize.js";
+import type { Clock } from "./time.js";
+
+export class OnTrackApplication implements CliApplication {
+  constructor(
+    readonly session: AuthenticatedSession,
+    readonly client: OnTrackClient,
+    readonly clock: Clock,
+  ) {}
+
+  async user(): Promise<unknown> {
+    const authMethod = await this.client.getAuthMethod();
+    if (this.session.user) {
+      return {
+        ...userToJson(this.session.user),
+        base_url: this.session.baseUrl,
+        auth_method: authMethod.method,
+      };
+    }
+    return {
+      username: this.session.username,
+      base_url: this.session.baseUrl,
+      auth_method: authMethod.method,
+    };
+  }
+
+  async authCheck(): Promise<unknown> {
+    const [authMethod, projects, roles] = await Promise.all([
+      this.client.getAuthMethod(),
+      this.client.getProjects(true),
+      this.client.getRoles(false),
+    ]);
+    return {
+      base_url: this.session.baseUrl,
+      username: this.session.username,
+      auth_method: authMethod.method,
+      projects: projects.length,
+      unit_roles: roles.length,
+      cached_user: this.session.user ? userToJson(this.session.user) : null,
+    };
+  }
+
+  async projects(options: { readonly includeInactive: boolean }): Promise<unknown> {
+    return (await this.client.getProjects(options.includeInactive)).map(projectSummaryToJson);
+  }
+
+  async project(projectId: number): Promise<unknown> {
+    return snapshotToJson(await this.snapshot(projectId));
+  }
+
+  async tasks(projectId: number, options: { readonly statuses: readonly string[] }): Promise<unknown> {
+    let tasks = (await this.snapshot(projectId)).tasks;
+    if (options.statuses.length > 0) {
+      const allowed = new Set(options.statuses);
+      tasks = tasks.filter((task) => allowed.has(task.status));
+    }
+    return tasks.map(taskRowToJson);
+  }
+
+  async roles(options: { readonly showAll: boolean }): Promise<unknown> {
+    return (await this.client.getRoles(!options.showAll)).map(roleToJson);
+  }
+
+  private async snapshot(projectId: number) {
+    const project = await this.client.getProject(projectId);
+    const unit = await this.client.getUnit(project.unit.id);
+    return buildProjectSnapshot(
+      { ...project, flexible_dates: unit.allow_flexible_dates ?? project.flexible_dates },
+      unit,
+      this.clock,
+    );
+  }
+}

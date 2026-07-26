@@ -1,0 +1,295 @@
+import { execFile } from "node:child_process";
+import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+
+import type { Environment, OnTrackConfig } from "./config.js";
+import { resolveCredentialSource } from "./config.js";
+import { CliError } from "./errors.js";
+import type { UserView } from "./types.js";
+
+export type SessionProvenance = "environment" | "config" | "migration" | "session_cache" | "okta";
+
+export interface AuthenticatedSession {
+  readonly baseUrl: string;
+  readonly username: string;
+  readonly accessToken: string;
+  readonly authTokenExpiry: string | null;
+  readonly provenance: SessionProvenance;
+  readonly user: UserView | null;
+}
+
+interface StoredSession {
+  readonly base_url: string;
+  readonly username: string;
+  readonly access_token: string;
+  readonly auth_token_expiry: string;
+  readonly provenance: "okta";
+}
+
+interface CookieRecord {
+  readonly name: string;
+  readonly value: string;
+  readonly domain: string;
+  readonly path: string;
+}
+
+export interface ResolveAuthenticatedSessionOptions {
+  readonly baseUrl: string;
+  readonly configDir: string;
+  readonly env: Environment;
+  readonly config?: OnTrackConfig;
+  readonly now?: Date;
+  readonly oktaExecutable?: string;
+  readonly oktaTimeoutMs?: number;
+  readonly fetch?: typeof fetch;
+  readonly signal?: AbortSignal;
+  readonly skipCache?: boolean;
+}
+
+function authError(message: string): CliError {
+  return new CliError("auth", message);
+}
+
+function isFuture(value: string, now: Date): boolean {
+  const expiry = new Date(value);
+  return !Number.isNaN(expiry.valueOf()) && expiry.valueOf() > now.valueOf();
+}
+
+function readStoredSession(value: unknown, baseUrl: string, now: Date): StoredSession | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const data = value as Record<string, unknown>;
+  if (
+    data.base_url !== baseUrl
+    || typeof data.username !== "string"
+    || !data.username
+    || typeof data.access_token !== "string"
+    || !data.access_token
+    || typeof data.auth_token_expiry !== "string"
+    || !isFuture(data.auth_token_expiry, now)
+    || data.provenance !== "okta"
+  ) return undefined;
+  return {
+    base_url: baseUrl,
+    username: data.username,
+    access_token: data.access_token,
+    auth_token_expiry: data.auth_token_expiry,
+    provenance: "okta",
+  };
+}
+
+async function loadStoredSession(sessionFile: string, baseUrl: string, now: Date): Promise<AuthenticatedSession | undefined> {
+  try {
+    const parsed: unknown = JSON.parse(await readFile(sessionFile, "utf8"));
+    const stored = readStoredSession(parsed, baseUrl, now);
+    if (!stored) return undefined;
+    return {
+      baseUrl: stored.base_url,
+      username: stored.username,
+      accessToken: stored.access_token,
+      authTokenExpiry: stored.auth_token_expiry,
+      provenance: "session_cache",
+      user: null,
+    };
+  } catch (error) {
+    const code = typeof error === "object" && error !== null && "code" in error ? (error as { code?: unknown }).code : undefined;
+    if (code === "ENOENT" || error instanceof SyntaxError) return undefined;
+    throw authError("Could not read the authenticated session cache.");
+  }
+}
+
+async function saveStoredSession(sessionFile: string, session: AuthenticatedSession): Promise<void> {
+  if (!session.authTokenExpiry || session.provenance !== "okta") return;
+  const stored: StoredSession = {
+    base_url: session.baseUrl,
+    username: session.username,
+    access_token: session.accessToken,
+    auth_token_expiry: session.authTokenExpiry,
+    provenance: "okta",
+  };
+  try {
+    await mkdir(dirname(sessionFile), { recursive: true });
+    await writeFile(sessionFile, `${JSON.stringify(stored, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+    await chmod(sessionFile, 0o600);
+  } catch {
+    throw authError("Could not write the authenticated session cache.");
+  }
+}
+
+interface ProcessResult {
+  readonly stdout: string;
+}
+
+function runOkta(executable: string, baseUrl: string, timeoutMs: number): Promise<ProcessResult> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      executable,
+      ["cookies", "--json", baseUrl],
+      { encoding: "utf8", timeout: timeoutMs, windowsHide: true, maxBuffer: 1024 * 1024 },
+      (error, stdout) => {
+        if (!error) {
+          resolve({ stdout });
+          return;
+        }
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === "ENOENT") {
+          reject(authError("Okta provider is unavailable."));
+          return;
+        }
+        if (error.killed || error.signal) {
+          reject(authError("Okta provider timed out."));
+          return;
+        }
+        reject(authError("No stored Okta session is available."));
+      },
+    );
+  });
+}
+
+function domainMatches(hostname: string, cookieDomain: string): boolean {
+  const normalized = cookieDomain.toLowerCase().replace(/^\./, "");
+  const host = hostname.toLowerCase();
+  return normalized === host || host.endsWith(`.${normalized}`);
+}
+
+function readCookies(stdout: string, baseUrl: string): CookieRecord[] {
+  if (!stdout.trim()) throw authError("Okta provider returned empty output.");
+  let payload: unknown;
+  try {
+    payload = JSON.parse(stdout);
+  } catch {
+    throw authError("Okta provider returned malformed JSON.");
+  }
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+    throw authError("Okta provider returned malformed JSON.");
+  }
+  const records = (payload as Record<string, unknown>).cookies;
+  if (!Array.isArray(records)) throw authError("Okta provider returned malformed JSON.");
+  const hostname = new URL(baseUrl).hostname;
+  return records.flatMap((record): CookieRecord[] => {
+    if (typeof record !== "object" || record === null || Array.isArray(record)) return [];
+    const data = record as Record<string, unknown>;
+    if (
+      typeof data.name !== "string"
+      || !data.name
+      || typeof data.value !== "string"
+      || !data.value
+      || typeof data.domain !== "string"
+      || !domainMatches(hostname, data.domain)
+      || /[;\r\n]/.test(data.name)
+      || /[;\r\n]/.test(data.value)
+    ) return [];
+    return [{ name: data.name, value: data.value, domain: data.domain, path: typeof data.path === "string" ? data.path : "/" }];
+  });
+}
+
+function cookieHeader(cookies: readonly CookieRecord[]): string {
+  return cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join("; ");
+}
+
+async function exchangeCookies(
+  baseUrl: string,
+  cookies: readonly CookieRecord[],
+  fetchImplementation: typeof fetch,
+  now: Date,
+  signal?: AbortSignal,
+): Promise<AuthenticatedSession> {
+  if (cookies.length === 0) throw authError("Cookie exchange failed: the Okta session has no OnTrack cookies.");
+  let response: Response;
+  try {
+    const init: RequestInit = {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        Cookie: cookieHeader(cookies),
+      },
+      body: JSON.stringify({ delete_auth_token: false }),
+    };
+    if (signal) init.signal = signal;
+    response = await fetchImplementation(`${baseUrl}/api/auth/access-token`, init);
+  } catch {
+    throw authError("Cookie exchange failed: OnTrack could not be reached.");
+  }
+  if (!response.ok) throw authError("Cookie exchange failed: OnTrack rejected the stored session.");
+
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    throw authError("Cookie exchange failed: OnTrack returned malformed JSON.");
+  }
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+    throw authError("Cookie exchange failed: OnTrack returned no access token.");
+  }
+  const data = payload as Record<string, unknown>;
+  const user = data.user;
+  if (typeof user !== "object" || user === null || Array.isArray(user)) {
+    throw authError("Cookie exchange failed: OnTrack returned no user.");
+  }
+  const username = (user as Record<string, unknown>).username;
+  if (
+    typeof data.auth_token !== "string"
+    || !data.auth_token
+    || typeof data.auth_token_expiry !== "string"
+    || typeof username !== "string"
+    || !username
+  ) throw authError("Cookie exchange failed: OnTrack returned an incomplete session.");
+  if (!isFuture(data.auth_token_expiry, now)) throw authError("The exchanged access token is already expired.");
+  const userData = user as Record<string, unknown>;
+  const optionalString = (value: unknown): string | null => typeof value === "string" ? value : null;
+  return {
+    baseUrl,
+    username,
+    accessToken: data.auth_token,
+    authTokenExpiry: new Date(data.auth_token_expiry).toISOString(),
+    provenance: "okta",
+    user: {
+      id: typeof userData.id === "number" && Number.isFinite(userData.id) ? userData.id : null,
+      username,
+      first_name: optionalString(userData.first_name ?? userData.firstName),
+      last_name: optionalString(userData.last_name ?? userData.lastName),
+      email: optionalString(userData.email),
+      nickname: optionalString(userData.nickname),
+    },
+  };
+}
+
+export async function resolveAuthenticatedSession(
+  options: ResolveAuthenticatedSessionOptions,
+): Promise<AuthenticatedSession> {
+  const config = options.config ?? {};
+  const explicit = resolveCredentialSource(options.env, config);
+  if (explicit) {
+    return {
+      baseUrl: options.baseUrl,
+      username: explicit.username,
+      accessToken: explicit.accessToken,
+      authTokenExpiry: null,
+      provenance: explicit.provenance,
+      user: explicit.user,
+    };
+  }
+
+  const now = options.now ?? new Date();
+  const sessionFile = join(options.configDir, "session.json");
+  if (!options.skipCache) {
+    const cached = await loadStoredSession(sessionFile, options.baseUrl, now);
+    if (cached) return cached;
+  }
+
+  const processResult = await runOkta(
+    options.oktaExecutable ?? "okta",
+    options.baseUrl,
+    options.oktaTimeoutMs ?? 30_000,
+  );
+  const cookies = readCookies(processResult.stdout, options.baseUrl);
+  const session = await exchangeCookies(
+    options.baseUrl,
+    cookies,
+    options.fetch ?? fetch,
+    now,
+    options.signal,
+  );
+  await saveStoredSession(sessionFile, session);
+  return session;
+}

@@ -16,6 +16,7 @@ const fallback = new Map<number, GradeDefinition>([
 export function readGradeDefinitions(value: unknown): GradeDefinition[] {
   if (value === undefined || value === null) return [];
   if (!Array.isArray(value)) throw new TypeError("grade_definitions must be an array");
+  if (value.length === 0) throw new TypeError("grade_definitions must not be empty when present");
   return value.map((item) => {
     if (typeof item !== "object" || item === null || Array.isArray(item)) throw new TypeError("grade definition must be an object");
     const data = item as Record<string, unknown>;

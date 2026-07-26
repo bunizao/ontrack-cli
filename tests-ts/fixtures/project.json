@@ -1,0 +1,25 @@
+{
+  "project": {
+    "id": 7,
+    "unit": {
+      "id": 9,
+      "code": "FIT9999",
+      "name": "Example Unit"
+    },
+    "target_grade": 1,
+    "submitted_grade": null,
+    "compile_portfolio": false,
+    "portfolio_available": false,
+    "uses_draft_learning_summary": false,
+    "tasks": []
+  },
+  "unit": {
+    "id": 9,
+    "code": "FIT9999",
+    "name": "Example Unit",
+    "description": "Fixture unit",
+    "grade_definitions": [],
+    "task_definitions": []
+  },
+  "tasks": []
+}
