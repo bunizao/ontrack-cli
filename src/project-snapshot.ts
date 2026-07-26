@@ -69,7 +69,7 @@ export function buildProjectSnapshot(project: Project, unit: Unit, clock: Clock)
     const definition = definitions.get(task.task_definition_id);
     const due = effectiveDue(project, task, definition);
     const start = effectiveStart(project, task, definition);
-    const deadline = definition?.due_date?.addDays(project.special_consideration_days) ?? null;
+    const deadline = due?.addDays(project.special_consideration_days) ?? null;
     return { due, row: {
       id: task.id,
       task_definition_id: task.task_definition_id,
@@ -94,7 +94,7 @@ export function buildProjectSnapshot(project: Project, unit: Unit, clock: Clock)
       grade_label: gradeLabel(task.grade, unit.grade_definitions),
       quality_pts: task.quality_pts,
       include_in_portfolio: task.include_in_portfolio,
-      is_overdue: Boolean(due && due.compare(clock.today) < 0 && !isFinalStatus(task.status)),
+      is_overdue: Boolean(deadline && deadline.compare(clock.today) < 0 && !isFinalStatus(task.status)),
       is_discuss_overdue: Boolean(task.discuss_timeout_expiry_at && task.discuss_timeout_expiry_at.compare(clock.now) < 0),
     } };
   });

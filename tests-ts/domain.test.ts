@@ -144,10 +144,54 @@ export function test_project_snapshot_applies_schedule_precedence_and_total_orde
   const rows = buildProjectSnapshot(project, unit, createClock("2026-07-26T12:00:00+08:00")).tasks;
   assert.equal(rows[0]?.id, 21);
   assert.equal(rows[0]?.due_date, "2026-07-05");
-  assert.equal(rows[0]?.deadline, "2026-07-03");
+  assert.equal(rows[0]?.deadline, "2026-07-07");
   assert.equal(rows[0]?.is_overdue, false);
   assert.equal(rows[1]?.due_date, "2026-08-04");
-  assert.equal(rows[1]?.deadline, "2026-08-22");
+  assert.equal(rows[1]?.deadline, "2026-08-06");
+}
+
+export function test_special_consideration_extends_the_effective_deadline_before_overdue(): void {
+  const project: Project = {
+    id: 1,
+    unit: { id: 1, code: "UNIT", name: "Unit" },
+    target_grade: null,
+    submitted_grade: null,
+    compile_portfolio: null,
+    portfolio_available: null,
+    uses_draft_learning_summary: null,
+    flexible_dates: false,
+    special_consideration_days: 2,
+    tasks: [{
+      id: 1,
+      task_definition_id: 1,
+      status: "not_started",
+      due_date: CivilDate.parse("2026-07-05"),
+      target_due_date: null,
+      target_start_date: null,
+      submission_date: null,
+      completion_date: null,
+      moved_to_discuss_at: null,
+      discuss_timeout_expiry_at: null,
+      extensions: null,
+      times_assessed: null,
+      grade: null,
+      quality_pts: null,
+      include_in_portfolio: null,
+    }],
+  };
+  const unit: Unit = {
+    id: 1,
+    code: "UNIT",
+    name: "Unit",
+    grade_definitions: [],
+    task_definitions: [],
+  };
+
+  const beforeDeadline = buildProjectSnapshot(project, unit, createClock("2026-07-06T12:00:00Z")).tasks[0];
+  const afterDeadline = buildProjectSnapshot(project, unit, createClock("2026-07-08T12:00:00Z")).tasks[0];
+  assert.equal(beforeDeadline?.deadline, "2026-07-07");
+  assert.equal(beforeDeadline?.is_overdue, false);
+  assert.equal(afterDeadline?.is_overdue, true);
 }
 
 export function test_non_flexible_negative_extensions_shift_start_by_weeks(): void {
