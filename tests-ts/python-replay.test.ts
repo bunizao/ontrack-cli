@@ -57,6 +57,8 @@ def main():
         result = {"project": project, "unit": unit, "rows": rows} if command == "project" else rows
     elif command == "roles":
         result = fetch("/api/unit_roles", {"active_only": True})
+    elif command == "crlf":
+        result = {"line_endings": "portable"}
     elif command == "unknown":
         result = fetch("/api/private")
     elif command == "wrong-params":
@@ -67,7 +69,11 @@ def main():
         result = requests.Session().request("GET", "https://ontrack.infotech.monash.edu/api/projects", params={"include_inactive": False})
     else:
         raise AssertionError("unknown test command")
-    print(json.dumps(result, indent=2))
+    output = json.dumps(result, indent=2)
+    if command == "crlf":
+        sys.stdout.buffer.write((output + "\r\n").encode("utf-8"))
+    else:
+        print(output)
 
 
 main()
@@ -237,6 +243,18 @@ export async function test_python_replay_requires_a_clean_python_checkout(): Pro
     assert.notEqual(result.process.status, 0);
     assert.match(result.process.stderr, /clean Git checkout/u);
     await assertNoNetwork(workspace.checkout);
+  } finally {
+    await rm(workspace.directory, { recursive: true, force: true });
+  }
+}
+
+export async function test_python_replay_normalizes_stdout_line_endings(): Promise<void> {
+  const workspace = await createWorkspace();
+  try {
+    const result = await runReplay(workspace, ["crlf"]);
+    assert.equal(result.process.status, 0, result.process.stderr || result.stderr);
+    assert.equal(result.stdout, "{\n  \"line_endings\": \"portable\"\n}\n");
+    assert.equal(result.provenance.stdout_sha256, sha256(result.stdout));
   } finally {
     await rm(workspace.directory, { recursive: true, force: true });
   }

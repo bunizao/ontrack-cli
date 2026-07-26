@@ -199,7 +199,11 @@ async function main() {
   }
 
   const exitCode = result.status ?? 1;
-  const stdoutBytes = await readFile(stdoutPath);
+  const rawStdoutBytes = await readFile(stdoutPath);
+  const stdoutBytes = Buffer.from(
+    new TextDecoder("utf-8", { fatal: true }).decode(rawStdoutBytes).replaceAll("\r\n", "\n"),
+  );
+  if (!stdoutBytes.equals(rawStdoutBytes)) await writeFile(stdoutPath, stdoutBytes);
   const stderrBytes = await readFile(stderrPath);
   const provenance = {
     schema: 1,
