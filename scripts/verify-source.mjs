@@ -14,11 +14,11 @@ for (const path of files("src")) {
   const source = readFileSync(path, "utf8");
   if (/\b(?:TODO|FIXME|unimplemented)\b/i.test(source)) failures.push(`${path}: unfinished marker`);
 }
-for (const path of files("tests-ts").filter((value) => value.endsWith(".ts"))) {
+for (const path of files("tests").filter((value) => value.endsWith(".ts"))) {
   const source = readFileSync(path, "utf8");
   if (/\b(?:skip|pending)\s*\(/.test(source)) failures.push(`${path}: skipped or pending test`);
 }
-for (const path of files("tests-ts/fixtures")) {
+for (const path of files("tests/fixtures")) {
   const fixture = readFileSync(path, "utf8");
   if (/ontrack\.infotech\.monash\.edu|Auth-Token|authentication_token|access_token|refresh_token/i.test(fixture)) {
     failures.push(`${path}: deployment or credential data`);

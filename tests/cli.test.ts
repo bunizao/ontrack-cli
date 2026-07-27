@@ -8,7 +8,7 @@ import { CliError, errorCategories, exitCodeFor } from "../src/errors.js";
 const secret = "ontrack_test_secret_SENTINEL_9d634c";
 
 async function fixture(name: string): Promise<unknown> {
-  const contents = await readFile(join(process.cwd(), "tests-ts", "fixtures", `${name}.json`), "utf8");
+  const contents = await readFile(join(process.cwd(), "tests", "fixtures", `${name}.json`), "utf8");
   return JSON.parse(contents) as unknown;
 }
 

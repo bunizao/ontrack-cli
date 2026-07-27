@@ -8,7 +8,7 @@ const domainModules = new Set(["grades.js", "project-snapshot.js", "status.js", 
 const coveredFunctions = new Map([...domainModules].map((name) => [name, { covered: 0, total: 0 }]));
 
 try {
-  const run = spawnSync(process.execPath, [".build/tests-ts/harness.js"], {
+  const run = spawnSync(process.execPath, [".build/tests/harness.js"], {
     env: { ...process.env, NODE_V8_COVERAGE: coverageDirectory },
     encoding: "utf8",
   });

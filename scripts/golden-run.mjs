@@ -1,7 +1,7 @@
 import process from "node:process";
 import { pathToFileURL } from "node:url";
 
-const moduleUrl = pathToFileURL(`${process.cwd()}/.build/tests-ts/golden.test.js`).href;
+const moduleUrl = pathToFileURL(`${process.cwd()}/.build/tests/golden.test.js`).href;
 const suite = await import(moduleUrl);
 let failures = 0;
 

@@ -9,7 +9,6 @@ ontrack_cli/
 release-notes/
 src/
 tests/
-tests-ts/
 *.tgz
 *.pyc
 PORTING.md
