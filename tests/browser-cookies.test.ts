@@ -11,10 +11,10 @@ export async function test_browser_cookie_discovery_reads_supported_browsers_and
     return { cookies: [], warnings: [] };
   };
 
-  await browserCookieCandidates("https://ontrack.example.edu", { getCookies, platform: "darwin" });
+  await browserCookieCandidates("https://ontrack.example.edu", { getCookies, platform: "linux" });
 
   assert.deepEqual(received.map((options) => options.browsers), [
-    ["chrome"], ["edge"], ["firefox"], ["safari"],
+    ["chrome"], ["edge"], ["firefox"],
   ]);
   for (const options of received) {
     assert.equal(options.url, "https://ontrack.example.edu/api/auth/access-token");
@@ -23,6 +23,25 @@ export async function test_browser_cookie_discovery_reads_supported_browsers_and
     assert.equal(options.edgeProfile, ALL_PROFILES);
     assert.equal(options.firefoxProfile, ALL_PROFILES);
   }
+}
+
+export async function test_macos_chromium_profiles_are_probed_without_reading_the_protected_root(): Promise<void> {
+  const received: GetCookiesOptions[] = [];
+  await browserCookieCandidates("https://ontrack.example.edu", {
+    platform: "darwin",
+    homeDir: "/Users/example",
+    fileExists: (path) => path.endsWith("/Google/Chrome/Default/Cookies")
+      || path.endsWith("/Google/Chrome/Profile 3/Cookies"),
+    getCookies: async (options) => {
+      received.push(options);
+      return { cookies: [], warnings: [] };
+    },
+  });
+
+  assert.deepEqual(received[0]?.chromeProfile, ["Default", "Profile 3"]);
+  assert.equal(received[1]?.edgeProfile, ALL_PROFILES);
+  assert.equal(received[2]?.firefoxProfile, ALL_PROFILES);
+  assert.deepEqual(received[3]?.browsers, ["safari"]);
 }
 
 export async function test_browser_cookie_discovery_keeps_browser_profiles_separate(): Promise<void> {
@@ -111,6 +130,23 @@ export async function test_browser_cookie_discovery_continues_after_one_browser_
 
   assert.equal(candidates[0]?.source, "firefox:default");
   assert.deepEqual(warnings, ["Could not read chrome cookies."]);
+}
+
+export async function test_browser_cookie_discovery_preserves_permission_failures(): Promise<void> {
+  const warnings: string[] = [];
+  await browserCookieCandidates("https://ontrack.example.edu", {
+    platform: "linux",
+    onWarning: (warning) => warnings.push(warning),
+    getCookies: async (options) => {
+      if (options.browsers?.[0] === "chrome") {
+        throw Object.assign(new Error("secret details must not escape"), { code: "EPERM" });
+      }
+      return { cookies: [], warnings: [] };
+    },
+  });
+
+  assert.deepEqual(warnings, ["Permission denied while reading chrome cookies (EPERM)."]);
+  assert.doesNotMatch(warnings.join("\n"), /secret details/u);
 }
 
 export async function test_browser_cookie_discovery_maps_url_only_cookies_to_the_request_host(): Promise<void> {
