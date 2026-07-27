@@ -9,7 +9,7 @@ import {
 } from "@steipete/sweet-cookie";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, posix } from "node:path";
 
 export interface BrowserCookie {
   readonly name: string;
@@ -107,16 +107,17 @@ function macosChromiumProfiles(
 ): ProfileType {
   const home = options.homeDir ?? homedir();
   const fileExists = options.fileExists ?? existsSync;
+  const macPath = posix.join;
   const roots = browser === "chrome"
     ? [
-      join(home, "Library/Application Support/Google/Chrome"),
-      join(home, "Library/Application Support/BraveSoftware/Brave-Browser"),
+      macPath(home, "Library/Application Support/Google/Chrome"),
+      macPath(home, "Library/Application Support/BraveSoftware/Brave-Browser"),
     ]
-    : [join(home, "Library/Application Support/Microsoft Edge")];
+    : [macPath(home, "Library/Application Support/Microsoft Edge")];
   const names = ["Default", "Guest Profile", ...Array.from({ length: 50 }, (_, index) => `Profile ${index + 1}`)];
   const found = names.filter((name) => roots.some((root) => [
-    join(root, name, "Cookies"),
-    join(root, name, "Network/Cookies"),
+    macPath(root, name, "Cookies"),
+    macPath(root, name, "Network/Cookies"),
   ].some(fileExists)));
   return found.length ? found : ALL_PROFILES;
 }
