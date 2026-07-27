@@ -1,7 +1,7 @@
 # ontrack-cli
 
 [![CI](https://github.com/bunizao/ontrack-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/bunizao/ontrack-cli/actions/workflows/ci.yml)
-[![Node.js 22+](https://img.shields.io/badge/Node.js-22%2B-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
+[![Node.js 22.5+](https://img.shields.io/badge/Node.js-22.5%2B-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![Bun 1.3.14+](https://img.shields.io/badge/Bun-1.3.14%2B-000000?logo=bun&logoColor=white)](https://bun.sh/)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
@@ -19,7 +19,7 @@ Use it to inspect projects, tasks, grades, and teaching roles from a terminal or
 
 ## Install
 
-Requires Node.js 22 or newer, or Bun 1.3.14 or newer.
+Requires Node.js 22.5 or newer, or Bun 1.3.14 or newer. Releases of Node.js that gate `node:sqlite` behind an experimental flag are handled automatically.
 
 ```bash
 npm install --global @bunizao/ontrack

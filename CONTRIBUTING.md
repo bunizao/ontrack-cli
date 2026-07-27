@@ -4,7 +4,7 @@ Thank you for improving `ontrack-cli`. Changes should remain small, testable, an
 
 ## Setup
 
-Install Node.js 22 or newer, Bun 1.3.14 or newer, and the project dependencies:
+Install Node.js 22.5 or newer, Bun 1.3.14 or newer, and the project dependencies:
 
 ```bash
 npm ci

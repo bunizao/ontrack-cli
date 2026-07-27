@@ -126,13 +126,30 @@ async function main() {
   let tarball;
   let server;
   try {
+    const built = spawnSync(executable("npm"), ["run", "build"], { cwd: workspace, encoding: "utf8", shell: process.platform === "win32" });
+    assert(built.status === 0, built.stderr || "package build failed");
     const packed = spawnSync(executable("npm"), ["pack", "--json"], { cwd: workspace, encoding: "utf8", shell: process.platform === "win32" });
     assert(packed.status === 0, packed.stderr || "npm pack failed");
     tarball = resolve(workspace, JSON.parse(packed.stdout)[0].filename);
     const installed = spawnSync(executable("npm"), ["install", "--prefix", temporary, tarball], { encoding: "utf8", shell: process.platform === "win32" });
     assert(installed.status === 0, installed.stderr || "tarball installation failed");
-    const cli = join(temporary, "node_modules", "@bunizao", "ontrack", "dist", "cli.js");
+    const packageRoot = join(temporary, "node_modules", "@bunizao", "ontrack");
+    const cli = join(packageRoot, "dist", "cli.js");
     const shim = join(temporary, "node_modules", ".bin", executable("ontrack"));
+    const bundledCookieReader = join(
+      packageRoot,
+      "node_modules",
+      "@steipete",
+      "sweet-cookie",
+      "dist",
+      "providers",
+      "chromeSqlite",
+      "shared.js",
+    );
+    assert(
+      readFileSync(bundledCookieReader, "utf8").includes("statement.setReadBigInts(true)"),
+      "packed browser cookie reader is missing the Node 22 bigint fix",
+    );
 
     const shimHelp = await run(shim, ["--help"]);
     assert(shimHelp.code === 0 && shimHelp.stdout.startsWith("Usage: ontrack ") && shimHelp.stderr === "", "installed shim help failed");

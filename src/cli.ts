@@ -14,6 +14,7 @@ import { loadConfig, resolveBaseUrl, resolveConfigPaths, type Environment } from
 import { CliError } from "./errors.js";
 import { HttpClient } from "./http.js";
 import { OnTrackClient } from "./ontrack.js";
+import { relaunchForNodeSqlite } from "./runtime.js";
 import { createClock } from "./time.js";
 import { VERSION } from "./version.js";
 
@@ -137,4 +138,4 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   }
 }
 
-process.exitCode = await main();
+process.exitCode = await relaunchForNodeSqlite() ?? await main();

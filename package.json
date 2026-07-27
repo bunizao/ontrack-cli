@@ -11,14 +11,18 @@
     "README.md",
     "CONTRIBUTING.md",
     "docs/architecture.md",
+    "scripts/apply-sweet-cookie-patch.mjs",
     "SKILL.md",
     "LICENSE"
   ],
+  "bundleDependencies": [
+    "@steipete/sweet-cookie"
+  ],
   "engines": {
-    "node": ">=22"
+    "node": ">=22.5.0"
   },
   "scripts": {
-    "build": "node scripts/clean-output.mjs && tsc -p tsconfig.build.json && node scripts/mark-cli-executable.mjs",
+    "build": "node scripts/apply-sweet-cookie-patch.mjs && node scripts/clean-output.mjs && tsc -p tsconfig.build.json && node scripts/mark-cli-executable.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && tsc -p tsconfig.json && node .build/tests/harness.js",
     "test:bun": "npm run build && tsc -p tsconfig.json && bun .build/tests/harness.js",
