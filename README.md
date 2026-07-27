@@ -10,12 +10,12 @@ A terminal client for [Doubtfire / OnTrack](https://github.com/doubtfire-lms/dou
 ## Features
 
 - Runs the same emitted ESM package on Node.js and Bun.
-- Imports OnTrack cookies from Chrome, Brave, Edge, or Firefox when the operating system permits access.
+- Imports OnTrack cookies from Chromium browsers on macOS and from readable Firefox profiles.
 - Reuses stored SAML browser sessions through [`okta-auth`](https://github.com/bunizao/okta-auth) before opening an interactive login.
 - Exchanges refresh cookies in memory and stores only the short-lived OnTrack access token with `0600` permissions.
 - Refreshes a rejected read request once, then retries it with a new access token.
 - Produces stable JSON for scripts and readable tables for terminals.
-- Verifies the TypeScript implementation against sanitized output from the final Python release.
+- Verifies command behavior against a sanitized golden corpus.
 
 ## Requirements
 
@@ -37,6 +37,7 @@ Install the current branch from source:
 git clone https://github.com/bunizao/ontrack-cli.git
 cd ontrack-cli
 npm ci
+npm run build
 npm link
 ```
 
@@ -126,9 +127,9 @@ npm run verify:oracle
 npm pack --dry-run
 ```
 
-CI runs the contract suite on Linux, macOS, and Windows with Node.js 22 and 24, plus Bun 1.3.14. The oracle check replays a sanitized live fixture through the pinned Python 0.1.3 implementation and compares representative command output.
+CI runs the contract suite on Linux, macOS, and Windows with Node.js 22 and 24, plus Bun 1.3.14. Maintainer checks also validate the committed compatibility corpus and package contents.
 
-Read [ADR 0001](docs/adr/0001-typescript-7-dual-runtime-rewrite.md) for the cutover decisions and [PORTING.md](PORTING.md) for the module map.
+See [CONTRIBUTING.md](CONTRIBUTING.md) to work on the project and [Architecture](docs/architecture.md) for the current module boundaries.
 
 ## License
 

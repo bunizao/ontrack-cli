@@ -2,7 +2,6 @@
 .github/
 .pytest_cache/
 .venv/
-docs/
 !dist/
 !dist/**
 ontrack_cli/
@@ -11,7 +10,6 @@ src/
 tests/
 *.tgz
 *.pyc
-PORTING.md
 config.example.yaml
 pyproject.toml
 tsconfig*.json

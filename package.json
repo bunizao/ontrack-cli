@@ -9,6 +9,8 @@
   "files": [
     "dist",
     "README.md",
+    "CONTRIBUTING.md",
+    "docs/architecture.md",
     "SKILL.md",
     "LICENSE"
   ],

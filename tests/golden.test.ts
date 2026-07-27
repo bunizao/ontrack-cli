@@ -163,7 +163,7 @@ function commandName(argv: readonly string[]): string {
 
 export async function test_command_goldens_match_or_regenerate_mechanically(): Promise<void> {
   const cases = await goldenCases();
-  assert.equal(cases.length, 18, "the cutover corpus should retain the ADR-sized 18-case matrix");
+  assert.equal(cases.length, 18, "the compatibility corpus should retain its 18-case matrix");
   for (const testCase of cases) {
     const result = await execute(testCase);
     assert.doesNotMatch(`${result.stdout}${result.stderr}`, new RegExp(secretSentinel), testCase.name);
