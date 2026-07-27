@@ -278,8 +278,11 @@ export async function test_interactive_browser_login_discovers_redirect_and_retr
       events.push(`cookies:${cookieReads}`);
       return cookieReads === 1 ? [] : browserCandidate(validCookies());
     },
+    onLoginUrl: (url) => { events.push(`url:${url}`); },
+    onBrowserWait: (timeoutMs) => { events.push(`wait:${timeoutMs}`); },
     promptEnter: async (message) => { events.push(`prompt:${message}`); },
     openBrowser: async (url) => { events.push(`open:${url}`); },
+    loginTimeoutMs: 45_000,
     now: () => new Date("2029-01-01T00:00:00Z"),
     fetch: async (input, init) => {
       const request = new Request(input, init);
@@ -298,8 +301,10 @@ export async function test_interactive_browser_login_discovers_redirect_and_retr
   assert.deepEqual(events, [
     "cookies:1",
     "GET:https://school.example.edu/api/auth/method",
-    "prompt:No active OnTrack browser session was found. Press Enter to open your browser and sign in.",
+    "url:https://identity.example.edu/ontrack/saml",
+    "prompt:No active OnTrack browser session was found. Press Enter to open the sign-in URL in your default browser.",
     "open:https://identity.example.edu/ontrack/saml",
+    "wait:45000",
     "cookies:2",
     "POST:https://school.example.edu/api/auth/access-token",
   ]);
@@ -357,7 +362,9 @@ export async function test_interactive_browser_login_times_out_when_no_cookie_ap
     }),
   }), (error) => error instanceof CliError
     && error.category === "auth"
-    && /Browser sign-in timed out/u.test(error.message));
+    && /No reusable browser session/u.test(error.message)
+    && /https:\/\/school\.example\.edu\/sign_in/u.test(error.message)
+    && /Remember me/u.test(error.message));
 }
 
 export async function test_interactive_browser_login_rechecks_cookie_expiry_after_waiting(): Promise<void> {
@@ -383,7 +390,7 @@ export async function test_interactive_browser_login_rechecks_cookie_expiry_afte
       exchanges += 1;
       return exchangeResponse(null)(input);
     },
-  }), (error) => error instanceof CliError && /Browser sign-in timed out/u.test(error.message));
+  }), (error) => error instanceof CliError && /No reusable browser session/u.test(error.message));
   assert.equal(exchanges, 0);
 }
 

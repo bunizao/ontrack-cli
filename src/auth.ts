@@ -53,6 +53,8 @@ export interface ResolveAuthenticatedSessionOptions extends BrowserSessionOption
 export interface LoginAuthenticatedSessionOptions extends BrowserSessionOptions {
   readonly loginTimeoutMs?: number;
   readonly loginPollIntervalMs?: number;
+  readonly onLoginUrl?: (url: string) => void;
+  readonly onBrowserWait?: (timeoutMs: number) => void;
   readonly promptEnter?: (message: string) => Promise<void>;
   readonly openBrowser?: (url: string) => Promise<void>;
 }
@@ -411,8 +413,9 @@ export async function loginAuthenticatedSession(
   if (!options.promptEnter || !options.openBrowser) {
     throw authError("Interactive browser login is unavailable in this environment.");
   }
+  options.onLoginUrl?.(loginUrl);
   try {
-    await options.promptEnter("No active OnTrack browser session was found. Press Enter to open your browser and sign in.");
+    await options.promptEnter("No active OnTrack browser session was found. Press Enter to open the sign-in URL in your default browser.");
   } catch (error) {
     if (options.signal?.aborted) throw new CliError("cancellation", "Authentication cancelled.");
     if (error instanceof CliError) throw error;
@@ -427,6 +430,7 @@ export async function loginAuthenticatedSession(
   }
 
   const loginTimeoutMs = options.loginTimeoutMs ?? 300_000;
+  options.onBrowserWait?.(loginTimeoutMs);
   const pollIntervalMs = options.loginPollIntervalMs ?? 1_000;
   const deadline = Date.now() + loginTimeoutMs;
   while (true) {
@@ -435,7 +439,8 @@ export async function loginAuthenticatedSession(
     if (session) return session;
     const remainingMs = deadline - Date.now();
     if (remainingMs <= 0) {
-      throw authError("Browser sign-in timed out. Complete sign-in and run `ontrack auth login` again.");
+      const signInPage = new URL("/sign_in", options.baseUrl).href;
+      throw authError(`No reusable browser session was detected. Open ${signInPage}, enable Remember me, then run \`ontrack auth login\` again.`);
     }
     await waitForBrowserCookies(Math.min(pollIntervalMs, remainingMs), options.signal);
   }

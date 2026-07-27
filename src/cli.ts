@@ -66,6 +66,10 @@ async function authLogin(signal: AbortSignal, env: Environment, platform: NodeJS
     sessionFile: paths.sessionFile,
     signal,
     browserCookieProvider: () => browserCookieCandidates(baseUrl, { onWarning: showWarning }),
+    onLoginUrl: (url) => { process.stderr.write(`Sign-in URL: ${url}\n`); },
+    onBrowserWait: (timeoutMs) => {
+      process.stderr.write(`Waiting up to ${Math.ceil(timeoutMs / 1_000)} seconds for a reusable browser session (Remember me must be enabled). Press Ctrl-C to cancel.\n`);
+    },
     promptEnter: (message) => promptForBrowserLogin(message, signal),
     openBrowser: (url) => openSystemBrowser(url, { platform }),
   });

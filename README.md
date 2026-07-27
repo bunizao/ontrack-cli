@@ -46,12 +46,14 @@ ontrack projects
 `auth login` first looks for a valid OnTrack session in your local browser profiles. If none is available, it:
 
 1. requests the sign-in URL from `/api/auth/method`;
-2. asks you to press Enter;
-3. opens the returned URL in your default browser;
+2. prints the sign-in URL so you can copy it to any browser;
+3. asks you to press Enter to open the same URL in your default browser;
 4. waits for the browser to complete sign-in; and
 5. exchanges the new OnTrack cookies for a short-lived access token.
 
 You do not need to install or configure `okta-auth`, and you do not need to click **Sign in** on the OnTrack landing page. Normal data commands never open a browser; they ask you to run `ontrack auth login` when authentication is required.
+
+Automatic completion requires **Remember me** to be enabled in OnTrack. The OnTrack API only creates reusable browser cookies when that setting is enabled; otherwise the browser can sign in successfully but the CLI cannot import the session. The command reports its five-minute waiting limit and explains this setting if it times out.
 
 Cookie discovery is provided by [`@steipete/sweet-cookie`](https://github.com/steipete/sweet-cookie). It reads every local profile for Chrome, Edge, and Firefox on macOS, Windows, and Linux, plus Safari and Brave on macOS. It uses the operating system credential store and does not require a global `sqlite3` command.
 

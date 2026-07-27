@@ -70,6 +70,20 @@ export async function test_browser_cookie_discovery_keeps_browser_profiles_separ
   ]);
 }
 
+export async function test_browser_cookie_discovery_rejects_a_non_reusable_username_cookie(): Promise<void> {
+  const candidates = await browserCookieCandidates("https://ontrack.example.edu", {
+    platform: "linux",
+    getCookies: async (options) => ({
+      cookies: options.browsers?.[0] === "chrome"
+        ? [{ name: "username", value: "alice", domain: "ontrack.example.edu", source: { browser: "chrome" } }]
+        : [],
+      warnings: [],
+    }),
+  });
+
+  assert.deepEqual(candidates, []);
+}
+
 export async function test_browser_cookie_discovery_keeps_chromium_stores_separate(): Promise<void> {
   const candidates = await browserCookieCandidates("https://ontrack.example.edu", {
     platform: "darwin",
