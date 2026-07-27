@@ -96,13 +96,18 @@ function spawnInterruptible(runtime, args, env, workspace) {
   return { child, ready, controlDirectory, interruptPath, stdoutPath, stderrPath };
 }
 
+const interruptReadyTimeoutMs = 30_000;
+
 async function waitForInterruptReadiness(child, events) {
   let timeout;
   try {
     await Promise.race([
       Promise.all(events),
       new Promise((_, reject) => {
-        timeout = setTimeout(() => reject(new Error("Console interrupt process did not become ready within 10 seconds")), 10_000);
+        timeout = setTimeout(
+          () => reject(new Error(`Console interrupt process did not become ready within ${interruptReadyTimeoutMs / 1_000} seconds`)),
+          interruptReadyTimeoutMs,
+        );
       }),
     ]);
   } catch (error) {
