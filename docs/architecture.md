@@ -1,6 +1,6 @@
 # Architecture
 
-`ontrack-cli` is a TypeScript command-line client for Doubtfire / OnTrack. TypeScript compiles to standard ESM in `dist/`; the same files run on Node.js and Bun without npm runtime dependencies.
+`ontrack-cli` is a TypeScript command-line client for Doubtfire / OnTrack. TypeScript compiles to standard ESM in `dist/`; the same files run on Node.js and Bun.
 
 ## Request flow
 
@@ -28,11 +28,15 @@ Each boundary has one job:
 
 ## Authentication boundary
 
-Explicit credentials take precedence over the local session cache and browser-backed providers. Browser and `okta-auth` cookies are filtered for the target deployment and exchanged in memory for an OnTrack access token. Refresh cookies are not copied into the CLI cache.
+Explicit credentials take precedence over the local session cache and browser cookies. Browser cookies are filtered for the target deployment and exchanged in memory for an OnTrack access token. Refresh cookies are not copied into the CLI cache.
 
 The cache stores the deployment URL, username, access token, expiry, and credential source with file mode `0600`. A rejected GET request may refresh credentials and retry once. The client does not retry mutating requests.
 
-Authentication cannot extend a server-side session beyond the deployment or identity provider policy. When reusable application and SAML sessions have expired, interactive sign-in is required.
+Browser discovery is delegated to `@steipete/sweet-cookie`, then normalized behind the local browser-cookie boundary. Each browser is queried separately so credentials from different profiles are never combined. Non-fatal provider warnings are shown during `auth login` without exposing cookie values.
+
+When no usable browser cookies exist, `auth login` requests a dynamic SAML URL from `/api/auth/method`, waits for terminal confirmation, opens the system browser, and polls supported browser profiles for the completed OnTrack session. Other commands never start interactive authentication.
+
+Authentication cannot extend a server-side session beyond the deployment or identity provider policy. When the browser session expires, interactive sign-in is required.
 
 ## Data contracts
 
@@ -44,7 +48,7 @@ Successful non-interactive `--json` commands write one JSON value to stdout and 
 
 ## Verification
 
-Tests use dependency injection at the HTTP, clock, browser-cookie, and subprocess boundaries. The suite includes:
+Tests use dependency injection at the HTTP, clock, browser-cookie, prompt, and browser-opening boundaries. The suite includes:
 
 - unit and integration tests in `tests/*.test.ts`;
 - synthetic response fixtures in `tests/fixtures/`;

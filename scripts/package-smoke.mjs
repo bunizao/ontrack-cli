@@ -1,9 +1,9 @@
 import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
-import { delimiter, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 
 function executable(name) {
   return process.platform === "win32" ? `${name}.cmd` : name;
@@ -118,17 +118,6 @@ async function waitForInterruptReadiness(child, events) {
   }
 }
 
-function fakeOkta(directory) {
-  const payload = '{"cookies":[{"name":"username","value":"student","domain":"127.0.0.1","path":"/"},{"name":"refresh_token","value":"refresh","domain":"127.0.0.1","path":"/"}]}';
-  if (process.platform === "win32") {
-    writeFileSync(join(directory, "okta.cmd"), `@echo off\r\necho ${payload}\r\n`);
-  } else {
-    const path = join(directory, "okta");
-    writeFileSync(path, `#!/bin/sh\nprintf '%s' '${payload}'\n`);
-    chmodSync(path, 0o755);
-  }
-}
-
 async function main() {
   const workspace = process.cwd();
   const packageMetadata = JSON.parse(readFileSync(join(workspace, "package.json"), "utf8"));
@@ -177,15 +166,13 @@ async function main() {
     await once(server, "listening");
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("Smoke server did not bind a port");
-    fakeOkta(temporary);
     const authenticatedEnv = {
       ...process.env,
       ONTRACK_BASE_URL: `http://127.0.0.1:${address.port}`,
       ONTRACK_CONFIG: join(temporary, "config.yaml"),
-      PATH: `${temporary}${delimiter}${process.env.PATH ?? ""}`,
+      ONTRACK_USERNAME: "student",
+      ONTRACK_AUTH_TOKEN: "access-token",
     };
-    delete authenticatedEnv.ONTRACK_USERNAME;
-    delete authenticatedEnv.ONTRACK_AUTH_TOKEN;
     for (const runtime of runtimes) {
       rmSync(join(temporary, "session.json"), { force: true });
       const projects = await run(runtime, [cli, "projects", "--json"], authenticatedEnv);

@@ -3,16 +3,29 @@
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { createInterface } from "node:readline/promises";
 
 import { OnTrackApplication } from "./application.js";
 import { loginAuthenticatedSession, resolveAuthenticatedSession } from "./auth.js";
+import { openSystemBrowser } from "./browser.js";
 import { browserCookieCandidates } from "./browser-cookies.js";
 import { executeCli, type CliApplication } from "./cli-app.js";
 import { loadConfig, resolveBaseUrl, resolveConfigPaths, type Environment } from "./config.js";
+import { CliError } from "./errors.js";
 import { HttpClient } from "./http.js";
 import { OnTrackClient } from "./ontrack.js";
 import { createClock } from "./time.js";
 import { VERSION } from "./version.js";
+
+async function promptForBrowserLogin(message: string, signal: AbortSignal): Promise<void> {
+  if (!process.stdin.isTTY) throw new CliError("auth", "Interactive browser login requires a terminal.");
+  const prompt = createInterface({ input: process.stdin, output: process.stderr });
+  try {
+    await prompt.question(`${message} `, { signal });
+  } finally {
+    prompt.close();
+  }
+}
 
 function lazyApplication(signal: AbortSignal, env: Environment, platform: NodeJS.Platform): CliApplication {
   let application: Promise<OnTrackApplication> | undefined;
@@ -41,15 +54,19 @@ async function authLogin(signal: AbortSignal, env: Environment, platform: NodeJS
   });
   const config = loadConfig(paths);
   const baseUrl = resolveBaseUrl(env, config);
+  const shownWarnings = new Set<string>();
+  const showWarning = (warning: string): void => {
+    if (shownWarnings.has(warning)) return;
+    shownWarnings.add(warning);
+    process.stderr.write(`Browser cookie warning: ${warning}\n`);
+  };
   const session = await loginAuthenticatedSession({
     baseUrl,
     sessionFile: paths.sessionFile,
-    env,
-    platform,
-    config,
     signal,
-    browserCookieProvider: () => browserCookieCandidates(baseUrl, { platform }),
-    promptOutput: (text) => process.stderr.write(text),
+    browserCookieProvider: () => browserCookieCandidates(baseUrl, { onWarning: showWarning }),
+    promptEnter: (message) => promptForBrowserLogin(message, signal),
+    openBrowser: (url) => openSystemBrowser(url, { platform }),
   });
   return {
     username: session.username,
@@ -72,10 +89,9 @@ async function createApplication(signal: AbortSignal, env: Environment, platform
     baseUrl,
     sessionFile: paths.sessionFile,
     env,
-    platform,
     config,
     signal,
-    browserCookieProvider: () => browserCookieCandidates(baseUrl, { platform }),
+    browserCookieProvider: () => browserCookieCandidates(baseUrl),
   });
   const sessionState = { current: session };
   const http = new HttpClient({
@@ -87,11 +103,10 @@ async function createApplication(signal: AbortSignal, env: Environment, platform
         baseUrl,
         sessionFile: paths.sessionFile,
         env,
-        platform,
         config,
         signal: refreshSignal,
         skipCache: true,
-        browserCookieProvider: () => browserCookieCandidates(baseUrl, { platform }),
+        browserCookieProvider: () => browserCookieCandidates(baseUrl),
       });
       sessionState.current = session;
       return { username: session.username, accessToken: session.accessToken };

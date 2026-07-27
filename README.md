@@ -5,33 +5,27 @@
 [![Bun 1.3.14+](https://img.shields.io/badge/Bun-1.3.14%2B-000000?logo=bun&logoColor=white)](https://bun.sh/)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-A terminal client for [Doubtfire / OnTrack](https://github.com/doubtfire-lms/doubtfire-api). It provides fast access to projects, tasks, grades, and teaching roles while reusing your existing browser sign-in.
+A read-only command-line client for [Doubtfire / OnTrack](https://github.com/doubtfire-lms/doubtfire-api).
+
+Use it to inspect projects, tasks, grades, and teaching roles from a terminal or script. The CLI reuses your OnTrack browser session and does not require a separate authentication package.
 
 ## Features
 
-- Runs the same emitted ESM package on Node.js and Bun.
-- Imports OnTrack cookies from Chromium browsers on macOS and from readable Firefox profiles.
-- Reuses stored SAML browser sessions through [`okta-auth`](https://github.com/bunizao/okta-auth) before opening an interactive login.
-- Exchanges refresh cookies in memory and stores only the short-lived OnTrack access token with `0600` permissions.
-- Refreshes a rejected read request once, then retries it with a new access token.
-- Produces stable JSON for scripts and readable tables for terminals.
-- Verifies command behavior against a sanitized golden corpus.
-
-## Requirements
-
-- Node.js 22 or newer, or Bun 1.3.14 or newer
-- An OnTrack deployment URL
-- `okta-auth` for browser-based SAML login, unless you provide explicit credentials
+- Read projects, task schedules, grades, and teaching roles.
+- Sign in through your existing browser session.
+- Return stable JSON for scripts or readable tables for terminals.
+- Run the same package with Node.js or Bun.
+- Refresh an expired access token from the browser without storing refresh cookies.
 
 ## Install
 
-Install the package after it is published:
+Requires Node.js 22 or newer, or Bun 1.3.14 or newer.
 
 ```bash
 npm install --global @bunizao/ontrack
 ```
 
-Install the current branch from source:
+To install from source:
 
 ```bash
 git clone https://github.com/bunizao/ontrack-cli.git
@@ -41,49 +35,41 @@ npm run build
 npm link
 ```
 
-The installed command remains `ontrack` under both runtimes.
-
 ## Quick start
 
-Set the root URL for your OnTrack deployment:
-
 ```bash
-export ONTRACK_BASE_URL='https://ontrack.example.edu'
-```
-
-Install and configure `okta-auth`, then obtain an OnTrack access token:
-
-```bash
-uv tool install okta-auth-cli
-okta config
+export ONTRACK_BASE_URL='https://ontrack.infotech.monash.edu'
 ontrack auth login
-ontrack auth check
+ontrack projects
 ```
 
-`auth login` tries these sources in order:
+`auth login` first looks for a valid OnTrack session in your local browser profiles. If none is available, it:
 
-1. A matching browser cookie pair from a local profile
-2. A stored OnTrack session from `okta-auth`
-3. A stored session for the deployment's SAML sign-in URL
-4. A visible SAML login
+1. requests the sign-in URL from `/api/auth/method`;
+2. asks you to press Enter;
+3. opens the returned URL in your default browser;
+4. waits for the browser to complete sign-in; and
+5. exchanges the new OnTrack cookies for a short-lived access token.
 
-The CLI follows the SAML URL returned by `/api/auth/method`, so you do not need to click the OnTrack landing page's **Sign in** button. Normal data commands do not open an interactive browser.
+You do not need to install or configure `okta-auth`, and you do not need to click **Sign in** on the OnTrack landing page. Normal data commands never open a browser; they ask you to run `ontrack auth login` when authentication is required.
 
-On macOS, reading Chromium profiles may require Files and Folders permission and Keychain access. Firefox import requires the `sqlite3` command. If direct profile access fails, the CLI continues with the stored SAML session.
+Cookie discovery is provided by [`@steipete/sweet-cookie`](https://github.com/steipete/sweet-cookie). It reads every local profile for Chrome, Edge, and Firefox on macOS, Windows, and Linux, plus Safari and Brave on macOS. It uses the operating system credential store and does not require a global `sqlite3` command.
+
+Browser security rules still apply. On macOS, the terminal running `ontrack` may need Files and Folders or Full Disk Access, and Chromium may request Keychain access. Recent Chrome and Edge releases on Windows may protect cookies with App-Bound Encryption; when those cookies cannot be read, the CLI prints a warning and can still use another supported browser profile.
 
 ## Commands
 
 | Command | Description |
 | --- | --- |
 | `ontrack user` | Show the authenticated user. |
-| `ontrack auth login` | Obtain and cache an OnTrack access token. |
-| `ontrack auth check` | Validate authentication and show project and role counts. |
+| `ontrack auth login` | Sign in through OnTrack and cache an access token. |
+| `ontrack auth check` | Check authentication and show project and role counts. |
 | `ontrack projects` | List current projects. |
-| `ontrack project <id>` | Show one project with its task snapshot. |
-| `ontrack tasks <id>` | List tasks for one project. |
+| `ontrack project <id>` | Show a project and its task snapshot. |
+| `ontrack tasks <id>` | List tasks for a project. |
 | `ontrack roles` | List teaching and administrative roles. |
 
-Useful options:
+Every command supports `--json`:
 
 ```bash
 ontrack projects --include-inactive --json
@@ -91,30 +77,30 @@ ontrack tasks 12345 --status rediscuss --json
 ontrack roles --all --json
 ```
 
-Every command supports `--json`. Successful JSON commands write only the result to stdout; failures leave stdout empty. The TypeScript release removes the former `--yaml` output mode.
+Successful JSON commands write only the result to stdout. Diagnostics and interactive prompts go to stderr.
 
 ## Configuration
 
-You can place `config.yaml` in the current directory, `$XDG_CONFIG_HOME/ontrack-cli/config.yaml`, or `~/.config/ontrack-cli/config.yaml`:
+Set the deployment URL with `ONTRACK_BASE_URL`, or add it to `config.yaml`:
 
 ```yaml
-base_url: https://ontrack.example.edu
+base_url: https://ontrack.infotech.monash.edu
 ```
 
-`ONTRACK_CONFIG` selects a specific file. Configuration lookup follows this order:
+The CLI checks these configuration locations in order:
 
-1. `ONTRACK_CONFIG`
-2. `config.yaml` in the current directory
-3. The XDG or platform configuration directory
+1. the file selected by `ONTRACK_CONFIG`;
+2. `config.yaml` in the current directory; and
+3. the platform configuration directory, such as `~/.config/ontrack-cli/config.yaml`.
 
-For automation, provide both values together:
+For non-interactive automation, provide an explicit credential pair:
 
 ```bash
 export ONTRACK_USERNAME='your_username'
 export ONTRACK_AUTH_TOKEN='your_access_token'
 ```
 
-Explicit credentials take precedence over cached and browser-backed sessions. The CLI never writes refresh cookies to its cache or includes credentials in output and diagnostics.
+Explicit credentials take precedence over the local session cache and browser cookies. The cache contains only the username, short-lived access token, expiry, deployment URL, and credential source. Refresh cookies are never copied into it.
 
 ## Development
 
@@ -124,12 +110,12 @@ npm run typecheck
 npm test
 npm run test:bun
 npm run verify:oracle
-npm pack --dry-run
+node scripts/package-smoke.mjs
 ```
 
-CI runs the contract suite on Linux, macOS, and Windows with Node.js 22 and 24, plus Bun 1.3.14. Maintainer checks also validate the committed compatibility corpus and package contents.
+CI verifies the contract suite and packed npm artifact on Linux, macOS, and Windows with Node.js 22, Node.js 24, and Bun.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) to work on the project and [Architecture](docs/architecture.md) for the current module boundaries.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow and [Architecture](docs/architecture.md) for the module boundaries.
 
 ## License
 

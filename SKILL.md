@@ -10,7 +10,7 @@ Use `ontrack` for read-only OnTrack inspection.
 ## Workflow
 
 1. Run `ontrack auth check --json` before a protected query when authentication state is unknown.
-2. If authentication fails, run `ontrack auth login --json`. Let the command reuse browser cookies or a stored SAML session before starting an interactive login.
+2. If authentication fails, run `ontrack auth login --json`. Let the command search supported browser profiles or open the SAML sign-in URL in the default browser.
 3. Resolve an unfamiliar project with `ontrack projects --json` before requesting project or task detail.
 4. Run the narrowest command that answers the request. Prefer `--json` for automation.
 5. Return the requested facts instead of pasting the full response unless the user asks for raw JSON.
@@ -34,11 +34,11 @@ Repeat `--status` to match more than one raw task status.
 
 ## Authentication
 
-- Treat access tokens, refresh cookies, browser cookies, and saved `okta-auth` sessions as secrets.
-- Never print or copy values from `~/.config/ontrack-cli/session.json` or `~/.okta-auth`.
+- Treat access tokens, refresh cookies, and browser cookies as secrets.
+- Never print or copy values from `~/.config/ontrack-cli/session.json` or browser storage.
 - Use `ONTRACK_USERNAME` and `ONTRACK_AUTH_TOKEN` only when the user supplies an explicit credential pair.
 - Expect `auth login` to cache a short-lived access token with `0600` permissions. The CLI exchanges browser refresh cookies in memory and does not copy them into its cache.
-- Do not automate clicks on the OnTrack landing page. The CLI follows the SAML sign-in URL returned by the API.
+- Do not automate clicks on the OnTrack landing page. After terminal confirmation, the CLI opens the SAML sign-in URL returned by the API.
 
 ## Output
 
