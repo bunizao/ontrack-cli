@@ -55,7 +55,7 @@ You do not need to install or configure `okta-auth`, and you do not need to clic
 
 Cookie discovery is provided by [`@steipete/sweet-cookie`](https://github.com/steipete/sweet-cookie). It reads every local profile for Chrome, Edge, and Firefox on macOS, Windows, and Linux, plus Safari and Brave on macOS. It uses the operating system credential store and does not require a global `sqlite3` command.
 
-Browser security rules still apply. On macOS, the terminal running `ontrack` may need Files and Folders or Full Disk Access, and Chromium may request Keychain access. Recent Chrome and Edge releases on Windows may protect cookies with App-Bound Encryption; when those cookies cannot be read, the CLI prints a warning and can still use another supported browser profile.
+Browser security rules still apply. On macOS, grant Full Disk Access to the application that launches `ontrack`—for example Terminal, iTerm, or ChatGPT—not to the CLI itself. Chromium may also request Keychain access. When access is denied, `auth login` prints the relevant System Settings location without exposing browser paths or Cookie values. Recent Chrome and Edge releases on Windows may protect cookies with App-Bound Encryption; the CLI can still try another supported browser profile.
 
 ## Commands
 

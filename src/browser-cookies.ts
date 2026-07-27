@@ -53,9 +53,9 @@ export async function browserCookieCandidates(
     try {
       const result = await getCookies(cookieRequest(requestUrl, browser, platform, options));
       results.push(result);
-      for (const warning of result.warnings) warnings.add(warning);
+      for (const warning of result.warnings) warnings.add(normalizeWarning(browser, warning, platform));
     } catch (error) {
-      warnings.add(extractorFailure(browser, error));
+      warnings.add(extractorFailure(browser, error, platform));
     }
   }
   for (const warning of warnings) options.onWarning?.(warning);
@@ -122,13 +122,28 @@ function macosChromiumProfiles(
   return found.length ? found : ALL_PROFILES;
 }
 
-function extractorFailure(browser: BrowserName, error: unknown): string {
+function extractorFailure(browser: BrowserName, error: unknown, platform: NodeJS.Platform): string {
   const code = typeof error === "object" && error !== null && "code" in error
     && typeof error.code === "string" ? error.code : undefined;
   if (code === "EPERM" || code === "EACCES") {
-    return `Permission denied while reading ${browser} cookies (${code}).`;
+    return permissionWarning(browser, code, platform);
   }
   return `Could not read ${browser} cookies${code ? ` (${code})` : ""}.`;
+}
+
+function normalizeWarning(browser: BrowserName, warning: string, platform: NodeJS.Platform): string {
+  const code = warning.match(/\b(EPERM|EACCES)\b/iu)?.[1]?.toUpperCase();
+  return code === "EPERM" || code === "EACCES"
+    ? permissionWarning(browser, code, platform)
+    : warning;
+}
+
+function permissionWarning(browser: BrowserName, code: "EPERM" | "EACCES", platform: NodeJS.Platform): string {
+  const label = `${browser[0]?.toUpperCase() ?? ""}${browser.slice(1)}`;
+  const action = platform === "darwin"
+    ? "In System Settings > Privacy & Security > Full Disk Access, allow the terminal or app that launched ontrack, then retry."
+    : "Allow the terminal or app that launched ontrack to access browser data, then retry.";
+  return `Permission denied while reading ${label} cookies (${code}). ${action}`;
 }
 
 function mapCookie(cookie: Cookie): BrowserCookie | undefined {

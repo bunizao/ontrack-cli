@@ -145,8 +145,29 @@ export async function test_browser_cookie_discovery_preserves_permission_failure
     },
   });
 
-  assert.deepEqual(warnings, ["Permission denied while reading chrome cookies (EPERM)."]);
+  assert.deepEqual(warnings, [
+    "Permission denied while reading Chrome cookies (EPERM). Allow the terminal or app that launched ontrack to access browser data, then retry.",
+  ]);
   assert.doesNotMatch(warnings.join("\n"), /secret details/u);
+}
+
+export async function test_macos_permission_warnings_explain_full_disk_access_without_leaking_paths(): Promise<void> {
+  const warnings: string[] = [];
+  await browserCookieCandidates("https://ontrack.example.edu", {
+    platform: "darwin",
+    onWarning: (warning) => warnings.push(warning),
+    getCookies: async (options) => ({
+      cookies: [],
+      warnings: options.browsers?.[0] === "chrome"
+        ? ["Failed to copy Chrome cookie DB: EPERM: operation not permitted, copyfile '/Users/private/Cookies' -> '/tmp/private/Cookies'"]
+        : [],
+    }),
+  });
+
+  assert.deepEqual(warnings, [
+    "Permission denied while reading Chrome cookies (EPERM). In System Settings > Privacy & Security > Full Disk Access, allow the terminal or app that launched ontrack, then retry.",
+  ]);
+  assert.doesNotMatch(warnings.join("\n"), /Users|\/tmp/u);
 }
 
 export async function test_browser_cookie_discovery_maps_url_only_cookies_to_the_request_host(): Promise<void> {
