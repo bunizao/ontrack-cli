@@ -2,6 +2,7 @@ import { parseArgs } from "node:util";
 
 import { CliError, exitCodeFor } from "./errors.js";
 import { renderJson, renderTable } from "./render.js";
+import type { TaskSubmissionOptions, TaskSubmissionPlan } from "./submission.js";
 
 export interface CliApplication {
   resolveProject(reference: string): Promise<number>;
@@ -15,6 +16,8 @@ export interface CliApplication {
   taskResourcesDownload(projectId: number, task: string, options: { readonly output?: string }): Promise<unknown>;
   taskRead(projectId: number, task: string): Promise<unknown>;
   taskState(projectId: number, task: string, state: string): Promise<unknown>;
+  prepareTaskSubmission(projectId: number, task: string, options: TaskSubmissionOptions): Promise<TaskSubmissionPlan>;
+  submitTask(plan: TaskSubmissionPlan): Promise<unknown>;
   chats(projectId: number, options: { readonly task?: string }): Promise<unknown>;
   chatSend(projectId: number, task: string, message: string): Promise<unknown>;
   roles(options: { readonly showAll: boolean }): Promise<unknown>;
@@ -33,6 +36,7 @@ interface Dependencies {
   readonly sensitiveValues?: readonly string[];
   readonly onDiagnostic?: (message: string) => void;
   readonly confirmChatSend?: (details: ChatSendConfirmation) => Promise<boolean>;
+  readonly confirmTaskSubmit?: (plan: TaskSubmissionPlan) => Promise<boolean>;
 }
 
 export interface ChatSendConfirmation {
@@ -41,7 +45,7 @@ export interface ChatSendConfirmation {
   readonly message: string;
 }
 
-type OutputView = "auth-check" | "auth-login" | "chat-send" | "chats-history" | "chats-summary" | "download" | "markdown" | "project" | "projects" | "roles" | "task-state" | "tasks" | "user";
+type OutputView = "auth-check" | "auth-login" | "chat-send" | "chats-history" | "chats-summary" | "download" | "markdown" | "project" | "projects" | "roles" | "submission" | "task-state" | "tasks" | "user";
 
 interface InvocationResult {
   readonly value: unknown;
@@ -95,6 +99,7 @@ function rootHelp(): string {
     "  task resources <project> <task> Download one task's resources",
     "  task read <project> <task> Print one task sheet as Markdown",
     "  task state <project> <task> <state> Change one task's workflow state",
+    "  task submit <project> <task> Submit task files for feedback",
     "  chats <project> [task] Show unread chat counts or one task's history",
     "  chats send <project> <task> Send one text chat message",
     "  roles                List teaching roles",
@@ -135,7 +140,7 @@ function helpFor(argv: readonly string[]): string | undefined {
     return "Usage: ontrack resources <command>\n\nCommands:\n  download <project> Download all task sheets and resources\n";
   }
   if (args.length === 1 && args[0] === "task") {
-    return "Usage: ontrack task <command>\n\nCommands:\n  sheet <project> <task>        Download one task sheet\n  resources <project> <task>    Download one task's resources\n  read <project> <task>         Print one task sheet as Markdown\n  state <project> <task> <state> Change one task's workflow state\n";
+    return "Usage: ontrack task <command>\n\nCommands:\n  sheet <project> <task>         Download one task sheet\n  resources <project> <task>     Download one task's resources\n  read <project> <task>          Print one task sheet as Markdown\n  state <project> <task> <state> Change one task's workflow state\n  submit <project> <task>        Submit task files\n";
   }
   if (args[0] === "user") return commandHelp("ontrack user", "Show the resolved signed-in user.", []);
   if (key === "auth check") return commandHelp("ontrack auth check", "Validate current credentials.", []);
@@ -182,6 +187,18 @@ function helpFor(argv: readonly string[]): string | undefined {
     "Change one assigned task's workflow state.",
     [],
     "Student states are not_started, working_on_it, and need_help. This does not submit files.",
+  );
+  if (key === "task submit") return commandHelp(
+    "ontrack task submit <project> <task>",
+    "Submit files for one assigned task.",
+    [
+      "  --file <path>       File in upload-requirement order; repeat for each file",
+      "  --type <type>       ready_for_feedback (default), need_help, or assess_in_portfolio",
+      "  --comment <text>    Optional submission comment",
+      "  --accept-tii-eula   Confirm acceptance of the Turnitin EULA for this submission",
+      "  -y, --yes            Confirm without an interactive prompt",
+    ],
+    "This changes OnTrack. Accepted files are processed asynchronously.",
   );
   if (key === "chats send") return commandHelp(
     "ontrack chats send <project> <task>",
@@ -310,6 +327,16 @@ function terminal(view: OutputView, value: unknown, emptyMessage?: string): stri
       time: data.created_at,
       message: terminalText(data.message),
     }], [["project", "Project"], ["task", "Task"], ["comment", "Comment ID"], ["time", "Time"], ["message", "Message"]]);
+  }
+  if (view === "submission") {
+    const data = record(value);
+    return recordTable([
+      ["Project", data.project_id],
+      ["Task", data.task],
+      ["Submission type", data.submission_type],
+      ["Status", data.status],
+      ["Processing asynchronously", data.processing_async === true ? "Yes" : "No"],
+    ]);
   }
   if (view === "roles") {
     const rows = records(value).map((role) => {
@@ -466,6 +493,45 @@ async function invoke(argv: readonly string[], dependencies: Dependencies): Prom
       value: await app.taskState(await resolvedProjectId(parsed.positionals[0], app), task, state),
       json: parsed.values.json ?? false,
       view: "task-state",
+    };
+  }
+  if (command === "task" && rest[0] === "submit") {
+    const parsed = parseArgs({
+      args: rest.slice(1),
+      options: {
+        ...common,
+        file: { type: "string", multiple: true },
+        type: { type: "string" },
+        comment: { type: "string" },
+        "accept-tii-eula": { type: "boolean" },
+        yes: { type: "boolean", short: "y" },
+      },
+      allowPositionals: true,
+      strict: true,
+    });
+    if (parsed.positionals.length !== 2) throw new CliError("usage", "task submit requires a project and task abbreviation");
+    const task = parsed.positionals[1]?.trim();
+    if (!task) throw new CliError("usage", "task abbreviation must not be empty");
+    const files = parsed.values.file ?? [];
+    if (files.length === 0 || files.some((file) => !file.trim())) throw new CliError("usage", "task submit requires at least one non-empty --file path");
+    const type = parsed.values.type?.trim() || "ready_for_feedback";
+    const comment = parsed.values.comment;
+    if (comment !== undefined && !comment.trim()) throw new CliError("usage", "submission comment must not be empty");
+    const confirmTaskSubmit = dependencies.confirmTaskSubmit;
+    if (!parsed.values.yes && !confirmTaskSubmit) {
+      throw new CliError("usage", "Task submission requires confirmation. Use --yes only after the user confirms the exact project, task, file list, and submission type.");
+    }
+    const projectId = await resolvedProjectId(parsed.positionals[0], app);
+    const baseOptions = { files, type, acceptTiiEula: parsed.values["accept-tii-eula"] ?? false };
+    const options = comment === undefined ? baseOptions : { ...baseOptions, comment };
+    const plan = await app.prepareTaskSubmission(projectId, task, options);
+    if (!parsed.values.yes && confirmTaskSubmit && !await confirmTaskSubmit(plan)) {
+      throw new CliError("usage", "Task submission was not confirmed.");
+    }
+    return {
+      value: await app.submitTask(plan),
+      json: parsed.values.json ?? false,
+      view: "submission",
     };
   }
   if (command === "chats" && rest[0] === "send") {

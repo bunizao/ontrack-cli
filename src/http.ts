@@ -42,6 +42,7 @@ interface ByteRange {
 }
 
 const maxDownloadBytes = 256 * 1024 * 1024;
+const maxErrorResponseBytes = 64 * 1024;
 
 function archiveTooLarge(): CliError {
   return new CliError("upstream_api", "OnTrack download exceeds the 256 MiB limit");
@@ -126,6 +127,37 @@ async function responseBytes(response: Response, limit?: number): Promise<Uint8A
   return bytes.subarray(0, total);
 }
 
+async function errorResponseBytes(response: Response): Promise<Uint8Array> {
+  if (!response.body) return new Uint8Array();
+  const reader = response.body.getReader();
+  const bytes = new Uint8Array(maxErrorResponseBytes);
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) return bytes.subarray(0, total);
+    if (total + value.length > bytes.length) {
+      await reader.cancel();
+      return new Uint8Array();
+    }
+    bytes.set(value, total);
+    total += value.length;
+  }
+}
+
+function upstreamErrorDetail(bytes: Uint8Array): string | undefined {
+  if (bytes.length === 0) return undefined;
+  try {
+    const value = JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+    const error = Reflect.get(value, "error");
+    if (typeof error !== "string") return undefined;
+    const safe = error.replace(/[\u0000-\u001f\u007f]/gu, " ").replace(/\s+/gu, " ").trim();
+    return safe ? Array.from(safe).slice(0, 500).join("") : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export class HttpClient {
   readonly #baseUrl: URL;
   readonly #fetch: typeof globalThis.fetch;
@@ -202,7 +234,10 @@ export class HttpClient {
       if (response.status === 401 || response.status === 419) {
         throw new CliError("auth", "OnTrack rejected the authenticated session", response.status);
       }
-      if (!response.ok) throw new CliError("upstream_api", `OnTrack returned HTTP ${response.status}`, response.status);
+      if (!response.ok) {
+        const detail = upstreamErrorDetail(response.bytes);
+        throw new CliError("upstream_api", `OnTrack returned HTTP ${response.status}${detail ? `: ${detail}` : ""}`, response.status);
+      }
       return response;
     }
     throw new CliError("auth", "OnTrack rejected the refreshed session", 419);
@@ -235,8 +270,7 @@ export class HttpClient {
       if (options.body !== undefined) init.body = options.body;
       const response = await this.#fetch(url, init);
       if (!response.ok) {
-        await response.body?.cancel().catch(() => undefined);
-        return { status: response.status, ok: false, bytes: new Uint8Array(), headers: new Headers(response.headers) };
+        return { status: response.status, ok: false, bytes: await errorResponseBytes(response), headers: new Headers(response.headers) };
       }
       return {
         status: response.status,

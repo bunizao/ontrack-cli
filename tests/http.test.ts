@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { CliError } from "../src/errors.js";
 import { HttpClient } from "../src/http.js";
 import { OnTrackClient } from "../src/ontrack.js";
+import type { PreparedUpload } from "../src/uploads.js";
 
 export async function test_ontrack_projects_sends_auth_headers_and_validates_the_response(): Promise<void> {
   let request: Request | undefined;
@@ -43,6 +44,51 @@ export async function test_ontrack_updates_one_task_state_with_a_canonical_trigg
   assert.equal(request?.url, "https://ontrack.example.edu/api/projects/5183/task_def_id/27");
   assert.equal(request?.headers.get("Content-Type"), "application/json");
   assert.deepEqual(await request?.json(), { trigger: "working_on_it" });
+}
+
+export async function test_ontrack_submits_files_with_exact_requirement_keys_and_order(): Promise<void> {
+  let request: Request | undefined;
+  const client = new OnTrackClient(new HttpClient({
+    baseUrl: "https://ontrack.example.edu",
+    credentials: { username: "student", accessToken: "secret-token" },
+    fetch: async (input, init) => {
+      request = new Request(input, init);
+      return Response.json({ id: 21, task_definition_id: 27, status: "ready_for_feedback" }, { status: 201 });
+    },
+  }));
+  const uploads: readonly PreparedUpload[] = [
+    { key: "file0", requirementName: "Report", requirementType: "document", path: "/tmp/report.pdf", filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array([1, 2]) },
+    { key: "file1", requirementName: "Source", requirementType: "zip", path: "/tmp/source.zip", filename: "source.zip", contentType: "application/zip", bytes: new Uint8Array([3, 4]) },
+  ];
+
+  const task = await client.submitTask(5183, 27, uploads, { type: "need_help", comment: "Please review", acceptTiiEula: true });
+
+  assert.equal(request?.method, "POST");
+  assert.equal(request?.url, "https://ontrack.example.edu/api/projects/5183/task_def_id/27/submission");
+  assert.match(request?.headers.get("Content-Type") ?? "", /^multipart\/form-data; boundary=/u);
+  const body = await request?.formData();
+  assert.deepEqual([...body!.keys()], ["file0", "file1", "trigger", "comment", "accepted_tii_eula"]);
+  assert.equal((body!.get("file0") as File).name, "report.pdf");
+  assert.deepEqual([...new Uint8Array(await (body!.get("file1") as File).arrayBuffer())], [3, 4]);
+  assert.equal(body!.get("trigger"), "need_help");
+  assert.equal(body!.get("comment"), "Please review");
+  assert.equal(body!.get("accepted_tii_eula"), "true");
+  assert.equal(task.status, "ready_for_feedback");
+}
+
+export async function test_http_surfaces_a_bounded_upstream_validation_error(): Promise<void> {
+  const client = new HttpClient({
+    baseUrl: "https://ontrack.example.edu",
+    credentials: { username: "student", accessToken: "valid" },
+    fetch: async () => Response.json({ error: "File upload did not match the Report requirement" }, { status: 403 }),
+  });
+
+  await assert.rejects(
+    client.request("api/submission", { method: "POST" }),
+    (error) => error instanceof CliError
+      && error.category === "upstream_api"
+      && error.message === "OnTrack returned HTTP 403: File upload did not match the Report requirement",
+  );
 }
 
 export async function test_http_download_returns_binary_response(): Promise<void> {

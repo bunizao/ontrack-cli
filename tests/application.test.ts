@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -129,6 +129,60 @@ export async function test_application_updates_one_assigned_task_state_and_verif
   assert.equal(requests.at(-1)?.method, "PUT");
 }
 
+export async function test_application_prepares_then_submits_exact_task_files(): Promise<void> {
+  const directory = await mkdtemp(join(tmpdir(), "ontrack-submit-"));
+  const report = join(directory, "report.pdf");
+  const requests: Request[] = [];
+  try {
+    await writeFile(report, new Uint8Array([0x25, 0x50, 0x44, 0x46]));
+    const http = new HttpClient({
+      baseUrl: "https://school.example.edu",
+      credentials: { username: "student", accessToken: "secret" },
+      fetch: async (input, init) => {
+        const request = new Request(input, init);
+        requests.push(request);
+        const url = new URL(request.url);
+        if (url.pathname === "/api/projects/5183") return Response.json({
+          id: 5183,
+          unit: { id: 15, code: "FIT1061", name: "AI" },
+          tasks: [{ id: 21, task_definition_id: 27, status: "working_on_it" }],
+        });
+        if (url.pathname === "/api/units/15") return Response.json({
+          id: 15,
+          code: "FIT1061",
+          name: "AI",
+          task_definitions: [{
+            id: 27,
+            abbreviation: "P1",
+            name: "Search",
+            upload_requirements: [{ key: "file0", name: "Report", type: "document" }],
+          }],
+        });
+        return Response.json({ id: 21, task_definition_id: 27, status: "ready_for_feedback" }, { status: 201 });
+      },
+    });
+    const app = new OnTrackApplication({ current: session("student") }, new OnTrackClient(http), createClock("2026-07-26T12:00:00Z"));
+
+    const plan = await app.prepareTaskSubmission(5183, "P1", { files: [report], type: "ready_for_feedback" });
+    assert.equal(requests.some((request) => request.method === "POST"), false);
+    assert.equal(plan.uploads[0]?.requirementName, "Report");
+    assert.equal(plan.uploads[0]?.filename, "report.pdf");
+
+    assert.deepEqual(await app.submitTask(plan), {
+      project_id: 5183,
+      task_definition_id: 27,
+      task: "P1",
+      previous_status: "working_on_it",
+      status: "ready_for_feedback",
+      submission_type: "ready_for_feedback",
+      processing_async: true,
+    });
+    assert.equal(requests.at(-1)?.method, "POST");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
 export async function test_application_rejects_an_unsupported_student_task_state_before_writing(): Promise<void> {
   const http = { request: async () => { throw new Error("must not request"); } } as unknown as HttpClient;
   const app = new OnTrackApplication({ current: session("student") }, new OnTrackClient(http), createClock("2026-07-26T12:00:00Z"));
@@ -136,6 +190,16 @@ export async function test_application_rejects_an_unsupported_student_task_state
   await assert.rejects(
     app.taskState(5183, "P1", "complete"),
     (error) => error instanceof CliError && error.category === "usage" && /not_started.*working_on_it.*need_help/u.test(error.message),
+  );
+}
+
+export async function test_application_rejects_an_unsupported_submission_type_before_reading_project_data(): Promise<void> {
+  const http = { request: async () => { throw new Error("must not request"); } } as unknown as HttpClient;
+  const app = new OnTrackApplication({ current: session("student") }, new OnTrackClient(http), createClock("2026-07-26T12:00:00Z"));
+
+  await assert.rejects(
+    app.prepareTaskSubmission(5183, "P1", { files: ["report.pdf"], type: "working_on_it" }),
+    (error) => error instanceof CliError && error.category === "usage" && /ready_for_feedback.*need_help.*assess_in_portfolio/u.test(error.message),
   );
 }
 

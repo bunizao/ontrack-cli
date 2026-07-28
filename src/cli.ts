@@ -16,6 +16,7 @@ import { HttpClient } from "./http.js";
 import { OnTrackClient } from "./ontrack.js";
 import { relaunchForNodeSqlite } from "./runtime.js";
 import { createClock } from "./time.js";
+import type { TaskSubmissionPlan } from "./submission.js";
 import { VERSION } from "./version.js";
 
 async function promptForBrowserLogin(message: string, signal: AbortSignal): Promise<void> {
@@ -45,6 +46,24 @@ async function confirmChatSend(details: ChatSendConfirmation, signal: AbortSigna
   }
 }
 
+async function confirmTaskSubmit(plan: TaskSubmissionPlan, signal: AbortSignal): Promise<boolean> {
+  if (!process.stdin.isTTY) {
+    throw new CliError("usage", "Task submission requires an interactive terminal or --yes after explicit user confirmation.");
+  }
+  const prompt = createInterface({ input: process.stdin, output: process.stderr });
+  const files = plan.uploads.map((upload, index) => `  ${index + 1}. ${upload.requirementName} (${upload.requirementType}, ${upload.bytes.length} bytes): ${upload.path}`).join("\n");
+  const expected = `submit ${plan.task}`;
+  try {
+    const answer = await prompt.question(
+      `Submit task ${plan.task} in project ${plan.projectId} as ${plan.type}?\n${files}\nTurnitin EULA accepted: ${plan.acceptTiiEula ? "yes" : "no"}\nType "${expected}" to confirm: `,
+      { signal },
+    );
+    return answer.trim() === expected;
+  } finally {
+    prompt.close();
+  }
+}
+
 function lazyApplication(signal: AbortSignal, env: Environment, platform: NodeJS.Platform): CliApplication {
   let application: Promise<OnTrackApplication> | undefined;
   const resolve = (): Promise<OnTrackApplication> => {
@@ -63,6 +82,8 @@ function lazyApplication(signal: AbortSignal, env: Environment, platform: NodeJS
     taskResourcesDownload: async (projectId, task, options) => (await resolve()).taskResourcesDownload(projectId, task, options),
     taskRead: async (projectId, task) => (await resolve()).taskRead(projectId, task),
     taskState: async (projectId, task, state) => (await resolve()).taskState(projectId, task, state),
+    prepareTaskSubmission: async (projectId, task, options) => (await resolve()).prepareTaskSubmission(projectId, task, options),
+    submitTask: async (plan) => (await resolve()).submitTask(plan),
     chats: async (projectId, options) => (await resolve()).chats(projectId, options),
     chatSend: async (projectId, task, message) => (await resolve()).chatSend(projectId, task, message),
     roles: async (options) => (await resolve()).roles(options),
@@ -157,6 +178,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       app: lazyApplication(controller.signal, env, platform),
       authLogin: () => authLogin(controller.signal, env, platform),
       confirmChatSend: (details) => confirmChatSend(details, controller.signal),
+      confirmTaskSubmit: (plan) => confirmTaskSubmit(plan, controller.signal),
       onDiagnostic: (message) => { process.stderr.write(message); },
       version: VERSION,
     });

@@ -9,6 +9,8 @@ import type { ProjectSnapshot, TaskRow } from "./project-snapshot.js";
 import type { TaskDefinition } from "./types.js";
 import type { Clock } from "./time.js";
 import { pdfToMarkdown } from "./pdf.js";
+import { submissionType, type TaskSubmissionOptions, type TaskSubmissionPlan } from "./submission.js";
+import { prepareUploads } from "./uploads.js";
 
 export interface SessionState {
   current: AuthenticatedSession;
@@ -274,6 +276,46 @@ export class OnTrackApplication implements CliApplication {
       task: selected.definition.abbreviation,
       previous_status: selected.row.status,
       status: updated.status,
+    };
+  }
+
+  async prepareTaskSubmission(projectId: number, task: string, options: TaskSubmissionOptions): Promise<TaskSubmissionPlan> {
+    const type = submissionType(options.type);
+    const snapshot = await this.snapshot(projectId);
+    const selected = selectedTask(snapshot, task);
+    const uploads = await prepareUploads(options.files, selected.definition.upload_requirements, this.signal);
+    return {
+      projectId,
+      taskDefinitionId: selected.definition.id,
+      task: selected.definition.abbreviation,
+      previousStatus: selected.row.status,
+      type,
+      acceptTiiEula: options.acceptTiiEula ?? false,
+      ...(options.comment === undefined ? {} : { comment: options.comment }),
+      uploads,
+    };
+  }
+
+  async submitTask(plan: TaskSubmissionPlan): Promise<unknown> {
+    const updated = await this.client.submitTask(
+      plan.projectId,
+      plan.taskDefinitionId,
+      plan.uploads,
+      plan.comment === undefined
+        ? { type: plan.type, acceptTiiEula: plan.acceptTiiEula }
+        : { type: plan.type, comment: plan.comment, acceptTiiEula: plan.acceptTiiEula },
+    );
+    if (updated.task_definition_id !== plan.taskDefinitionId || updated.status !== plan.type) {
+      throw new CliError("upstream_contract", `OnTrack did not accept task ${plan.task} as ${plan.type}`);
+    }
+    return {
+      project_id: plan.projectId,
+      task_definition_id: plan.taskDefinitionId,
+      task: plan.task,
+      previous_status: plan.previousStatus,
+      status: updated.status,
+      submission_type: plan.type,
+      processing_async: true,
     };
   }
 

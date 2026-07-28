@@ -2,6 +2,7 @@ import { CliError } from "./errors.js";
 import { HttpClient, type DownloadResponse } from "./http.js";
 import { readProject, readProjects, readRoles, readTaskComment, readTaskComments, readTaskUpdate, readUnit } from "./readers.js";
 import type { Project, ProjectSummary, TaskComment, TaskUpdate, Unit, UnitRole } from "./types.js";
+import type { PreparedUpload } from "./uploads.js";
 
 export interface ProjectResourcesArchive {
   readonly projectId: number;
@@ -137,6 +138,25 @@ export class OnTrackClient {
       }
       throw error;
     }
+  }
+
+  async submitTask(
+    projectId: number,
+    taskDefinitionId: number,
+    uploads: readonly PreparedUpload[],
+    options: { readonly type: string; readonly comment?: string; readonly acceptTiiEula?: boolean },
+  ): Promise<TaskUpdate> {
+    const form = new FormData();
+    for (const upload of uploads) {
+      form.append(upload.key, new Blob([upload.bytes.slice()], { type: upload.contentType }), upload.filename);
+    }
+    form.append("trigger", options.type);
+    if (options.comment !== undefined) form.append("comment", options.comment);
+    if (options.acceptTiiEula) form.append("accepted_tii_eula", "true");
+    return readTaskUpdate(await this.http.request(
+      `api/projects/${projectId}/task_def_id/${taskDefinitionId}/submission`,
+      { method: "POST", body: form },
+    ));
   }
 
   async getRoles(activeOnly = true): Promise<UnitRole[]> {

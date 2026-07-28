@@ -37,6 +37,16 @@ async function fakeApplication(): Promise<{
     taskResourcesDownload: { project_id: 7, unit_id: 9, task_definition_id: 12, task: "1.1", file_path: "/tmp/1.1-resources.zip", bytes_written: 4, content_type: "application/zip" },
     taskRead: { project_id: 7, unit_id: 9, task_definition_id: 12, task: "1.1", pages: 1, markdown: "# FIT9999 1.1 Task Sheet\n\nRead me.\n" },
     taskState: { project_id: 7, task_definition_id: 12, task: "1.1", previous_status: "not_started", status: "working_on_it" },
+    prepareTaskSubmission: {
+      projectId: 7,
+      taskDefinitionId: 12,
+      task: "1.1",
+      previousStatus: "working_on_it",
+      type: "ready_for_feedback",
+      acceptTiiEula: false,
+      uploads: [{ key: "file0", requirementName: "Report", requirementType: "document", path: "/tmp/report.pdf", filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array([1]) }],
+    },
+    submitTask: { project_id: 7, task_definition_id: 12, task: "1.1", previous_status: "working_on_it", status: "ready_for_feedback", submission_type: "ready_for_feedback", processing_async: true },
     chatsSummary: [{ task_definition_id: 12, task: "1.1", name: "Example task", status: "rediscuss", unread_comments: 2 }],
     chatsHistory: await fixture("chats"),
     chatSend: { project_id: 7, task_definition_id: 12, task: "1.1", comment_id: 51, message: "Please review this.", created_at: "2026-07-28T03:04:05.000Z" },
@@ -62,6 +72,8 @@ async function fakeApplication(): Promise<{
       taskResourcesDownload: record("taskResourcesDownload", values.taskResourcesDownload),
       taskRead: record("taskRead", values.taskRead),
       taskState: record("taskState", values.taskState),
+      prepareTaskSubmission: record("prepareTaskSubmission", values.prepareTaskSubmission) as CliApplication["prepareTaskSubmission"],
+      submitTask: record("submitTask", values.submitTask) as CliApplication["submitTask"],
       chats: async (projectId, options) => record("chats", options.task ? values.chatsHistory : values.chatsSummary)(projectId, options),
       chatSend: record("chatSend", values.chatSend),
       roles: record("roles", values.roles),
@@ -93,6 +105,46 @@ export async function test_chat_send_requires_confirmation_before_application_wo
   assert.deepEqual(invocations, [{ command: "chatSend", arguments: [7, "1.1", "Please review this."] }]);
   assert.equal(confirmed.exitCode, 0);
   assert.match(confirmed.stdout, /Project\s+Task\s+Comment ID\s+Time\s+Message/u);
+}
+
+export async function test_task_submit_requires_confirmation_and_never_mutates_when_declined(): Promise<void> {
+  const { app, invocations } = await fakeApplication();
+  const refused = await executeCli(["task", "submit", "FIT1045", "1.1", "--file", "/tmp/report.pdf"], {
+    app,
+    version: "0.2.0",
+  });
+  assert.equal(refused.exitCode, 2);
+  assert.match(refused.stderr, /confirmation.*--yes/iu);
+  assert.deepEqual(invocations, []);
+
+  const declined = await executeCli(["task", "submit", "FIT1045", "1.1", "--file", "/tmp/report.pdf"], {
+    app,
+    version: "0.2.0",
+    confirmTaskSubmit: async () => false,
+  });
+  assert.equal(declined.exitCode, 2);
+  assert.deepEqual(invocations.map(({ command }) => command), ["resolveProject", "prepareTaskSubmission"]);
+  assert.equal(invocations.some(({ command }) => command === "submitTask"), false);
+}
+
+export async function test_task_submit_yes_preserves_file_order_and_submission_type(): Promise<void> {
+  const { app, invocations } = await fakeApplication();
+  const result = await executeCli([
+    "task", "submit", "7", "1.1",
+    "--file", "/tmp/report.pdf",
+    "--type", "ready_for_feedback",
+    "--comment", "Please review",
+    "--yes",
+    "--json",
+  ], { app, version: "0.2.0" });
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(JSON.parse(result.stdout).processing_async, true);
+  assert.deepEqual(invocations[0], {
+    command: "prepareTaskSubmission",
+    arguments: [7, "1.1", { files: ["/tmp/report.pdf"], type: "ready_for_feedback", acceptTiiEula: false, comment: "Please review" }],
+  });
+  assert.equal(invocations[1]?.command, "submitTask");
 }
 
 export async function test_chat_send_yes_is_explicit_noninteractive_confirmation(): Promise<void> {
@@ -214,15 +266,26 @@ export async function test_command_flags_reach_the_application_seam(): Promise<v
   ]);
 }
 
-export async function test_unit_code_resolves_before_a_project_scoped_command(): Promise<void> {
-  const { app, invocations } = await fakeApplication();
-  const result = await executeCli(["project", "fit1045", "--json"], { app, version: "0.2.0" });
-
-  assert.equal(result.exitCode, 0);
-  assert.deepEqual(invocations, [
-    { command: "resolveProject", arguments: ["fit1045"] },
-    { command: "project", arguments: [7] },
-  ]);
+export async function test_unit_code_resolves_before_every_project_scoped_command(): Promise<void> {
+  const cases: Array<{ readonly argv: string[]; readonly command: keyof CliApplication }> = [
+    { argv: ["project", "fit1045", "--json"], command: "project" },
+    { argv: ["tasks", "FIT1045", "--json"], command: "tasks" },
+    { argv: ["resources", "download", "FIT1045", "--json"], command: "resourcesDownload" },
+    { argv: ["task", "sheet", "FIT1045", "1.1", "--json"], command: "taskSheetDownload" },
+    { argv: ["task", "resources", "FIT1045", "1.1", "--json"], command: "taskResourcesDownload" },
+    { argv: ["task", "read", "FIT1045", "1.1", "--json"], command: "taskRead" },
+    { argv: ["task", "state", "FIT1045", "1.1", "working_on_it", "--json"], command: "taskState" },
+    { argv: ["task", "submit", "FIT1045", "1.1", "--file", "/tmp/report.pdf", "--yes", "--json"], command: "prepareTaskSubmission" },
+    { argv: ["chats", "FIT1045", "--json"], command: "chats" },
+    { argv: ["chats", "send", "FIT1045", "1.1", "--message", "Hello", "--yes", "--json"], command: "chatSend" },
+  ];
+  for (const { argv, command } of cases) {
+    const { app, invocations } = await fakeApplication();
+    const result = await executeCli(argv, { app, version: "0.2.0" });
+    assert.equal(result.exitCode, 0, argv.join(" "));
+    assert.deepEqual(invocations[0], { command: "resolveProject", arguments: [argv.includes("fit1045") ? "fit1045" : "FIT1045"] });
+    assert.equal(invocations.some((invocation) => invocation.command === command), true, command);
+  }
 }
 
 export async function test_task_state_updates_one_task_without_submission_confirmation(): Promise<void> {
@@ -295,6 +358,8 @@ export async function test_secret_sentinel_is_removed_from_results_and_diagnosti
     taskResourcesDownload: async (projectId, task, options) => expose(app.taskResourcesDownload(projectId, task, options)),
     taskRead: async (projectId, task) => expose(app.taskRead(projectId, task)),
     taskState: async (projectId, task, state) => expose(app.taskState(projectId, task, state)),
+    prepareTaskSubmission: async (projectId, task, options) => app.prepareTaskSubmission(projectId, task, options),
+    submitTask: async (plan) => expose(app.submitTask(plan)),
     chats: async (projectId, options) => expose(app.chats(projectId, options)),
     chatSend: async (projectId, task, message) => expose(app.chatSend(projectId, task, message)),
     roles: async (options) => expose(app.roles(options)),
@@ -372,6 +437,7 @@ export async function test_command_help_does_not_resolve_the_application(): Prom
     { argv: ["task", "resources", "--help"], usage: "ontrack task resources <project> <task>", option: "--output" },
     { argv: ["task", "read", "--help"], usage: "ontrack task read <project> <task>", option: "Markdown" },
     { argv: ["task", "state", "--help"], usage: "ontrack task state <project> <task> <state>", option: "working_on_it" },
+    { argv: ["task", "submit", "--help"], usage: "ontrack task submit <project> <task>", option: "--file" },
     { argv: ["chats", "--help"], usage: "ontrack chats <project> [task]", option: "marks" },
     { argv: ["chats", "send", "--help"], usage: "ontrack chats send <project> <task>", option: "--message" },
     { argv: ["roles", "--help"], usage: "ontrack roles", option: "--all" },

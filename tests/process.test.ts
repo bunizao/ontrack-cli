@@ -119,6 +119,100 @@ export async function test_process_chat_send_posts_exact_message_in_node_and_bun
   }
 }
 
+export async function test_process_task_submit_uses_identical_multipart_in_node_and_bun(): Promise<void> {
+  const directory = mkdtempSync(join(tmpdir(), "ontrack-submit-process-"));
+  const report = join(directory, "report.pdf");
+  const source = join(directory, "source.zip");
+  writeFileSync(report, new Uint8Array([1, 2]));
+  writeFileSync(source, new Uint8Array([3, 4]));
+  const submissions: Array<{ readonly keys: string[]; readonly report: number[]; readonly source: number[]; readonly type: FormDataEntryValue | null; readonly comment: FormDataEntryValue | null }> = [];
+  const server = createServer((request, response) => {
+    assert.equal(request.headers.username, "student");
+    assert.equal(request.headers["auth-token"], "process-secret");
+    if (request.url === "/api/projects/5183") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        id: 5183,
+        unit: { id: 15, code: "FIT1045", name: "Algorithms" },
+        tasks: [{ id: 21, task_definition_id: 27, status: "working_on_it" }],
+      }));
+      return;
+    }
+    if (request.url === "/api/units/15") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        id: 15,
+        code: "FIT1045",
+        name: "Algorithms",
+        task_definitions: [{
+          id: 27,
+          abbreviation: "P1",
+          name: "Search",
+          upload_requirements: [
+            { key: "file0", name: "Report", type: "document" },
+            { key: "file1", name: "Source", type: "zip" },
+          ],
+        }],
+      }));
+      return;
+    }
+    assert.equal(request.method, "POST");
+    assert.equal(request.url, "/api/projects/5183/task_def_id/27/submission");
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk: Buffer) => chunks.push(chunk));
+    request.on("end", () => {
+      void (async () => {
+        const form = await new Response(Buffer.concat(chunks), {
+          headers: { "content-type": request.headers["content-type"] ?? "" },
+        }).formData();
+        submissions.push({
+          keys: [...form.keys()],
+          report: [...new Uint8Array(await (form.get("file0") as File).arrayBuffer())],
+          source: [...new Uint8Array(await (form.get("file1") as File).arrayBuffer())],
+          type: form.get("trigger"),
+          comment: form.get("comment"),
+        });
+        response.writeHead(201, { "content-type": "application/json" });
+        response.end(JSON.stringify({ id: 21, task_definition_id: 27, status: "need_help" }));
+      })();
+    });
+  });
+  const port = await listen(server);
+  const entrypoint = resolve("dist/cli.js");
+  try {
+    for (const executable of [process.execPath, "bun"]) {
+      const result = await run(executable, [
+        entrypoint,
+        "task", "submit", "5183", "P1",
+        "--file", report,
+        "--file", source,
+        "--type", "need_help",
+        "--comment", "Please help",
+        "--yes",
+        "--json",
+      ], {
+        ONTRACK_BASE_URL: `http://127.0.0.1:${port}`,
+        ONTRACK_USERNAME: "student",
+        ONTRACK_AUTH_TOKEN: "process-secret",
+        ONTRACK_CONFIG: "",
+      }, directory);
+      assert.equal(result.code, 0, `${executable}: ${result.stderr}`);
+      assert.equal(JSON.parse(result.stdout).processing_async, true);
+    }
+    assert.deepEqual(submissions, [0, 1].map(() => ({
+      keys: ["file0", "file1", "trigger", "comment"],
+      report: [1, 2],
+      source: [3, 4],
+      type: "need_help",
+      comment: "Please help",
+    })));
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+    server.close();
+    await once(server, "close");
+  }
+}
+
 export async function test_process_reads_a_task_sheet_as_markdown_in_node_and_bun(): Promise<void> {
   const directory = mkdtempSync(join(tmpdir(), "ontrack-task-read-"));
   const pdf = textPdf(["Hello agent", "Second line"]);
