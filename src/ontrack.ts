@@ -23,11 +23,19 @@ function isZip(bytes: Uint8Array): boolean {
     const entries = view.getUint16(offset + 10, true);
     const centralSize = view.getUint32(offset + 12, true);
     const centralOffset = view.getUint32(offset + 16, true);
-    if (disk !== 0 || centralDisk !== 0 || diskEntries !== entries || centralOffset + centralSize > offset) return false;
+    if (disk !== 0 || centralDisk !== 0 || diskEntries !== entries || centralOffset + centralSize !== offset) return false;
     if (entries === 0) return centralSize === 0;
-    return centralSize >= 46
-      && centralOffset + 4 <= offset
-      && view.getUint32(centralOffset, true) === 0x02014b50;
+    let cursor = centralOffset;
+    for (let entry = 0; entry < entries; entry += 1) {
+      if (cursor + 46 > offset || view.getUint32(cursor, true) !== 0x02014b50) return false;
+      const nameLength = view.getUint16(cursor + 28, true);
+      const extraLength = view.getUint16(cursor + 30, true);
+      const entryCommentLength = view.getUint16(cursor + 32, true);
+      const localOffset = view.getUint32(cursor + 42, true);
+      if (localOffset + 30 > centralOffset || view.getUint32(localOffset, true) !== 0x04034b50) return false;
+      cursor += 46 + nameLength + extraLength + entryCommentLength;
+    }
+    return cursor === offset;
   }
   return false;
 }

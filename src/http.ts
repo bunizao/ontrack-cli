@@ -28,41 +28,39 @@ interface HttpResponse {
   readonly bytes: Uint8Array;
 }
 
-const maxDownloadBytes = 512 * 1024 * 1024;
+const maxDownloadBytes = 256 * 1024 * 1024;
+
+function archiveTooLarge(): CliError {
+  return new CliError("upstream_api", "OnTrack resource archive exceeds the 256 MiB download limit");
+}
 
 async function responseBytes(response: Response, limit?: number): Promise<Uint8Array> {
   if (limit === undefined) return new Uint8Array(await response.arrayBuffer());
   const lengthHeader = response.headers.get("Content-Length");
   const contentLength = lengthHeader && /^\d+$/u.test(lengthHeader) ? Number(lengthHeader) : undefined;
-  if (contentLength !== undefined && contentLength > limit) {
-    throw new CliError("upstream_api", "OnTrack resource archive exceeds the 512 MiB download limit");
-  }
-  if (contentLength !== undefined) {
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    if (bytes.length > limit) throw new CliError("upstream_api", "OnTrack resource archive exceeds the 512 MiB download limit");
-    return bytes;
-  }
+  if (contentLength !== undefined && contentLength > limit) throw archiveTooLarge();
   if (!response.body) return new Uint8Array();
   const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
+  let bytes = new Uint8Array(Math.min(64 * 1024, limit));
   let total = 0;
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
-    total += value.length;
-    if (total > limit) {
+    const nextTotal = total + value.length;
+    if (nextTotal > limit) {
       await reader.cancel();
-      throw new CliError("upstream_api", "OnTrack resource archive exceeds the 512 MiB download limit");
+      throw archiveTooLarge();
     }
-    chunks.push(value);
+    if (nextTotal > bytes.length) {
+      const capacity = Math.min(limit, Math.max(nextTotal, bytes.length * 2));
+      const grown = new Uint8Array(capacity);
+      grown.set(bytes.subarray(0, total));
+      bytes = grown;
+    }
+    bytes.set(value, total);
+    total = nextTotal;
   }
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.length;
-  }
-  return bytes;
+  return bytes.subarray(0, total);
 }
 
 export class HttpClient {

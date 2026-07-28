@@ -46,7 +46,7 @@ The CLI distinguishes calendar dates from timestamps. Task schedules combine uni
 
 Successful non-interactive `--json` commands write one JSON value to stdout and leave stderr empty. Interactive authentication may write prompts to stderr while keeping stdout machine-readable. Failures leave stdout empty. Usage errors exit with code `2`, cancellation exits with `130`, and other failures exit with `1`.
 
-Resource downloads resolve the unit through the selected project, fetch the aggregate archive through the same authenticated transport, and validate its central-directory structure. Archives are limited to 512 MiB. The complete response is received before an abortable sibling temporary-file write begins. A hard-link commit prevents overwriting an existing destination, and temporary-file cleanup is attempted after success or failure.
+Resource downloads resolve the unit through the selected project, fetch the aggregate archive through the same authenticated transport, and validate every central-directory record. Archives are limited to 256 MiB and collected in one bounded, growing buffer. The complete response is received before an abortable sibling temporary-file write begins. A hard-link commit prevents overwriting an existing destination, and temporary-file cleanup is attempted after success or failure.
 
 ## Verification
 

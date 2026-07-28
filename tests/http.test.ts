@@ -69,12 +69,12 @@ export async function test_http_download_refreshes_once_after_419(): Promise<voi
   assert.deepEqual([...result], [0x50, 0x4b]);
 }
 
-export async function test_http_download_rejects_an_archive_over_512_mib_before_reading_it(): Promise<void> {
+export async function test_http_download_rejects_an_archive_over_256_mib_before_reading_it(): Promise<void> {
   const client = new HttpClient({
     baseUrl: "https://ontrack.example.edu",
     credentials: { username: "student", accessToken: "valid" },
     fetch: async () => new Response(new Uint8Array([0x50, 0x4b]), {
-      headers: { "Content-Length": String(512 * 1024 * 1024 + 1) },
+      headers: { "Content-Length": String(256 * 1024 * 1024 + 1) },
     }),
   });
 
@@ -82,7 +82,7 @@ export async function test_http_download_rejects_an_archive_over_512_mib_before_
     client.download("api/units/15/all_resources"),
     (error) => error instanceof CliError
       && error.category === "upstream_api"
-      && /512 MiB/u.test(error.message),
+      && /256 MiB/u.test(error.message),
   );
 }
 
@@ -108,6 +108,32 @@ export async function test_project_resources_resolve_the_unit_and_require_a_zip(
       && error.message === "OnTrack returned an invalid resource archive",
   );
   assert.deepEqual(urls, ["/api/projects/5183", "/api/units/15/all_resources"]);
+}
+
+export async function test_project_resources_reject_an_incomplete_central_directory(): Promise<void> {
+  const malformed = new Uint8Array(68);
+  const view = new DataView(malformed.buffer);
+  view.setUint32(0, 0x02014b50, true);
+  view.setUint16(54, 2, true);
+  view.setUint16(56, 2, true);
+  view.setUint32(58, 46, true);
+  view.setUint32(62, 0, true);
+  view.setUint32(46, 0x06054b50, true);
+  const client = new OnTrackClient(new HttpClient({
+    baseUrl: "https://ontrack.example.edu",
+    credentials: { username: "student", accessToken: "valid" },
+    fetch: async (input) => {
+      const url = new URL(input instanceof Request ? input.url : input);
+      return url.pathname === "/api/projects/5183"
+        ? Response.json({ id: 5183, unit: { id: 15, code: "FIT1061", name: "AI" }, tasks: [] })
+        : new Response(malformed);
+    },
+  }));
+
+  await assert.rejects(
+    client.downloadProjectResources(5183),
+    (error) => error instanceof CliError && error.category === "upstream_contract",
+  );
 }
 
 export async function test_project_resource_401_is_an_authorization_error_after_project_access(): Promise<void> {
