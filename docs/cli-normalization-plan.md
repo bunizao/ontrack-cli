@@ -246,12 +246,44 @@ Rules:
 - During P1, before the first publish, consumers use `npm link` or a `file:../cli-kit` dependency.
 - The kit must not raise any consumer's Node floor — see §7.7.
 
-### 3.0.1 Package naming (do this at the same time)
+### 3.0.1 Package naming
 
-The three CLIs are inconsistently named on npm today: `@bunizao/ontrack` is scoped, `moodle-cli`
-and `edstem-cli` are not. Normalize to `@bunizao/ontrack`, `@bunizao/moodle`, `@bunizao/edstem`.
-Publish a final unscoped release of each old name carrying a `deprecate` notice pointing at the
-scoped one. Unscoped generic names also carry a long-term squatting and confusion risk.
+Registry state, checked against npm:
+
+| Name | Status |
+| --- | --- |
+| `ontrack` | free |
+| `ontrack-cli` | taken by an unrelated publisher (`markchu`, v0.3.0) |
+| `@bunizao/ontrack` | unpublished — ontrack-cli has never shipped |
+| `moodle-cli` | owned by `bunizao`, v0.6.0 published |
+| `moodle` | taken by an unrelated publisher (`mrcrgl`, v1.2.1) |
+| `edstem-cli` | owned by `bunizao`, v0.4.0 published |
+| `edstem` | free |
+| `cli-kit` | taken by an unrelated publisher (Axway, v2.1.1) |
+
+A fully consistent unscoped set is impossible: `moodle` and `ontrack-cli` are both held by other
+publishers. Consistency could only be bought by scoping all three, which would mean renaming two
+already-published packages and running a deprecation cycle for a purely cosmetic gain.
+
+**Decision — publish the CLIs unscoped, scope the library:**
+
+```
+ontrack        take the bare name; never published, so zero migration, and it matches the binary
+moodle-cli     leave as is
+edstem-cli     leave as is
+@bunizao/cli-kit
+```
+
+The package name appears only in an install command copied out of a README; the binary name is
+what people type daily, and all three binaries (`ontrack`, `moodle`, `edstem`) are unaffected by
+this choice. The suffix mismatch is not worth a deprecation cycle on two live packages.
+
+`@bunizao/cli-kit` is scoped because `cli-kit` is taken, not for consistency. The resulting rule is
+coherent on its own terms: CLIs get bare names because users type them, libraries get scoped names
+because nobody does.
+
+`edstem` is currently free if a bare alias is ever wanted; claiming it now would be speculative and
+is out of scope.
 
 ### 3.0.2 Monorepo — deferred, with a trigger
 
