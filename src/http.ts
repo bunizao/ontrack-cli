@@ -26,16 +26,76 @@ interface HttpResponse {
   readonly status: number;
   readonly ok: boolean;
   readonly bytes: Uint8Array;
+  readonly headers: Headers;
+}
+
+export interface DownloadResponse {
+  readonly bytes: Uint8Array;
+  readonly contentType: string | null;
+  readonly filename: string | null;
+}
+
+interface ByteRange {
+  readonly start: number;
+  readonly end: number;
+  readonly total: number;
 }
 
 const maxDownloadBytes = 256 * 1024 * 1024;
 
 function archiveTooLarge(): CliError {
-  return new CliError("upstream_api", "OnTrack resource archive exceeds the 256 MiB download limit");
+  return new CliError("upstream_api", "OnTrack download exceeds the 256 MiB limit");
+}
+
+function contentRange(value: string | null): ByteRange | undefined {
+  const match = /^bytes (\d+)-(\d+)\/(\d+)$/u.exec(value ?? "");
+  if (!match) return undefined;
+  const start = Number(match[1]);
+  const end = Number(match[2]);
+  const total = Number(match[3]);
+  if (![start, end, total].every(Number.isSafeInteger) || start < 0 || end < start || total <= end) return undefined;
+  return { start, end, total };
+}
+
+function requireContentRange(response: HttpResponse, expectedStart: number, expectedTotal?: number): ByteRange {
+  const range = contentRange(response.headers.get("Content-Range"));
+  if (
+    response.status !== 206
+    || !range
+    || range.start !== expectedStart
+    || (expectedTotal !== undefined && range.total !== expectedTotal)
+    || response.bytes.length !== range.end - range.start + 1
+  ) {
+    throw new CliError("upstream_contract", "OnTrack returned an invalid Content-Range response");
+  }
+  return range;
+}
+
+function responseFilename(value: string | null): string | null {
+  if (!value) return null;
+  const extended = /(?:^|;)\s*filename\*=UTF-8''([^;]+)/iu.exec(value)?.[1];
+  let filename: string | undefined;
+  if (extended) {
+    try {
+      filename = decodeURIComponent(extended.trim());
+    } catch {
+      filename = undefined;
+    }
+  }
+  filename ??= /(?:^|;)\s*filename="([^"]*)"/iu.exec(value)?.[1]
+    ?? /(?:^|;)\s*filename=([^;]+)/iu.exec(value)?.[1]?.trim();
+  if (!filename) return null;
+  const safe = filename.replaceAll("\\", "/").split("/").at(-1)?.replace(/[\u0000-\u001f\u007f]/gu, "").trim();
+  return safe && safe !== "." && safe !== ".." ? safe : null;
 }
 
 async function responseBytes(response: Response, limit?: number): Promise<Uint8Array> {
   if (limit === undefined) return new Uint8Array(await response.arrayBuffer());
+  const range = contentRange(response.headers.get("Content-Range"));
+  if (range && range.total > limit) {
+    await response.body?.cancel().catch(() => undefined);
+    throw archiveTooLarge();
+  }
   const lengthHeader = response.headers.get("Content-Length");
   const contentLength = lengthHeader && /^\d+$/u.test(lengthHeader) ? Number(lengthHeader) : undefined;
   if (contentLength !== undefined && contentLength > limit) {
@@ -95,10 +155,33 @@ export class HttpClient {
   }
 
   async download(path: string, options: HttpRequestOptions = {}): Promise<Uint8Array> {
+    return (await this.downloadFile(path, options)).bytes;
+  }
+
+  async downloadFile(path: string, options: HttpRequestOptions = {}): Promise<DownloadResponse> {
     const headers = new Headers(options.headers);
     if (!headers.has("Accept")) headers.set("Accept", "application/octet-stream");
-    const response = await this.#response(path, { ...options, headers }, maxDownloadBytes);
-    return response.bytes;
+    const first = await this.#response(path, { ...options, headers }, maxDownloadBytes);
+    const metadata = {
+      contentType: first.headers.get("Content-Type")?.split(";", 1)[0]?.trim() || null,
+      filename: responseFilename(first.headers.get("Content-Disposition")),
+    };
+    if (first.status !== 206) return { bytes: first.bytes, ...metadata };
+
+    const initialRange = requireContentRange(first, 0);
+    if (initialRange.total > maxDownloadBytes) throw archiveTooLarge();
+    const bytes = new Uint8Array(initialRange.total);
+    bytes.set(first.bytes, 0);
+    let offset = initialRange.end + 1;
+    while (offset < initialRange.total) {
+      const rangeHeaders = new Headers(headers);
+      rangeHeaders.set("Range", `bytes=${offset}-`);
+      const response = await this.#response(path, { ...options, headers: rangeHeaders }, maxDownloadBytes);
+      const range = requireContentRange(response, offset, initialRange.total);
+      bytes.set(response.bytes, offset);
+      offset = range.end + 1;
+    }
+    return { bytes, ...metadata };
   }
 
   async #response(path: string, options: HttpRequestOptions, responseLimit?: number): Promise<HttpResponse> {
@@ -153,12 +236,13 @@ export class HttpClient {
       const response = await this.#fetch(url, init);
       if (!response.ok) {
         await response.body?.cancel().catch(() => undefined);
-        return { status: response.status, ok: false, bytes: new Uint8Array() };
+        return { status: response.status, ok: false, bytes: new Uint8Array(), headers: new Headers(response.headers) };
       }
       return {
         status: response.status,
         ok: response.ok,
         bytes: await responseBytes(response, responseLimit),
+        headers: new Headers(response.headers),
       };
     } catch (error) {
       if (error instanceof CliError) throw error;

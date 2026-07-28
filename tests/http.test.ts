@@ -49,6 +49,83 @@ export async function test_http_download_returns_binary_response(): Promise<void
   assert.equal(request?.headers.get("Accept"), "application/octet-stream");
 }
 
+export async function test_http_download_follows_ranges_and_preserves_metadata(): Promise<void> {
+  const ranges: (string | null)[] = [];
+  const client = new HttpClient({
+    baseUrl: "https://ontrack.example.edu",
+    credentials: { username: "student", accessToken: "secret-token" },
+    fetch: async (input, init) => {
+      const request = new Request(input, init);
+      const range = request.headers.get("Range");
+      ranges.push(range);
+      return range === null
+        ? new Response(new Uint8Array([1, 2, 3]), {
+          status: 206,
+          headers: {
+            "Content-Range": "bytes 0-2/6",
+            "Content-Type": "application/pdf",
+            "Content-Disposition": "attachment; filename=FIT1061-1.1.pdf",
+          },
+        })
+        : new Response(new Uint8Array([4, 5, 6]), {
+          status: 206,
+          headers: { "Content-Range": "bytes 3-5/6" },
+        });
+    },
+  });
+
+  const result = await client.downloadFile("api/units/15/task_definitions/27/task_pdf");
+
+  assert.deepEqual([...result.bytes], [1, 2, 3, 4, 5, 6]);
+  assert.equal(result.contentType, "application/pdf");
+  assert.equal(result.filename, "FIT1061-1.1.pdf");
+  assert.deepEqual(ranges, [null, "bytes=3-"]);
+}
+
+export async function test_http_download_refreshes_a_later_range_without_restarting(): Promise<void> {
+  const requests: { readonly token: string | null; readonly range: string | null }[] = [];
+  const client = new HttpClient({
+    baseUrl: "https://ontrack.example.edu",
+    credentials: { username: "student", accessToken: "initial" },
+    refresh: async () => ({ username: "student", accessToken: "renewed" }),
+    fetch: async (input, init) => {
+      const request = new Request(input, init);
+      const token = request.headers.get("Auth-Token");
+      const range = request.headers.get("Range");
+      requests.push({ token, range });
+      if (range === null) {
+        return new Response(new Uint8Array([1, 2, 3]), { status: 206, headers: { "Content-Range": "bytes 0-2/6" } });
+      }
+      if (token === "initial") return Response.json({ error: "expired" }, { status: 419 });
+      return new Response(new Uint8Array([4, 5, 6]), { status: 206, headers: { "Content-Range": "bytes 3-5/6" } });
+    },
+  });
+
+  assert.deepEqual([...(await client.downloadFile("api/large-file")).bytes], [1, 2, 3, 4, 5, 6]);
+  assert.deepEqual(requests, [
+    { token: "initial", range: null },
+    { token: "initial", range: "bytes=3-" },
+    { token: "renewed", range: "bytes=3-" },
+  ]);
+}
+
+export async function test_http_download_rejects_inconsistent_ranges(): Promise<void> {
+  const client = new HttpClient({
+    baseUrl: "https://ontrack.example.edu",
+    credentials: { username: "student", accessToken: "token" },
+    fetch: async (input, init) => new Request(input, init).headers.has("Range")
+      ? new Response(new Uint8Array([4, 5, 6]), { status: 206, headers: { "Content-Range": "bytes 2-4/6" } })
+      : new Response(new Uint8Array([1, 2, 3]), { status: 206, headers: { "Content-Range": "bytes 0-2/6" } }),
+  });
+
+  await assert.rejects(
+    client.downloadFile("api/large-file"),
+    (error) => error instanceof CliError
+      && error.category === "upstream_contract"
+      && /Content-Range/u.test(error.message),
+  );
+}
+
 export async function test_http_download_refreshes_once_after_419(): Promise<void> {
   const tokens: string[] = [];
   const client = new HttpClient({
