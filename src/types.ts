@@ -25,8 +25,18 @@ export interface TaskDefinition {
   readonly max_quality_pts: number | null;
   readonly has_task_sheet?: boolean | null;
   readonly has_task_resources?: boolean | null;
+  readonly upload_requirements: readonly UploadRequirement[];
   readonly grade_due_dates: Readonly<Record<string, CivilDate>>;
   readonly grade_start_dates: Readonly<Record<string, CivilDate>>;
+}
+
+export type UploadRequirementType = "code" | "document" | "image" | "zip";
+
+export interface UploadRequirement {
+  readonly key: string;
+  readonly name: string;
+  readonly type: UploadRequirementType;
+  readonly submission_history: boolean;
 }
 
 export interface Task {

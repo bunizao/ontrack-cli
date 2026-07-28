@@ -15,6 +15,7 @@ export function test_task_definition_keeps_grade_overrides_internal(): void {
     due_date: null,
     is_graded: null,
     max_quality_pts: null,
+    upload_requirements: [],
     grade_due_dates: {},
     grade_start_dates: { "2": CivilDate.parse("2026-07-01") },
   });

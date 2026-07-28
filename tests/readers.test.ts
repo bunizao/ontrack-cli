@@ -73,6 +73,10 @@ export function test_readers_retain_maximal_schedule_and_grade_fields(): void {
       due_date: "2026-07-12",
       has_task_sheet: true,
       has_task_resources: false,
+      upload_requirements: [
+        { key: "file0", name: "Report", type: "document", submission_history: true },
+        { key: "file1", name: "Source", type: "zip" },
+      ],
       grade_due_dates: [{ target_grade: 2, target_due_date: "2026-07-09", start_date: "2026-07-02" }],
     }],
   });
@@ -81,6 +85,10 @@ export function test_readers_retain_maximal_schedule_and_grade_fields(): void {
   assert.equal(unit.task_definitions[0]?.grade_start_dates["2"]?.toString(), "2026-07-02");
   assert.equal(unit.task_definitions[0]?.has_task_sheet, true);
   assert.equal(unit.task_definitions[0]?.has_task_resources, false);
+  assert.deepEqual(unit.task_definitions[0]?.upload_requirements, [
+    { key: "file0", name: "Report", type: "document", submission_history: true },
+    { key: "file1", name: "Source", type: "zip", submission_history: false },
+  ]);
 }
 
 export function test_wrong_shapes_are_contract_errors_not_empty_successes(): void {
@@ -91,6 +99,10 @@ export function test_wrong_shapes_are_contract_errors_not_empty_successes(): voi
   assert.throws(() => readUnit({ ...unitSummary, task_definitions: [], grade_definitions: {} }), /grade_definitions/i);
   assert.throws(() => readUnit({ ...unitSummary, task_definitions: [], grade_definitions: [] }), /grade_definitions/i);
   assert.throws(() => readRoles([{ id: "4", role: "Tutor", unit: unitSummary }]), /id must be a positive safe integer/i);
+  assert.throws(
+    () => readUnit({ ...unitSummary, task_definitions: [{ id: 1, abbreviation: "P1", name: "Task", upload_requirements: [{ key: "files[]", name: "Report", type: "document" }] }] }),
+    /upload requirement key/u,
+  );
   for (const id of [0, 7.5, Number.MAX_SAFE_INTEGER + 1]) {
     assert.throws(() => readProjects([{ id, unit: unitSummary }]), /id must be a positive safe integer/i);
   }

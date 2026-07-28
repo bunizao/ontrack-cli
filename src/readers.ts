@@ -12,6 +12,7 @@ import type {
   Unit,
   UnitRole,
   UnitSummary,
+  UploadRequirement,
   UserView,
 } from "./types.js";
 
@@ -163,9 +164,29 @@ function readTaskDefinition(value: unknown): TaskDefinition {
     max_quality_pts: nullableNumber(data.max_quality_pts, "task definition max_quality_pts"),
     has_task_sheet: nullableBoolean(data.has_task_sheet, "task definition has_task_sheet"),
     has_task_resources: nullableBoolean(data.has_task_resources, "task definition has_task_resources"),
+    upload_requirements: readUploadRequirements(data.upload_requirements),
     grade_due_dates: gradeDueDates,
     grade_start_dates: gradeStartDates,
   };
+}
+
+function readUploadRequirements(value: unknown): UploadRequirement[] {
+  if (value === undefined || value === null) return [];
+  return array(value, "task definition upload_requirements").map((item, index) => {
+    const data = object(item, `upload requirement ${index + 1}`);
+    const key = requiredString(data.key, `upload requirement key ${index + 1}`);
+    if (key !== `file${index}`) return contract(`upload requirement key ${index + 1} must be file${index}`);
+    const type = requiredString(data.type, `upload requirement type ${index + 1}`);
+    if (type !== "code" && type !== "document" && type !== "image" && type !== "zip") {
+      return contract(`upload requirement type ${index + 1} is unsupported`);
+    }
+    return {
+      key,
+      name: requiredString(data.name, `upload requirement name ${index + 1}`),
+      type,
+      submission_history: nullableBoolean(data.submission_history, `upload requirement submission_history ${index + 1}`) ?? false,
+    };
+  });
 }
 
 export function readProjects(value: unknown): ProjectSummary[] {
