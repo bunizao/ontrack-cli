@@ -190,7 +190,7 @@ export async function test_secret_sentinel_is_removed_from_results_and_diagnosti
       });
       assert.equal(success.exitCode, 0, argv.join(" "));
       assert.doesNotMatch(`${success.stdout}${success.stderr}`, new RegExp(secret), argv.join(" "));
-      assert.match(success.stdout, /\[REDACTED\]/u, argv.join(" "));
+      if (json) assert.match(success.stdout, /\[REDACTED\]/u, argv.join(" "));
       assert.doesNotMatch(success.stdout, /auth_token/u, argv.join(" "));
     }
   }
@@ -226,17 +226,80 @@ export async function test_help_and_version_succeed_without_resolving_the_applic
 }
 
 export async function test_command_help_does_not_resolve_the_application(): Promise<void> {
-  for (const argv of [["user", "--help"], ["auth", "check", "--help"], ["auth", "login", "--help"], ["projects", "--help"], ["project", "--help"], ["tasks", "--help"], ["resources", "download", "--help"], ["roles", "--help"]]) {
+  const cases = [
+    { argv: ["user", "--help"], usage: "ontrack user", option: "--json" },
+    { argv: ["auth", "check", "--help"], usage: "ontrack auth check", option: "--json" },
+    { argv: ["auth", "login", "--help"], usage: "ontrack auth login", option: "--json" },
+    { argv: ["projects", "--help"], usage: "ontrack projects", option: "--include-inactive" },
+    { argv: ["project", "--help"], usage: "ontrack project <project_id>", option: "not list positions" },
+    { argv: ["tasks", "--help"], usage: "ontrack tasks <project_id>", option: "--status" },
+    { argv: ["resources", "download", "--help"], usage: "ontrack resources download <project_id>", option: "--output" },
+    { argv: ["roles", "--help"], usage: "ontrack roles", option: "--all" },
+  ];
+  for (const { argv, usage, option } of cases) {
     const { app, invocations } = await fakeApplication();
     const result = await executeCli(argv, { app, version: "0.2.0" });
     assert.equal(result.exitCode, 0, argv.join(" "));
-    assert.match(result.stdout, /^Usage: ontrack /, argv.join(" "));
-    if (["project", "tasks", "resources"].includes(argv[0] ?? "")) {
-      assert.match(result.stdout, /project arguments use the id from.*projects.*not list positions/is, argv.join(" "));
-    }
+    assert.match(result.stdout, new RegExp(`^Usage: ${usage.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "u"), argv.join(" "));
+    assert.match(result.stdout, new RegExp(option.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "iu"), argv.join(" "));
     assert.equal(result.stderr, "", argv.join(" "));
     assert.deepEqual(invocations, [], argv.join(" "));
   }
+}
+
+export async function test_bare_root_and_groups_show_discoverable_help(): Promise<void> {
+  const { app, invocations } = await fakeApplication();
+  for (const { argv, pattern } of [
+    { argv: [] as string[], pattern: /Usage: ontrack <command>/u },
+    { argv: ["auth"], pattern: /Usage: ontrack auth <command>/u },
+    { argv: ["resources"], pattern: /Usage: ontrack resources <command>/u },
+  ]) {
+    const result = await executeCli(argv, { app, version: "0.2.0" });
+    assert.equal(result.exitCode, 0, argv.join(" "));
+    assert.match(result.stdout, pattern, argv.join(" "));
+    assert.equal(result.stderr, "", argv.join(" "));
+  }
+  assert.deepEqual(invocations, []);
+}
+
+export async function test_default_output_uses_command_aware_tables(): Promise<void> {
+  const cases = [
+    { argv: ["projects"], headers: /ID\s+Unit\s+Name\s+Role\s+Start\s+End\s+Active/u },
+    { argv: ["tasks", "7"], headers: /Task\s+Name\s+Status\s+Due\s+Grade\s+Quality\s+Overdue/u },
+    { argv: ["roles"], headers: /Unit\s+Name\s+Role\s+User/u },
+    { argv: ["project", "7"], headers: /Field\s+Value[\s\S]*Project ID\s+7[\s\S]*Tasks[\s\S]*No tasks found/u },
+    { argv: ["resources", "download", "7"], headers: /Project\s+Unit\s+Archive\s+Size/u },
+  ];
+  for (const { argv, headers } of cases) {
+    const { app } = await fakeApplication();
+    const result = await executeCli(argv, { app, version: "0.2.0" });
+    assert.equal(result.exitCode, 0, argv.join(" "));
+    assert.match(result.stdout, headers, argv.join(" "));
+    assert.doesNotMatch(result.stdout, /\{"id":/u, argv.join(" "));
+    assert.equal(result.stderr, "", argv.join(" "));
+  }
+}
+
+export async function test_empty_default_tables_explain_the_result(): Promise<void> {
+  const { app } = await fakeApplication();
+  const empty: CliApplication = {
+    ...app,
+    projects: async () => [],
+    tasks: async () => [],
+    roles: async () => [],
+  };
+  assert.equal((await executeCli(["projects"], { app: empty, version: "0.2.0" })).stdout,
+    "No active projects found. Use --include-inactive to include past projects.\n");
+  assert.equal((await executeCli(["projects", "--include-inactive"], { app: empty, version: "0.2.0" })).stdout,
+    "No projects found.\n");
+  assert.equal((await executeCli(["tasks", "7"], { app: empty, version: "0.2.0" })).stdout,
+    "No tasks found.\n");
+  assert.equal((await executeCli(["tasks", "7", "--status", "rediscuss"], { app: empty, version: "0.2.0" })).stdout,
+    "No tasks match status: rediscuss.\n");
+  assert.equal((await executeCli(["roles"], { app: empty, version: "0.2.0" })).stdout,
+    "No active teaching roles found. Use --all to include inactive roles.\n");
+  assert.equal((await executeCli(["roles", "--all"], { app: empty, version: "0.2.0" })).stdout,
+    "No teaching roles found.\n");
 }
 
 export async function test_unknown_command_with_help_remains_a_usage_error(): Promise<void> {
