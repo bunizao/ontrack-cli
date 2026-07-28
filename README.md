@@ -14,7 +14,8 @@ Inspect projects, tasks, grades, chats, and teaching roles from a terminal or sc
 - Read projects, task schedules, grades, and teaching roles.
 - Download one task sheet, one task's resources, or the unit-wide resource archive.
 - Convert a task-sheet PDF to Markdown in memory for agents and shell pipelines.
-- Review unread chat counts and task comment history.
+- Read task chats and send confirmed text messages.
+- Change student task states and submit ordered task files after confirmation.
 - Sign in through your existing browser session.
 - Show readable tables by default and stable JSON with `--json`.
 - Run the same package with Node.js or Bun.
@@ -70,33 +71,37 @@ Browser security rules still apply. On macOS, grant Full Disk Access to the appl
 | `ontrack auth login` | Sign in through OnTrack and cache an access token. |
 | `ontrack auth check` | Check authentication and show project and role counts. |
 | `ontrack projects` | List current projects. |
-| `ontrack project <project_id>` | Show a project and its task snapshot. |
-| `ontrack tasks <project_id>` | List tasks for a project. |
-| `ontrack resources download <project_id>` | Download the project's unit-wide resource ZIP. |
-| `ontrack task sheet <project_id> <task>` | Download one task sheet. |
-| `ontrack task resources <project_id> <task>` | Download one task's linked file or resource ZIP. |
-| `ontrack task read <project_id> <task>` | Print a task sheet as Markdown without creating a PDF file. |
-| `ontrack chats <project_id>` | List tasks and unread comment counts without opening chat streams. |
-| `ontrack chats <project_id> <task>` | Show one task's chronological comment history. |
-| `ontrack chats send <project_id> <task> --message <text>` | Send one text message after confirmation. |
+| `ontrack project <project>` | Show a project and its task snapshot. |
+| `ontrack tasks <project>` | List tasks for a project. |
+| `ontrack resources download <project>` | Download the project's unit-wide resource ZIP. |
+| `ontrack task sheet <project> <task>` | Download one task sheet. |
+| `ontrack task resources <project> <task>` | Download one task's linked file or resource ZIP. |
+| `ontrack task read <project> <task>` | Print a task sheet as Markdown without creating a PDF file. |
+| `ontrack task state <project> <task> <state>` | Set `not_started`, `working_on_it`, or `need_help`. |
+| `ontrack task submit <project> <task> --file <path>` | Submit files in the order required by the task. |
+| `ontrack chats <project>` | List tasks and unread comment counts without opening chat streams. |
+| `ontrack chats <project> <task>` | Show one task's chronological comment history. |
+| `ontrack chats send <project> <task> --message <text>` | Send one text message after confirmation. |
 | `ontrack roles` | List teaching and administrative roles. |
 
 Commands print tables by default. Use `--json` for automation:
 
 ```bash
 ontrack projects --include-inactive --json
-ontrack tasks 12345 --status rediscuss --json
-ontrack chats 12345 --json
-ontrack chats 12345 1.1 --json
-ontrack chats send 12345 1.1 --message "Please review this"
-ontrack task sheet 12345 1.1 --output FIT1061-1.1.pdf --json
-ontrack task resources 12345 1.1 --output 1.1-resources.zip --json
-ontrack task read 12345 1.1 > FIT1061-1.1.md
-ontrack resources download 5183 --output FIT1061-resources.zip --json
+ontrack tasks FIT1045 --status rediscuss --json
+ontrack chats FIT1045 --json
+ontrack chats FIT1045 1.1 --json
+ontrack chats send FIT1045 1.1 --message "Please review this"
+ontrack task sheet FIT1061 1.1 --output FIT1061-1.1.pdf --json
+ontrack task resources FIT1061 1.1 --output 1.1-resources.zip --json
+ontrack task read FIT1061 1.1 > FIT1061-1.1.md
+ontrack task state FIT1061 1.1 working_on_it
+ontrack task submit FIT1061 1.1 --file report.pdf --file source.zip
+ontrack resources download FIT1061 --output FIT1061-resources.zip --json
 ontrack roles --all --json
 ```
 
-Use the `id` field from `ontrack projects --include-inactive`; project IDs are not list positions.
+`<project>` accepts a unit code such as `FIT1045` or the `id` from `ontrack projects --include-inactive`. The CLI uses a unit code only when it identifies one project. If current and past projects share a code, use the project ID. List positions are never project IDs.
 
 The task selector accepts an abbreviation shown by `ontrack project`; a task-definition ID is also accepted. When OnTrack has not generated project task instances, the project table lists the authorized unit definitions that remain available for download. Server filenames are used when possible. Existing files are never replaced, downloads are written atomically, and large ranged responses are assembled before the file is committed.
 
@@ -104,9 +109,13 @@ The task selector accepts an abbreviation shown by `ontrack project`; a task-def
 
 `resources download` retrieves the complete unit archive exposed by OnTrack. It is not filtered to the student's current task rows. The archive does not include general unit website content.
 
-`chats <project_id>` reads unread counts from the project snapshot and does not open comment streams. Reading one task's history causes OnTrack to mark returned non-discussion comments as read; the CLI prints this side effect to stderr before presenting the result.
+`chats <project>` reads unread counts from the project snapshot and does not open comment streams. Reading one task's history causes OnTrack to mark returned non-discussion comments as read; the CLI prints this side effect to stderr before presenting the result.
 
 `chats send` is a remote mutation. It shows the exact destination and message in an interactive terminal and requires typing `send`. Non-interactive use must pass `--yes` only after the user has explicitly approved that project, task, and message. Text messages are limited to 4,095 characters; attachments and replies are not supported by this command.
+
+`task submit` reads the task's upload requirements and pairs each repeated `--file` with `file0`, `file1`, and later fields in server order. It rejects missing, empty, oversized, non-regular, and symbolic-link inputs before the POST. The default type is `ready_for_feedback`; `need_help` and `assess_in_portfolio` are also supported. Use `--accept-tii-eula` only when you accept the Turnitin EULA for that submission.
+
+Interactive submission shows the project, task, type, and file mapping, then requires `submit <task>`. Non-interactive use requires `--yes` after the user approves those exact values. A successful HTTP 201 means OnTrack accepted the files for asynchronous processing; it does not mean the final PDF is ready. The CLI returns server validation errors for file types, prerequisites, group membership, pending submissions, and feedback comments.
 
 Successful JSON commands write only the result to stdout. Diagnostics and interactive prompts go to stderr.
 

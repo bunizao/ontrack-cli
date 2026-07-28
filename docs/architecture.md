@@ -19,7 +19,7 @@ Each boundary has one job:
 | Area | Modules | Responsibility |
 | --- | --- | --- |
 | CLI | `cli.ts`, `cli-app.ts` | Parse commands, select output mode, and map failures to exit codes. |
-| Application | `application.ts`, `resources.ts` | Coordinate authenticated reads, downloads, and atomic local file writes. |
+| Application | `application.ts`, `resources.ts`, `uploads.ts`, `submission.ts` | Coordinate authenticated reads, downloads, task updates, and confirmed submissions. |
 | Authentication | `auth.ts`, `browser-cookies.ts`, `config.ts` | Resolve credentials, exchange application cookies, and maintain the local access-token cache. |
 | Transport | `http.ts` | Apply timeouts, cancellation, authentication headers, and the safe retry policy. |
 | OnTrack API | `ontrack.ts`, `readers.ts` | Call API routes and validate unknown response payloads. |
@@ -54,6 +54,12 @@ Task-sheet reading reuses the same authenticated, range-aware PDF download witho
 Chat summaries use unread counts already present in the project snapshot and do not fetch comment streams. History requests are restricted to one selected task to avoid an implicit N+1 request and unexpected read-state changes. The upstream history route returns group-task comments chronologically and marks non-discussion comments as read; the CLI reports that side effect on stderr. Terminal rendering omits email addresses and strips control sequences while JSON preserves the validated API payload.
 
 Text chat sending is a separate POST path and never reuses the read command. The CLI validates the 4,095-character upstream limit and requires either typed terminal confirmation or `--yes` before resolving credentials or issuing the mutation. POST requests are not automatically retried after authentication rejection.
+
+Project-scoped commands accept a positive project ID or a unit code. The resolver matches codes without case sensitivity, prefers one active project, and rejects ambiguous matches. Application and HTTP layers receive the resolved numeric ID, so routes never depend on list positions or unit codes.
+
+Task state writes allow the student transitions `not_started`, `working_on_it`, and `need_help`. The application checks the returned task-definition ID and status because upstream can return HTTP 200 without applying an invalid trigger.
+
+Task submission has a read phase and a write phase. The read phase selects a generated project task, validates the submission type, reads `upload_requirements`, and freezes local regular-file bytes in requirement order. The CLI displays that plan and requests typed confirmation. The write phase sends `file0`, `file1`, and later multipart fields to the upstream route. It never retries the POST. HTTP 201 records acceptance for asynchronous processing, so the result does not claim that OnTrack generated the final PDF.
 
 ## Verification
 
