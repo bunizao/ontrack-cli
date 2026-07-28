@@ -1,5 +1,5 @@
 {
-  "name": "@bunizao/ontrack",
+  "name": "ontrack",
   "version": "0.2.0",
   "description": "Terminal-first CLI for OnTrack and Doubtfire",
   "type": "module",

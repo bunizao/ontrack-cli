@@ -26,7 +26,7 @@ Inspect projects, tasks, grades, chats, and teaching roles from a terminal or sc
 Requires Node.js 22.5 or newer, or Bun 1.3.14 or newer. Releases of Node.js that gate `node:sqlite` behind an experimental flag are handled automatically.
 
 ```bash
-npm install --global @bunizao/ontrack
+npm install --global ontrack
 ```
 
 To install from source:
