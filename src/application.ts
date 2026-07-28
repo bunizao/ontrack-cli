@@ -178,14 +178,16 @@ export class OnTrackApplication implements CliApplication {
     return (await this.client.getRoles(!options.showAll)).map(roleToJson);
   }
 
-  async resourcesDownload(projectId: number, options: { readonly output?: string }): Promise<unknown> {
+  async resourcesDownload(projectId: number, options: { readonly output?: string; readonly force?: boolean }): Promise<unknown> {
     const destination = options.output ?? `ontrack-resources-${projectId}.zip`;
-    await assertOutputAvailable(destination);
+    if (!options.force) await assertOutputAvailable(destination);
     const archive = await this.client.downloadProjectResources(projectId);
     const archivePath = await writeResourceArchive(
       destination,
       archive.bytes,
       this.signal,
+      undefined,
+      options.force,
     );
     return {
       project_id: archive.projectId,
@@ -195,20 +197,20 @@ export class OnTrackApplication implements CliApplication {
     };
   }
 
-  async taskSheetDownload(projectId: number, task: string, options: { readonly output?: string }): Promise<unknown> {
+  async taskSheetDownload(projectId: number, task: string, options: { readonly output?: string; readonly force?: boolean }): Promise<unknown> {
     const snapshot = await this.snapshot(projectId);
     const selected = selectedDownloadTask(snapshot, task);
     if (selected.definition.has_task_sheet === false) {
       throw new CliError("upstream_api", `Task ${selected.abbreviation} has no task sheet.`);
     }
     const destination = options.output ?? `${snapshot.unit.code}-${selected.abbreviation}.pdf`;
-    await assertOutputAvailable(destination);
+    if (!options.force) await assertOutputAvailable(destination);
     const download = await this.client.downloadTaskSheet(snapshot.unit.id, selected.definition.id);
     if (placeholderFile(download.filename)) throw new CliError("upstream_api", `Task ${selected.abbreviation} has no task sheet.`);
     if (download.contentType !== "application/pdf" || !isPdf(download.bytes)) {
       throw new CliError("upstream_contract", "OnTrack returned an invalid task sheet PDF");
     }
-    const filePath = await writeDownloadedFile(destination, download.bytes, this.signal);
+    const filePath = await writeDownloadedFile(destination, download.bytes, this.signal, undefined, options.force);
     return {
       project_id: projectId,
       unit_id: snapshot.unit.id,
@@ -220,21 +222,21 @@ export class OnTrackApplication implements CliApplication {
     };
   }
 
-  async taskResourcesDownload(projectId: number, task: string, options: { readonly output?: string }): Promise<unknown> {
+  async taskResourcesDownload(projectId: number, task: string, options: { readonly output?: string; readonly force?: boolean }): Promise<unknown> {
     const snapshot = await this.snapshot(projectId);
     const selected = selectedDownloadTask(snapshot, task);
     if (selected.definition.has_task_resources === false) {
       throw new CliError("upstream_api", `Task ${selected.abbreviation} has no resources.`);
     }
-    if (options.output) await assertOutputAvailable(options.output);
+    if (options.output && !options.force) await assertOutputAvailable(options.output);
     const download = await this.client.downloadTaskResources(snapshot.unit.id, selected.definition.id);
     if (placeholderFile(download.filename)) throw new CliError("upstream_api", `Task ${selected.abbreviation} has no resources.`);
     if (!download.filename && !options.output) {
       throw new CliError("upstream_contract", "OnTrack returned task resources without a filename");
     }
     const destination = options.output ?? download.filename as string;
-    if (!options.output) await assertOutputAvailable(destination);
-    const filePath = await writeDownloadedFile(destination, download.bytes, this.signal);
+    if (!options.output && !options.force) await assertOutputAvailable(destination);
+    const filePath = await writeDownloadedFile(destination, download.bytes, this.signal, undefined, options.force);
     return {
       project_id: projectId,
       unit_id: snapshot.unit.id,

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -37,6 +37,19 @@ export async function test_cancellation_during_resource_write_removes_a_partial_
       (error) => error instanceof CliError && error.category === "cancellation",
     );
     assert.deepEqual(await readdir(directory), []);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+export async function test_forced_resource_write_replaces_an_existing_file_atomically(): Promise<void> {
+  const directory = await mkdtemp(join(tmpdir(), "ontrack-forced-resource-"));
+  const destination = join(directory, "resources.zip");
+  try {
+    await writeFile(destination, new Uint8Array([1]));
+    await writeResourceArchive(destination, new Uint8Array([2, 3]), undefined, undefined, true);
+    assert.deepEqual([...await readFile(destination)], [2, 3]);
+    assert.deepEqual(await readdir(directory), ["resources.zip"]);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

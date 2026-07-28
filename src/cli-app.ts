@@ -11,9 +11,9 @@ export interface CliApplication {
   projects(options: { readonly includeInactive: boolean }): Promise<unknown>;
   project(projectId: number): Promise<unknown>;
   tasks(projectId: number, options: { readonly statuses: readonly string[] }): Promise<unknown>;
-  resourcesDownload(projectId: number, options: { readonly output?: string }): Promise<unknown>;
-  taskSheetDownload(projectId: number, task: string, options: { readonly output?: string }): Promise<unknown>;
-  taskResourcesDownload(projectId: number, task: string, options: { readonly output?: string }): Promise<unknown>;
+  resourcesDownload(projectId: number, options: { readonly output?: string; readonly force?: boolean }): Promise<unknown>;
+  taskSheetDownload(projectId: number, task: string, options: { readonly output?: string; readonly force?: boolean }): Promise<unknown>;
+  taskResourcesDownload(projectId: number, task: string, options: { readonly output?: string; readonly force?: boolean }): Promise<unknown>;
   taskRead(projectId: number, task: string): Promise<unknown>;
   taskState(projectId: number, task: string, state: string): Promise<unknown>;
   prepareTaskSubmission(projectId: number, task: string, options: TaskSubmissionOptions): Promise<TaskSubmissionPlan>;

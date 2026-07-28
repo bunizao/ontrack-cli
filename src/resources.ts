@@ -1,4 +1,4 @@
-import { link, lstat, unlink, writeFile } from "node:fs/promises";
+import { link, lstat, rename, unlink, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { basename, dirname, join, resolve } from "node:path";
 
@@ -32,6 +32,7 @@ export async function writeDownloadedFile(
   bytes: Uint8Array,
   signal?: AbortSignal,
   writer: ResourceArchiveWriter = writeFile,
+  force = false,
 ): Promise<string> {
   const archivePath = resolve(destination);
   const temporaryPath = join(dirname(archivePath), `.${basename(archivePath)}.${process.pid}.${randomUUID()}.tmp`);
@@ -39,7 +40,8 @@ export async function writeDownloadedFile(
     if (signal?.aborted) throw new CliError("cancellation", "Download cancelled");
     await writer(temporaryPath, bytes, signal ? { flag: "wx", signal } : { flag: "wx" });
     if (signal?.aborted) throw new CliError("cancellation", "Download cancelled");
-    await link(temporaryPath, archivePath);
+    if (force) await rename(temporaryPath, archivePath);
+    else await link(temporaryPath, archivePath);
     return archivePath;
   } catch (error) {
     if (signal?.aborted || (error instanceof Error && error.name === "AbortError")) {
@@ -59,6 +61,7 @@ export async function writeResourceArchive(
   bytes: Uint8Array,
   signal?: AbortSignal,
   writer: ResourceArchiveWriter = writeFile,
+  force = false,
 ): Promise<string> {
-  return writeDownloadedFile(destination, bytes, signal, writer);
+  return writeDownloadedFile(destination, bytes, signal, writer, force);
 }
