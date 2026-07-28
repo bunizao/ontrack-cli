@@ -81,7 +81,8 @@ function lazyApplication(signal: AbortSignal, env: Environment, platform: NodeJS
     prepareTaskSubmission: async (projectId, task, options) => (await resolve()).prepareTaskSubmission(projectId, task, options),
     submitTask: async (plan) => (await resolve()).submitTask(plan),
     chats: async (projectId, options) => (await resolve()).chats(projectId, options),
-    chatSend: async (projectId, task, message) => (await resolve()).chatSend(projectId, task, message),
+    prepareChatSend: async (projectId, task, message) => (await resolve()).prepareChatSend(projectId, task, message),
+    chatSend: async (plan) => (await resolve()).chatSend(plan),
     roles: async (options) => (await resolve()).roles(options),
   };
 }
@@ -175,6 +176,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       authLogin: () => authLogin(controller.signal, env, platform),
       confirmChatSend: (details) => confirmChatSend(details, controller.signal),
       confirmTaskSubmit: (plan) => confirmTaskSubmit(plan, controller.signal),
+      interactive: process.stdin.isTTY === true,
       onDiagnostic: (message) => { process.stderr.write(message); },
       version: VERSION,
     });

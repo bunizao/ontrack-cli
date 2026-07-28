@@ -49,6 +49,7 @@ async function fakeApplication(): Promise<{
     submitTask: { project_id: 7, task_definition_id: 12, task: "1.1", previous_status: "working_on_it", status: "ready_for_feedback", submission_type: "ready_for_feedback", processing_async: true },
     chatsSummary: [{ task_definition_id: 12, task: "1.1", name: "Example task", status: "rediscuss", unread_comments: 2 }],
     chatsHistory: await fixture("chats"),
+    prepareChatSend: { projectId: 7, taskDefinitionId: 12, task: "1.1", message: "Please review this." },
     chatSend: { project_id: 7, task_definition_id: 12, task: "1.1", comment_id: 51, message: "Please review this.", created_at: "2026-07-28T03:04:05.000Z" },
     roles: await fixture("roles"),
   };
@@ -75,7 +76,8 @@ async function fakeApplication(): Promise<{
       prepareTaskSubmission: record("prepareTaskSubmission", values.prepareTaskSubmission) as CliApplication["prepareTaskSubmission"],
       submitTask: record("submitTask", values.submitTask) as CliApplication["submitTask"],
       chats: async (projectId, options) => record("chats", options.task ? values.chatsHistory : values.chatsSummary)(projectId, options),
-      chatSend: record("chatSend", values.chatSend),
+      prepareChatSend: record("prepareChatSend", values.prepareChatSend) as CliApplication["prepareChatSend"],
+      chatSend: record("chatSend", values.chatSend) as CliApplication["chatSend"],
       roles: record("roles", values.roles),
     },
     invocations,
@@ -101,10 +103,39 @@ export async function test_chat_send_requires_confirmation_before_application_wo
       return true;
     },
   });
-  assert.deepEqual(confirmations, [{ projectId: 7, task: "1.1", message: "Please review this." }]);
-  assert.deepEqual(invocations, [{ command: "chatSend", arguments: [7, "1.1", "Please review this."] }]);
+  assert.deepEqual(confirmations, [{ projectId: 7, taskDefinitionId: 12, task: "1.1", message: "Please review this." }]);
+  assert.deepEqual(invocations, [
+    { command: "prepareChatSend", arguments: [7, "1.1", "Please review this."] },
+    { command: "chatSend", arguments: [{ projectId: 7, taskDefinitionId: 12, task: "1.1", message: "Please review this." }] },
+  ]);
   assert.equal(confirmed.exitCode, 0);
   assert.match(confirmed.stdout, /Project\s+Task\s+Comment ID\s+Time\s+Message/u);
+}
+
+export async function test_chat_send_confirms_the_canonical_task_before_mutating(): Promise<void> {
+  const { app, invocations } = await fakeApplication();
+  const canonicalApp: CliApplication = {
+    ...app,
+    prepareChatSend: async (projectId, task, message) => {
+      invocations.push({ command: "prepareChatSend", arguments: [projectId, task, message] });
+      return { projectId, taskDefinitionId: 12, task: "P1", message };
+    },
+  };
+  const confirmations: unknown[] = [];
+
+  const result = await executeCli(["chats", "send", "7", "12", "--message", "Please review this."], {
+    app: canonicalApp,
+    version: "0.2.0",
+    confirmChatSend: async (details) => {
+      confirmations.push(details);
+      return true;
+    },
+  });
+
+  assert.equal(result.exitCode, 0);
+  assert.deepEqual(confirmations, [{ projectId: 7, taskDefinitionId: 12, task: "P1", message: "Please review this." }]);
+  assert.equal(invocations.at(-1)?.command, "chatSend");
+  assert.deepEqual(invocations.at(-1)?.arguments, [{ projectId: 7, taskDefinitionId: 12, task: "P1", message: "Please review this." }]);
 }
 
 export async function test_task_submit_requires_confirmation_and_never_mutates_when_declined(): Promise<void> {
@@ -174,7 +205,10 @@ export async function test_chat_send_yes_is_explicit_noninteractive_confirmation
     message: "Please review this.",
     created_at: "2026-07-28T03:04:05.000Z",
   });
-  assert.deepEqual(invocations, [{ command: "chatSend", arguments: [7, "1.1", "Please review this."] }]);
+  assert.deepEqual(invocations, [
+    { command: "prepareChatSend", arguments: [7, "1.1", "Please review this."] },
+    { command: "chatSend", arguments: [{ projectId: 7, taskDefinitionId: 12, task: "1.1", message: "Please review this." }] },
+  ]);
 }
 
 export async function test_chat_send_does_not_mutate_when_typed_confirmation_is_declined(): Promise<void> {
@@ -186,7 +220,7 @@ export async function test_chat_send_does_not_mutate_when_typed_confirmation_is_
   });
   assert.equal(result.exitCode, 2);
   assert.match(result.stderr, /not confirmed/i);
-  assert.deepEqual(invocations, []);
+  assert.deepEqual(invocations, [{ command: "prepareChatSend", arguments: [7, "1.1", "Please review this."] }]);
 }
 
 export async function test_chat_send_rejects_invalid_messages_before_confirmation(): Promise<void> {
@@ -373,7 +407,8 @@ export async function test_secret_sentinel_is_removed_from_results_and_diagnosti
     prepareTaskSubmission: async (projectId, task, options) => app.prepareTaskSubmission(projectId, task, options),
     submitTask: async (plan) => expose(app.submitTask(plan)),
     chats: async (projectId, options) => expose(app.chats(projectId, options)),
-    chatSend: async (projectId, task, message) => expose(app.chatSend(projectId, task, message)),
+    prepareChatSend: async (projectId, task, message) => app.prepareChatSend(projectId, task, message),
+    chatSend: async (plan) => expose(app.chatSend(plan)),
     roles: async (options) => expose(app.roles(options)),
   };
   const commands = [

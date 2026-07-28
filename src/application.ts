@@ -1,5 +1,5 @@
 import type { AuthenticatedSession } from "./auth.js";
-import type { CliApplication } from "./cli-app.js";
+import type { ChatSendConfirmation, CliApplication } from "./cli-app.js";
 import type { OnTrackClient } from "./ontrack.js";
 import { buildProjectSnapshot } from "./project-snapshot.js";
 import { projectSummaryToJson, roleToJson, snapshotToJson, userToJson } from "./serialize.js";
@@ -156,14 +156,18 @@ export class OnTrackApplication implements CliApplication {
     });
   }
 
-  async chatSend(projectId: number, task: string, message: string): Promise<unknown> {
+  async prepareChatSend(projectId: number, task: string, message: string): Promise<ChatSendConfirmation> {
     const snapshot = await this.snapshot(projectId);
     const selected = selectedTask(snapshot, task);
-    const comment = await this.client.addTaskComment(projectId, selected.definition.id, message);
+    return { projectId, taskDefinitionId: selected.definition.id, task: selected.definition.abbreviation, message };
+  }
+
+  async chatSend(plan: ChatSendConfirmation): Promise<unknown> {
+    const comment = await this.client.addTaskComment(plan.projectId, plan.taskDefinitionId, plan.message);
     return {
-      project_id: projectId,
-      task_definition_id: selected.definition.id,
-      task: selected.row.abbreviation,
+      project_id: plan.projectId,
+      task_definition_id: plan.taskDefinitionId,
+      task: plan.task,
       comment_id: comment.id,
       message: comment.comment,
       created_at: comment.created_at,

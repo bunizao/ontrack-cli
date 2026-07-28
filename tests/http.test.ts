@@ -76,6 +76,19 @@ export async function test_ontrack_submits_files_with_exact_requirement_keys_and
   assert.equal(task.status, "ready_for_feedback");
 }
 
+export async function test_ontrack_requires_http_201_for_an_accepted_submission(): Promise<void> {
+  const client = new OnTrackClient(new HttpClient({
+    baseUrl: "https://ontrack.example.edu",
+    credentials: { username: "student", accessToken: "secret-token" },
+    fetch: async () => Response.json({ id: 21, task_definition_id: 27, status: "ready_for_feedback" }),
+  }));
+
+  await assert.rejects(
+    client.submitTask(5183, 27, [], { type: "ready_for_feedback" }),
+    (error) => error instanceof CliError && error.category === "upstream_contract" && /HTTP 201/u.test(error.message),
+  );
+}
+
 export async function test_http_surfaces_a_bounded_upstream_validation_error(): Promise<void> {
   const client = new HttpClient({
     baseUrl: "https://ontrack.example.edu",

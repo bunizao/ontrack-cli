@@ -19,7 +19,8 @@ export interface CliApplication {
   prepareTaskSubmission(projectId: number, task: string, options: TaskSubmissionOptions): Promise<TaskSubmissionPlan>;
   submitTask(plan: TaskSubmissionPlan): Promise<unknown>;
   chats(projectId: number, options: { readonly task?: string }): Promise<unknown>;
-  chatSend(projectId: number, task: string, message: string): Promise<unknown>;
+  prepareChatSend(projectId: number, task: string, message: string): Promise<ChatSendConfirmation>;
+  chatSend(plan: ChatSendConfirmation): Promise<unknown>;
   roles(options: { readonly showAll: boolean }): Promise<unknown>;
 }
 
@@ -37,10 +38,12 @@ interface Dependencies {
   readonly onDiagnostic?: (message: string) => void;
   readonly confirmChatSend?: (details: ChatSendConfirmation) => Promise<boolean>;
   readonly confirmTaskSubmit?: (plan: TaskSubmissionPlan) => Promise<boolean>;
+  readonly interactive?: boolean;
 }
 
 export interface ChatSendConfirmation {
   readonly projectId: number;
+  readonly taskDefinitionId: number;
   readonly task: string;
   readonly message: string;
 }
@@ -519,8 +522,8 @@ async function invoke(argv: readonly string[], dependencies: Dependencies): Prom
     if (comment !== undefined && !comment.trim()) throw new CliError("usage", "submission comment must not be empty");
     if (comment !== undefined && Array.from(comment).length > 4_095) throw new CliError("usage", "submission comment must not exceed 4095 characters");
     const confirmTaskSubmit = dependencies.confirmTaskSubmit;
-    if (!parsed.values.yes && !confirmTaskSubmit) {
-      throw new CliError("usage", "Task submission requires confirmation. Use --yes only after the user confirms the exact project, task, file list, and submission type.");
+    if (!parsed.values.yes && (!confirmTaskSubmit || dependencies.interactive === false)) {
+      throw new CliError("usage", "Task submission requires confirmation in an interactive terminal or --yes after the user confirms the exact project, task, file list, and submission type.");
     }
     const projectId = await resolvedProjectId(parsed.positionals[0], app);
     const baseOptions = { files, type, acceptTiiEula: parsed.values["accept-tii-eula"] ?? false };
@@ -554,16 +557,17 @@ async function invoke(argv: readonly string[], dependencies: Dependencies): Prom
     if (!message.trim()) throw new CliError("usage", "chat message must not be empty");
     if (Array.from(message).length > 4_095) throw new CliError("usage", "chat message must not exceed 4095 characters");
     const confirmChatSend = dependencies.confirmChatSend;
-    if (!parsed.values.yes && !confirmChatSend) {
-      throw new CliError("usage", "Chat sending requires confirmation. Use --yes only after the user confirms the exact project, task, and message.");
+    if (!parsed.values.yes && (!confirmChatSend || dependencies.interactive === false)) {
+      throw new CliError("usage", "Chat sending requires confirmation in an interactive terminal or --yes after the user confirms the exact project, task, and message.");
     }
     const id = await resolvedProjectId(parsed.positionals[0], app);
+    const plan = await app.prepareChatSend(id, task, message);
     if (!parsed.values.yes && confirmChatSend) {
-      const confirmed = await confirmChatSend({ projectId: id, task, message });
+      const confirmed = await confirmChatSend(plan);
       if (!confirmed) throw new CliError("usage", "Chat message was not confirmed.");
     }
     return {
-      value: await app.chatSend(id, task, message),
+      value: await app.chatSend(plan),
       json: parsed.values.json ?? false,
       view: "chat-send",
     };

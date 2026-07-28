@@ -77,6 +77,23 @@ export async function test_application_resolves_a_unique_active_project_by_unit_
   assert.equal(await app.resolveProject("fit1045"), 6200);
 }
 
+export async function test_application_prefers_one_active_project_without_scanning_inactive_duplicates(): Promise<void> {
+  const queries: string[] = [];
+  const http = new HttpClient({
+    baseUrl: "https://school.example.edu",
+    credentials: { username: "student", accessToken: "secret" },
+    fetch: async (input) => {
+      const url = new URL(input instanceof Request ? input.url : input);
+      queries.push(url.search);
+      return Response.json([{ id: 6200, unit: { id: 16, code: "FIT1045", name: "Algorithms", active: true } }]);
+    },
+  });
+  const app = new OnTrackApplication({ current: session("student") }, new OnTrackClient(http), createClock("2026-07-26T12:00:00Z"));
+
+  assert.equal(await app.resolveProject("FIT1045"), 6200);
+  assert.deepEqual(queries, ["?include_inactive=false"]);
+}
+
 export async function test_application_refuses_an_ambiguous_unit_code(): Promise<void> {
   const http = new HttpClient({
     baseUrl: "https://school.example.edu",
@@ -501,7 +518,8 @@ export async function test_application_sends_one_validated_text_comment_to_the_s
   });
   const app = new OnTrackApplication({ current: session("student") }, new OnTrackClient(http), createClock("2026-07-28T04:00:00Z"));
 
-  assert.deepEqual(await app.chatSend(5183, "P1", "Please review this."), {
+  const plan = await app.prepareChatSend(5183, "P1", "Please review this.");
+  assert.deepEqual(await app.chatSend(plan), {
     project_id: 5183,
     task_definition_id: 27,
     task: "P1",
@@ -544,7 +562,7 @@ export async function test_application_reports_upstream_chat_send_rejection_with
   const app = new OnTrackApplication({ current: session("student") }, new OnTrackClient(http), createClock("2026-07-28T04:00:00Z"));
 
   await assert.rejects(
-    app.chatSend(5183, "P1", "Duplicate message"),
+    app.chatSend(await app.prepareChatSend(5183, "P1", "Duplicate message")),
     (error) => error instanceof CliError
       && error.category === "upstream_api"
       && error.statusCode === 403

@@ -35,6 +35,11 @@ export interface DownloadResponse {
   readonly filename: string | null;
 }
 
+export interface JsonResponse {
+  readonly status: number;
+  readonly value: unknown;
+}
+
 interface ByteRange {
   readonly start: number;
   readonly end: number;
@@ -178,9 +183,13 @@ export class HttpClient {
   }
 
   async request(path: string, options: HttpRequestOptions = {}): Promise<unknown> {
+    return (await this.requestWithStatus(path, options)).value;
+  }
+
+  async requestWithStatus(path: string, options: HttpRequestOptions = {}): Promise<JsonResponse> {
     const response = await this.#response(path, options);
     try {
-      return JSON.parse(new TextDecoder().decode(response.bytes)) as unknown;
+      return { status: response.status, value: JSON.parse(new TextDecoder().decode(response.bytes)) as unknown };
     } catch {
       throw new CliError("upstream_contract", "OnTrack returned invalid JSON");
     }

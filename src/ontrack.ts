@@ -153,10 +153,14 @@ export class OnTrackClient {
     form.append("trigger", options.type);
     if (options.comment !== undefined) form.append("comment", options.comment);
     if (options.acceptTiiEula) form.append("accepted_tii_eula", "true");
-    return readTaskUpdate(await this.http.request(
+    const response = await this.http.requestWithStatus(
       `api/projects/${projectId}/task_def_id/${taskDefinitionId}/submission`,
       { method: "POST", body: form },
-    ));
+    );
+    if (response.status !== 201) {
+      throw new CliError("upstream_contract", `OnTrack submission returned HTTP ${response.status}; expected HTTP 201`);
+    }
+    return readTaskUpdate(response.value);
   }
 
   async getRoles(activeOnly = true): Promise<UnitRole[]> {

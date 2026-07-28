@@ -101,7 +101,7 @@ ontrack resources download FIT1061 --output FIT1061-resources.zip --json
 ontrack roles --all --json
 ```
 
-`<project>` accepts a unit code such as `FIT1045` or the `id` from `ontrack projects --include-inactive`. The CLI uses a unit code only when it identifies one project. If current and past projects share a code, use the project ID. List positions are never project IDs.
+`<project>` accepts a unit code such as `FIT1045` or the `id` from `ontrack projects --include-inactive`. The CLI prefers one active match. If no active match exists, the code must identify one past project; otherwise, use the project ID. List positions are never project IDs.
 
 The task selector accepts an abbreviation shown by `ontrack project`; a task-definition ID is also accepted. When OnTrack has not generated project task instances, the project table lists the authorized unit definitions that remain available for download. Server filenames are used when possible. Existing files are never replaced, downloads are written atomically, and large ranged responses are assembled before the file is committed.
 
