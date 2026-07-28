@@ -552,9 +552,10 @@ async function invoke(argv: readonly string[], dependencies: Dependencies): Prom
     if (parsed.positionals.length !== 2) throw new CliError("usage", "chats send requires a project and task abbreviation");
     const task = parsed.positionals[1]?.trim();
     if (!task) throw new CliError("usage", "task abbreviation must not be empty");
-    const message = parsed.values.message;
-    if (message === undefined) throw new CliError("usage", "chats send requires --message <text>");
-    if (!message.trim()) throw new CliError("usage", "chat message must not be empty");
+    const rawMessage = parsed.values.message;
+    if (rawMessage === undefined) throw new CliError("usage", "chats send requires --message <text>");
+    const message = rawMessage.trim();
+    if (!message) throw new CliError("usage", "chat message must not be empty");
     if (Array.from(message).length > 4_095) throw new CliError("usage", "chat message must not exceed 4095 characters");
     const confirmChatSend = dependencies.confirmChatSend;
     if (!parsed.values.yes && (!confirmChatSend || dependencies.interactive === false)) {

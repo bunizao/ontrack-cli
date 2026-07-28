@@ -138,6 +138,35 @@ export async function test_chat_send_confirms_the_canonical_task_before_mutating
   assert.deepEqual(invocations.at(-1)?.arguments, [{ projectId: 7, taskDefinitionId: 12, task: "P1", message: "Please review this." }]);
 }
 
+export async function test_chat_send_confirms_the_message_exactly_as_ontrack_will_store_it(): Promise<void> {
+  const { app, invocations } = await fakeApplication();
+  const canonicalApp: CliApplication = {
+    ...app,
+    prepareChatSend: async (projectId, task, message) => {
+      const plan = { projectId, taskDefinitionId: 12, task: "P1", message };
+      invocations.push({ command: "prepareChatSend", arguments: [projectId, task, message] });
+      return plan;
+    },
+  };
+  const confirmations: unknown[] = [];
+
+  const result = await executeCli(["chats", "send", "5183", "P1", "--message", "  Please review this.  "], {
+    app: canonicalApp,
+    version: "0.2.0",
+    confirmChatSend: async (details) => {
+      confirmations.push(details);
+      return true;
+    },
+  });
+
+  assert.equal(result.exitCode, 0);
+  assert.deepEqual(confirmations, [{ projectId: 5183, taskDefinitionId: 12, task: "P1", message: "Please review this." }]);
+  assert.deepEqual(invocations, [
+    { command: "prepareChatSend", arguments: [5183, "P1", "Please review this."] },
+    { command: "chatSend", arguments: [{ projectId: 5183, taskDefinitionId: 12, task: "P1", message: "Please review this." }] },
+  ]);
+}
+
 export async function test_task_submit_requires_confirmation_and_never_mutates_when_declined(): Promise<void> {
   const { app, invocations } = await fakeApplication();
   const refused = await executeCli(["task", "submit", "FIT1045", "1.1", "--file", "/tmp/report.pdf"], {

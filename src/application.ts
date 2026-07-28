@@ -338,6 +338,7 @@ export class OnTrackApplication implements CliApplication {
   }
 
   private ambiguousProject(reference: string, projectIds: readonly number[]): CliError {
-    return new CliError("usage", `Unit ${reference} matches multiple projects: ${projectIds.join(", ")}. Use a project ID.`);
+    const ids = [...new Set(projectIds)].sort((left, right) => left - right);
+    return new CliError("usage", `Unit ${reference.trim().toUpperCase()} matches multiple projects: ${ids.join(", ")}. Use a project ID.`);
   }
 }

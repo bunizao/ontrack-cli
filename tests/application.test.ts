@@ -111,6 +111,26 @@ export async function test_application_refuses_an_ambiguous_unit_code(): Promise
   );
 }
 
+export async function test_application_reports_ambiguous_project_ids_once_in_numeric_order(): Promise<void> {
+  const http = new HttpClient({
+    baseUrl: "https://school.example.edu",
+    credentials: { username: "student", accessToken: "secret" },
+    fetch: async () => Response.json([
+      { id: 6300, unit: { id: 17, code: "FIT1045", name: "Algorithms" } },
+      { id: 6200, unit: { id: 16, code: "FIT1045", name: "Algorithms" } },
+      { id: 6300, unit: { id: 17, code: "FIT1045", name: "Algorithms" } },
+    ]),
+  });
+  const app = new OnTrackApplication({ current: session("student") }, new OnTrackClient(http), createClock("2026-07-26T12:00:00Z"));
+
+  await assert.rejects(
+    app.resolveProject("fit1045"),
+    (error) => error instanceof CliError
+      && error.category === "usage"
+      && error.message === "Unit FIT1045 matches multiple projects: 6200, 6300. Use a project ID.",
+  );
+}
+
 export async function test_application_updates_one_assigned_task_state_and_verifies_the_response(): Promise<void> {
   const requests: Request[] = [];
   const http = new HttpClient({
