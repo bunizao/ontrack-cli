@@ -36,6 +36,14 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+function structuredErrorCode(stderr) {
+  try {
+    return JSON.parse(stderr)?.error?.code;
+  } catch {
+    return undefined;
+  }
+}
+
 async function interrupt(child, interruptPath) {
   if (process.platform !== "win32") {
     child.kill("SIGINT");
@@ -121,7 +129,7 @@ async function waitForInterruptReadiness(child, events) {
 async function main() {
   const workspace = process.cwd();
   const packageMetadata = JSON.parse(readFileSync(join(workspace, "package.json"), "utf8"));
-  const expectedVersion = `ontrack ${packageMetadata.version}\n`;
+  const expectedVersion = `${packageMetadata.version}\n`;
   const temporary = mkdtempSync(join(tmpdir(), "ontrack-package-smoke-"));
   let tarball;
   let server;
@@ -133,7 +141,7 @@ async function main() {
     tarball = resolve(workspace, JSON.parse(packed.stdout)[0].filename);
     const installed = spawnSync(executable("npm"), ["install", "--prefix", temporary, tarball], { encoding: "utf8", shell: process.platform === "win32" });
     assert(installed.status === 0, installed.stderr || "tarball installation failed");
-    const packageRoot = join(temporary, "node_modules", "@bunizao", "ontrack");
+    const packageRoot = join(temporary, "node_modules", ...packageMetadata.name.split("/"));
     const cli = join(packageRoot, "dist", "cli.js");
     const shim = join(temporary, "node_modules", ".bin", executable("ontrack"));
     const bundledCookieReader = join(
@@ -205,7 +213,7 @@ async function main() {
       const projects = await run(runtime, [cli, "projects", "--json"], authenticatedEnv);
       assert(projects.code === 0 && projects.stdout === "[]\n" && projects.stderr === "", `${runtime} projects failed: ${projects.stderr}`);
       const archive = join(temporary, `resources-${index}.zip`);
-      const resources = await run(runtime, [cli, "resources", "download", "5183", "--output", archive, "--json"], authenticatedEnv);
+      const resources = await run(runtime, [cli, "units", "get", "5183", "--dest", archive, "--json"], authenticatedEnv);
       const receipt = JSON.parse(resources.stdout || "null");
       assert(resources.code === 0 && resources.stderr === "", `${runtime} resource download failed: ${resources.stderr}`);
       assert(receipt?.archive_path === archive && receipt?.bytes_written === 22, `${runtime} resource receipt is invalid`);
@@ -220,10 +228,10 @@ async function main() {
     delete errorEnv.ONTRACK_USERNAME;
     delete errorEnv.ONTRACK_AUTH_TOKEN;
     const shimError = await run(shim, ["projects", "--json"], errorEnv);
-    assert(shimError.code === 1 && shimError.stdout === "" && /config error/i.test(shimError.stderr), "installed shim representative error failed");
+    assert(shimError.code === 1 && shimError.stdout === "" && structuredErrorCode(shimError.stderr) === "config", "installed shim representative error failed");
     for (const runtime of runtimes) {
       const error = await run(runtime, [cli, "projects", "--json"], errorEnv);
-      assert(error.code === 1 && error.stdout === "" && /config error/i.test(error.stderr), `${runtime} representative error failed`);
+      assert(error.code === 1 && error.stdout === "" && structuredErrorCode(error.stderr) === "config", `${runtime} representative error failed`);
     }
 
     for (const runtime of runtimes) {
@@ -253,7 +261,7 @@ async function main() {
         const [code] = outcome;
         const stdout = stdoutPath ? readFileSync(stdoutPath, "utf8") : wrapperStdout;
         const stderr = stderrPath ? readFileSync(stderrPath, "utf8") : wrapperStderr;
-        assert(code === 130 && stdout === "" && /cancellation/i.test(stderr), `${runtime} installed console interrupt behavior failed: ${wrapperStderr}`);
+        assert(code === 130 && stdout === "" && structuredErrorCode(stderr) === "cancelled", `${runtime} installed console interrupt behavior failed: ${wrapperStderr}`);
       } finally {
         if (controlDirectory) rmSync(controlDirectory, { recursive: true, force: true });
       }
