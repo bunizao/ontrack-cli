@@ -43,6 +43,7 @@ function lazyApplication(signal: AbortSignal, env: Environment, platform: NodeJS
     resourcesDownload: async (projectId, options) => (await resolve()).resourcesDownload(projectId, options),
     taskSheetDownload: async (projectId, task, options) => (await resolve()).taskSheetDownload(projectId, task, options),
     taskResourcesDownload: async (projectId, task, options) => (await resolve()).taskResourcesDownload(projectId, task, options),
+    chats: async (projectId, options) => (await resolve()).chats(projectId, options),
     roles: async (options) => (await resolve()).roles(options),
   };
 }
@@ -134,10 +135,11 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     const result = await executeCli(argv, {
       app: lazyApplication(controller.signal, env, platform),
       authLogin: () => authLogin(controller.signal, env, platform),
+      onDiagnostic: (message) => { process.stderr.write(message); },
       version: VERSION,
     });
-    if (result.stdout) process.stdout.write(result.stdout);
     if (result.stderr) process.stderr.write(result.stderr);
+    if (result.stdout) process.stdout.write(result.stdout);
     return result.exitCode;
   } finally {
     process.removeListener("SIGINT", cancel);

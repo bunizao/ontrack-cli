@@ -91,3 +91,24 @@ export interface UnitRole {
   readonly unit: UnitSummary;
   readonly user: UserView | null;
 }
+
+export interface TaskCommentParty {
+  readonly id: number;
+  readonly first_name: string;
+  readonly last_name: string;
+  readonly email: string;
+}
+
+export interface TaskComment {
+  readonly [key: string]: unknown;
+  readonly id: number;
+  readonly comment: string;
+  readonly has_attachment: boolean;
+  readonly type: string;
+  readonly is_new: boolean;
+  readonly reply_to_id: number | null;
+  readonly author: TaskCommentParty;
+  readonly recipient: TaskCommentParty;
+  readonly created_at: string;
+  readonly recipient_read_time: string | null;
+}

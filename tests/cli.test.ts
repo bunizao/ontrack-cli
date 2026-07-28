@@ -34,6 +34,8 @@ async function fakeApplication(): Promise<{
     resourcesDownload: { project_id: 7, unit_id: 9, archive_path: "/tmp/resources.zip", bytes_written: 4 },
     taskSheetDownload: { project_id: 7, unit_id: 9, task_definition_id: 12, task: "1.1", file_path: "/tmp/FIT9999-1.1.pdf", bytes_written: 6, content_type: "application/pdf" },
     taskResourcesDownload: { project_id: 7, unit_id: 9, task_definition_id: 12, task: "1.1", file_path: "/tmp/1.1-resources.zip", bytes_written: 4, content_type: "application/zip" },
+    chatsSummary: [{ task_definition_id: 12, task: "1.1", name: "Example task", status: "rediscuss", unread_comments: 2 }],
+    chatsHistory: await fixture("chats"),
     roles: await fixture("roles"),
   };
   const invocations: Invocation[] = [];
@@ -53,6 +55,7 @@ async function fakeApplication(): Promise<{
       resourcesDownload: record("resourcesDownload", values.resourcesDownload),
       taskSheetDownload: record("taskSheetDownload", values.taskSheetDownload),
       taskResourcesDownload: record("taskResourcesDownload", values.taskResourcesDownload),
+      chats: async (projectId, options) => record("chats", options.task ? values.chatsHistory : values.chatsSummary)(projectId, options),
       roles: record("roles", values.roles),
     },
     invocations,
@@ -110,6 +113,8 @@ export async function test_command_flags_reach_the_application_seam(): Promise<v
   await executeCli(["resources", "download", "8", "--json"], { app, version: "0.2.0" });
   await executeCli(["task", "sheet", "7", "1.1", "--output", "sheet.pdf", "--json"], { app, version: "0.2.0" });
   await executeCli(["task", "resources", "7", "1.1", "--json"], { app, version: "0.2.0" });
+  await executeCli(["chats", "7", "--json"], { app, version: "0.2.0" });
+  await executeCli(["chats", "7", "1.1", "--json"], { app, version: "0.2.0" });
   await executeCli(["roles", "--all", "--json"], { app, version: "0.2.0" });
 
   assert.deepEqual(invocations, [
@@ -120,6 +125,8 @@ export async function test_command_flags_reach_the_application_seam(): Promise<v
     { command: "resourcesDownload", arguments: [8, {}] },
     { command: "taskSheetDownload", arguments: [7, "1.1", { output: "sheet.pdf" }] },
     { command: "taskResourcesDownload", arguments: [7, "1.1", {}] },
+    { command: "chats", arguments: [7, {}] },
+    { command: "chats", arguments: [7, { task: "1.1" }] },
     { command: "roles", arguments: [{ showAll: true }] },
   ]);
 }
@@ -135,6 +142,7 @@ export async function test_yaml_is_a_usage_error_for_every_command(): Promise<vo
     ["resources", "download", "7", "--yaml"],
     ["task", "sheet", "7", "1.1", "--yaml"],
     ["task", "resources", "7", "1.1", "--yaml"],
+    ["chats", "7", "--yaml"],
     ["roles", "--yaml"],
   ];
 
@@ -179,6 +187,7 @@ export async function test_secret_sentinel_is_removed_from_results_and_diagnosti
     resourcesDownload: async (projectId, options) => expose(app.resourcesDownload(projectId, options)),
     taskSheetDownload: async (projectId, task, options) => expose(app.taskSheetDownload(projectId, task, options)),
     taskResourcesDownload: async (projectId, task, options) => expose(app.taskResourcesDownload(projectId, task, options)),
+    chats: async (projectId, options) => expose(app.chats(projectId, options)),
     roles: async (options) => expose(app.roles(options)),
   };
   const commands = [
@@ -191,6 +200,7 @@ export async function test_secret_sentinel_is_removed_from_results_and_diagnosti
     ["resources", "download", "7"],
     ["task", "sheet", "7", "1.1"],
     ["task", "resources", "7", "1.1"],
+    ["chats", "7"],
     ["roles"],
   ];
   for (const command of commands) {
@@ -250,6 +260,7 @@ export async function test_command_help_does_not_resolve_the_application(): Prom
     { argv: ["resources", "download", "--help"], usage: "ontrack resources download <project_id>", option: "--output" },
     { argv: ["task", "sheet", "--help"], usage: "ontrack task sheet <project_id> <task>", option: "--output" },
     { argv: ["task", "resources", "--help"], usage: "ontrack task resources <project_id> <task>", option: "--output" },
+    { argv: ["chats", "--help"], usage: "ontrack chats <project_id> [task]", option: "marks" },
     { argv: ["roles", "--help"], usage: "ontrack roles", option: "--all" },
   ];
   for (const { argv, usage, option } of cases) {
@@ -283,10 +294,11 @@ export async function test_default_output_uses_command_aware_tables(): Promise<v
     { argv: ["projects"], headers: /ID\s+Unit\s+Name\s+Role\s+Start\s+End\s+Active/u },
     { argv: ["tasks", "7"], headers: /Task\s+Name\s+Status\s+Due\s+Grade\s+Quality\s+Overdue/u },
     { argv: ["roles"], headers: /Unit\s+Name\s+Role\s+User/u },
-    { argv: ["project", "7"], headers: /Field\s+Value[\s\S]*Project ID\s+7[\s\S]*Tasks[\s\S]*No tasks found/u },
+    { argv: ["project", "7"], headers: /Field\s+Value[\s\S]*Project ID\s+7[\s\S]*Tasks[\s\S]*No project tasks found/u },
     { argv: ["resources", "download", "7"], headers: /Project\s+Unit\s+Archive\s+Size/u },
     { argv: ["task", "sheet", "7", "1.1"], headers: /Project\s+Unit\s+Task\s+File\s+Size/u },
     { argv: ["task", "resources", "7", "1.1"], headers: /Project\s+Unit\s+Task\s+File\s+Size/u },
+    { argv: ["chats", "7"], headers: /Task\s+Name\s+Status\s+Unread/u },
   ];
   for (const { argv, headers } of cases) {
     const { app } = await fakeApplication();
@@ -296,6 +308,82 @@ export async function test_default_output_uses_command_aware_tables(): Promise<v
     assert.doesNotMatch(result.stdout, /\{"id":/u, argv.join(" "));
     assert.equal(result.stderr, "", argv.join(" "));
   }
+}
+
+export async function test_project_table_lists_downloadable_unit_tasks_when_no_project_tasks_exist(): Promise<void> {
+  const { app } = await fakeApplication();
+  const projectApp: CliApplication = {
+    ...app,
+    project: async () => ({
+      project: { id: 7, target_grade: 3 },
+      unit: {
+        summary: { code: "FIT9999", name: "Example Unit" },
+        task_definitions: [{ id: 12, abbreviation: "P1", name: "Search task" }],
+      },
+      tasks: [],
+    }),
+  };
+  const result = await executeCli(["project", "7"], { app: projectApp, version: "0.2.0" });
+  assert.match(result.stdout, /No project tasks found/u);
+  assert.match(result.stdout, /Available unit tasks[\s\S]*Task\s+Name[\s\S]*P1\s+Search task/u);
+}
+
+export async function test_chat_history_is_a_table_with_an_explicit_read_side_effect_note(): Promise<void> {
+  const { app } = await fakeApplication();
+  const result = await executeCli(["chats", "7", "1.1"], { app, version: "0.2.0" });
+  assert.equal(result.exitCode, 0);
+  assert.match(result.stdout, /Time\s+Author\s+Type\s+Message\s+Attachment\s+Reply To/u);
+  assert.match(result.stdout, /Example Tutor/u);
+  assert.doesNotMatch(result.stdout, /@example\.invalid/u);
+  assert.match(result.stderr, /marks.*read/i);
+}
+
+export async function test_chat_json_remains_machine_clean_while_warning_stays_on_stderr(): Promise<void> {
+  const { app } = await fakeApplication();
+  const result = await executeCli(["chats", "7", "1.1", "--json"], { app, version: "0.2.0" });
+  assert.deepEqual(JSON.parse(result.stdout), await fixture("chats"));
+  assert.match(result.stderr, /marks.*read/i);
+}
+
+export async function test_chat_warning_is_emitted_before_history_is_requested(): Promise<void> {
+  const { app } = await fakeApplication();
+  const events: string[] = [];
+  const observing: CliApplication = {
+    ...app,
+    chats: async () => {
+      events.push("request");
+      return [];
+    },
+  };
+  const result = await executeCli(["chats", "7", "1.1"], {
+    app: observing,
+    version: "0.2.0",
+    onDiagnostic: () => { events.push("warning"); },
+  });
+  assert.deepEqual(events, ["warning", "request"]);
+  assert.equal(result.stderr, "");
+}
+
+export async function test_chat_table_bounds_long_messages_and_removes_terminal_controls(): Promise<void> {
+  const { app } = await fakeApplication();
+  const longMessage = `first line\n\u001b[31m${"x".repeat(200)}\u001b[0m`;
+  const chatApp: CliApplication = {
+    ...app,
+    chats: async () => [{
+      id: 1,
+      comment: longMessage,
+      has_attachment: false,
+      type: "text",
+      is_new: false,
+      reply_to_id: null,
+      author: { first_name: "Example", last_name: "Tutor" },
+      created_at: "2026-07-28T01:02:03.000Z",
+    }],
+  };
+  const result = await executeCli(["chats", "7", "1.1"], { app: chatApp, version: "0.2.0" });
+  assert.doesNotMatch(result.stdout, /\u001b|\nfirst line\n/u);
+  assert.match(result.stdout, /first line x{20,}\.\.\./u);
+  assert.doesNotMatch(result.stdout, /x{118}/u);
 }
 
 export async function test_empty_default_tables_explain_the_result(): Promise<void> {

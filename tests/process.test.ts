@@ -309,6 +309,261 @@ export async function test_process_resource_download_preserves_an_existing_file(
   }
 }
 
+export async function test_process_downloads_one_task_sheet_through_the_packaged_cli(): Promise<void> {
+  const directory = mkdtempSync(join(tmpdir(), "ontrack-task-sheet-process-"));
+  const output = join(directory, "FIT1061-1.1.pdf");
+  const urls: string[] = [];
+  const pdf = Buffer.from("%PDF-1.4\nsynthetic task sheet\n");
+  const server = createServer((request, response) => {
+    urls.push(request.url ?? "");
+    assert.equal(request.headers.username, "student");
+    assert.equal(request.headers["auth-token"], "process-secret");
+    if (request.url === "/api/projects/5183") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        id: 5183,
+        unit: { id: 15, code: "FIT1061", name: "Algorithms and programming fundamentals" },
+        tasks: [{ id: 21, task_definition_id: 27, status: "not_started" }],
+      }));
+      return;
+    }
+    if (request.url === "/api/units/15") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        id: 15,
+        code: "FIT1061",
+        name: "Algorithms and programming fundamentals",
+        task_definitions: [{ id: 27, abbreviation: "1.1", name: "Search", has_task_sheet: true }],
+      }));
+      return;
+    }
+    assert.equal(request.url, "/api/units/15/task_definitions/27/task_pdf?as_attachment=true");
+    response.writeHead(200, {
+      "content-type": "application/pdf",
+      "content-disposition": 'attachment; filename="FIT1061-1.1.pdf"',
+    });
+    response.end(pdf);
+  });
+  const port = await listen(server);
+  try {
+    const result = await run(process.execPath, [
+      "dist/cli.js",
+      "task",
+      "sheet",
+      "5183",
+      "1.1",
+      "--output",
+      output,
+    ], {
+      ONTRACK_BASE_URL: `http://127.0.0.1:${port}`,
+      ONTRACK_USERNAME: "student",
+      ONTRACK_AUTH_TOKEN: "process-secret",
+      ONTRACK_CONFIG: "",
+    });
+    assert.deepEqual(urls, [
+      "/api/projects/5183",
+      "/api/units/15",
+      "/api/units/15/task_definitions/27/task_pdf?as_attachment=true",
+    ]);
+    assert.deepEqual(readFileSync(output), pdf);
+    assert.deepEqual(readdirSync(directory), ["FIT1061-1.1.pdf"]);
+    assert.equal(result.code, 0);
+    assert.equal(result.signal, null);
+    assert.equal(result.stderr, "");
+    assert.match(result.stdout, /Project\s+Unit\s+Task\s+File\s+Size/u);
+    assert.match(result.stdout, new RegExp(`5183\\s+15\\s+1\\.1\\s+${output.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "u"));
+    assert.doesNotMatch(`${result.stdout}${result.stderr}`, /process-secret/u);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+    server.close();
+    await once(server, "close");
+  }
+}
+
+export async function test_process_downloads_one_task_resources_file_through_the_packaged_cli(): Promise<void> {
+  const directory = mkdtempSync(join(tmpdir(), "ontrack-task-resources-process-"));
+  const output = join(directory, "FIT1061-1.1-resources.zip");
+  const urls: string[] = [];
+  const archive = Buffer.from("UEsFBgAAAAAAAAAAAAAAAAAAAAAAAA==", "base64");
+  const server = createServer((request, response) => {
+    urls.push(request.url ?? "");
+    assert.equal(request.headers.username, "student");
+    assert.equal(request.headers["auth-token"], "process-secret");
+    if (request.url === "/api/projects/5183") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        id: 5183,
+        unit: { id: 15, code: "FIT1061", name: "Algorithms and programming fundamentals" },
+        tasks: [{ id: 21, task_definition_id: 27, status: "not_started" }],
+      }));
+      return;
+    }
+    if (request.url === "/api/units/15") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        id: 15,
+        code: "FIT1061",
+        name: "Algorithms and programming fundamentals",
+        task_definitions: [{ id: 27, abbreviation: "1.1", name: "Search", has_task_resources: true }],
+      }));
+      return;
+    }
+    assert.equal(request.url, "/api/units/15/task_definitions/27/task_resources");
+    response.writeHead(200, {
+      "content-type": "application/zip",
+      "content-disposition": 'attachment; filename="FIT1061-1.1-resources.zip"',
+    });
+    response.end(archive);
+  });
+  const port = await listen(server);
+  try {
+    const result = await run(process.execPath, [
+      "dist/cli.js",
+      "task",
+      "resources",
+      "5183",
+      "1.1",
+      "--output",
+      output,
+    ], {
+      ONTRACK_BASE_URL: `http://127.0.0.1:${port}`,
+      ONTRACK_USERNAME: "student",
+      ONTRACK_AUTH_TOKEN: "process-secret",
+      ONTRACK_CONFIG: "",
+    });
+    assert.deepEqual(urls, [
+      "/api/projects/5183",
+      "/api/units/15",
+      "/api/units/15/task_definitions/27/task_resources",
+    ]);
+    assert.deepEqual(readFileSync(output), archive);
+    assert.deepEqual(readdirSync(directory), ["FIT1061-1.1-resources.zip"]);
+    assert.equal(result.code, 0);
+    assert.equal(result.signal, null);
+    assert.equal(result.stderr, "");
+    assert.match(result.stdout, /Project\s+Unit\s+Task\s+File\s+Size/u);
+    assert.match(result.stdout, new RegExp(`5183\\s+15\\s+1\\.1\\s+${output.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "u"));
+    assert.doesNotMatch(`${result.stdout}${result.stderr}`, /process-secret/u);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+    server.close();
+    await once(server, "close");
+  }
+}
+
+export async function test_process_chats_summary_is_a_human_table_without_reading_chat_history(): Promise<void> {
+  const urls: string[] = [];
+  const server = createServer((request, response) => {
+    urls.push(request.url ?? "");
+    assert.equal(request.headers.username, "student");
+    assert.equal(request.headers["auth-token"], "process-secret");
+    response.writeHead(200, { "content-type": "application/json" });
+    if (request.url === "/api/projects/5183") {
+      response.end(JSON.stringify({
+        id: 5183,
+        unit: { id: 15, code: "FIT1061", name: "Algorithms and programming fundamentals" },
+        tasks: [{ id: 21, task_definition_id: 27, status: "rediscuss", num_new_comments: 3 }],
+      }));
+      return;
+    }
+    assert.equal(request.url, "/api/units/15");
+    response.end(JSON.stringify({
+      id: 15,
+      code: "FIT1061",
+      name: "Algorithms and programming fundamentals",
+      task_definitions: [{ id: 27, abbreviation: "1.1", name: "Search" }],
+    }));
+  });
+  const port = await listen(server);
+  try {
+    const result = await run(process.execPath, ["dist/cli.js", "chats", "5183"], {
+      ONTRACK_BASE_URL: `http://127.0.0.1:${port}`,
+      ONTRACK_USERNAME: "student",
+      ONTRACK_AUTH_TOKEN: "process-secret",
+      ONTRACK_CONFIG: "",
+    });
+    assert.deepEqual(urls, ["/api/projects/5183", "/api/units/15"]);
+    assert.deepEqual(result, {
+      code: 0,
+      signal: null,
+      stdout: [
+        "Task  Name    Status     Unread",
+        "----  ------  ---------  ------",
+        "1.1   Search  rediscuss  3",
+        "",
+      ].join("\n"),
+      stderr: "",
+    });
+  } finally {
+    server.close();
+    await once(server, "close");
+  }
+}
+
+export async function test_process_task_chat_history_warns_that_viewing_marks_comments_read(): Promise<void> {
+  const urls: string[] = [];
+  const server = createServer((request, response) => {
+    urls.push(request.url ?? "");
+    assert.equal(request.headers.username, "student");
+    assert.equal(request.headers["auth-token"], "process-secret");
+    response.writeHead(200, { "content-type": "application/json" });
+    if (request.url === "/api/projects/5183") {
+      response.end(JSON.stringify({
+        id: 5183,
+        unit: { id: 15, code: "FIT1061", name: "Algorithms and programming fundamentals" },
+        tasks: [{ id: 21, task_definition_id: 27, status: "rediscuss", num_new_comments: 1 }],
+      }));
+      return;
+    }
+    if (request.url === "/api/units/15") {
+      response.end(JSON.stringify({
+        id: 15,
+        code: "FIT1061",
+        name: "Algorithms and programming fundamentals",
+        task_definitions: [{ id: 27, abbreviation: "1.1", name: "Search" }],
+      }));
+      return;
+    }
+    assert.equal(request.url, "/api/projects/5183/task_def_id/27/comments");
+    response.end(JSON.stringify([{
+      id: 41,
+      comment: "Please review the search heuristic.",
+      has_attachment: false,
+      type: "text",
+      is_new: true,
+      reply_to_id: null,
+      author: { id: 2, first_name: "Example", last_name: "Tutor", email: "tutor@example.invalid" },
+      recipient: { id: 1, first_name: "Example", last_name: "Student", email: "student@example.invalid" },
+      created_at: "2026-07-28T01:02:03.000Z",
+      recipient_read_time: null,
+    }]));
+  });
+  const port = await listen(server);
+  try {
+    const result = await run(process.execPath, ["dist/cli.js", "chats", "5183", "1.1"], {
+      ONTRACK_BASE_URL: `http://127.0.0.1:${port}`,
+      ONTRACK_USERNAME: "student",
+      ONTRACK_AUTH_TOKEN: "process-secret",
+      ONTRACK_CONFIG: "",
+    });
+    assert.deepEqual(urls, [
+      "/api/projects/5183",
+      "/api/units/15",
+      "/api/projects/5183/task_def_id/27/comments",
+    ]);
+    assert.equal(result.code, 0);
+    assert.equal(result.signal, null);
+    assert.match(result.stdout, /Time\s+Author\s+Type\s+Message\s+Attachment\s+Reply To/u);
+    assert.match(result.stdout, /Example Tutor\s+text\s+Please review the search heuristic\.\s+No/u);
+    assert.doesNotMatch(result.stdout, /tutor@example\.invalid|student@example\.invalid/u);
+    assert.equal(result.stderr, "Note: Viewing task chat marks its non-discussion comments as read in OnTrack.\n");
+    assert.doesNotMatch(`${result.stdout}${result.stderr}`, /process-secret/u);
+  } finally {
+    server.close();
+    await once(server, "close");
+  }
+}
+
 export async function test_terminal_output_preserves_unicode_and_never_emits_ansi(): Promise<void> {
   const server = createServer((request, response) => {
     assert.equal(request.url, "/api/projects?include_inactive=false");

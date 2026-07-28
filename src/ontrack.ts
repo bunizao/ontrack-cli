@@ -1,7 +1,7 @@
 import { CliError } from "./errors.js";
 import { HttpClient, type DownloadResponse } from "./http.js";
-import { readProject, readProjects, readRoles, readUnit } from "./readers.js";
-import type { Project, ProjectSummary, Unit, UnitRole } from "./types.js";
+import { readProject, readProjects, readRoles, readTaskComments, readUnit } from "./readers.js";
+import type { Project, ProjectSummary, TaskComment, Unit, UnitRole } from "./types.js";
 
 export interface ProjectResourcesArchive {
   readonly projectId: number;
@@ -98,6 +98,12 @@ export class OnTrackClient {
 
   async downloadTaskResources(unitId: number, taskDefinitionId: number): Promise<DownloadResponse> {
     return this.http.downloadFile(`api/units/${unitId}/task_definitions/${taskDefinitionId}/task_resources`);
+  }
+
+  async getTaskComments(projectId: number, taskDefinitionId: number): Promise<TaskComment[]> {
+    return readTaskComments(await this.http.request(
+      `api/projects/${projectId}/task_def_id/${taskDefinitionId}/comments`,
+    ));
   }
 
   async getRoles(activeOnly = true): Promise<UnitRole[]> {

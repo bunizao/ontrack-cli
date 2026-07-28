@@ -5,6 +5,8 @@ import type {
   Project,
   ProjectSummary,
   Task,
+  TaskComment,
+  TaskCommentParty,
   TaskDefinition,
   Unit,
   UnitRole,
@@ -40,6 +42,11 @@ function requiredPositiveInteger(value: unknown, name: string): number {
 
 function requiredString(value: unknown, name: string): string {
   if (typeof value !== "string") return contract(`${name} must be a string`);
+  return value;
+}
+
+function requiredBoolean(value: unknown, name: string): boolean {
+  if (typeof value !== "boolean") return contract(`${name} must be a boolean`);
   return value;
 }
 
@@ -219,6 +226,40 @@ export function readRoles(value: unknown): UnitRole[] {
       role: requiredString(data.role, "role role"),
       unit: readUnitSummary(data.unit),
       user: data.user === undefined || data.user === null ? null : readUser(data.user),
+    };
+  });
+}
+
+function readTaskCommentParty(value: unknown, name: string): TaskCommentParty {
+  const data = object(value, name);
+  return {
+    id: requiredPositiveInteger(data.id, `${name} id`),
+    first_name: requiredString(data.first_name, `${name} first_name`),
+    last_name: requiredString(data.last_name, `${name} last_name`),
+    email: requiredString(data.email, `${name} email`),
+  };
+}
+
+export function readTaskComments(value: unknown): TaskComment[] {
+  return array(value, "task comments").map((item) => {
+    const data = object(item, "task comment");
+    const createdAt = instant(data.created_at, "task comment created_at");
+    if (!createdAt) return contract("task comment created_at must be an instant");
+    const recipientReadTime = instant(data.recipient_read_time, "task comment recipient_read_time");
+    return {
+      ...data,
+      id: requiredPositiveInteger(data.id, "task comment id"),
+      comment: requiredString(data.comment, "task comment comment"),
+      has_attachment: requiredBoolean(data.has_attachment, "task comment has_attachment"),
+      type: requiredString(data.type, "task comment type"),
+      is_new: requiredBoolean(data.is_new, "task comment is_new"),
+      reply_to_id: data.reply_to_id === null
+        ? null
+        : requiredPositiveInteger(data.reply_to_id, "task comment reply_to_id"),
+      author: readTaskCommentParty(data.author, "task comment author"),
+      recipient: readTaskCommentParty(data.recipient, "task comment recipient"),
+      created_at: createdAt.toString(),
+      recipient_read_time: recipientReadTime?.toString() ?? null,
     };
   });
 }

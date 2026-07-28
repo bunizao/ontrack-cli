@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -106,6 +106,44 @@ export async function test_application_downloads_a_task_sheet_by_abbreviation():
   }
 }
 
+export async function test_application_downloads_from_unit_definitions_when_project_tasks_are_empty(): Promise<void> {
+  const directory = await mkdtemp(join(tmpdir(), "ontrack-unit-task-sheet-"));
+  const output = join(directory, "sheet.pdf");
+  const http = new HttpClient({
+    baseUrl: "https://school.example.edu",
+    credentials: { username: "student", accessToken: "secret" },
+    fetch: async (input) => {
+      const url = new URL(input instanceof Request ? input.url : input);
+      if (url.pathname === "/api/projects/5183") return Response.json({
+        id: 5183,
+        unit: { id: 15, code: "FIT1061", name: "AI" },
+        tasks: [],
+      });
+      if (url.pathname === "/api/units/15") return Response.json({
+        id: 15,
+        code: "FIT1061",
+        name: "AI",
+        task_definitions: [
+          { id: 1, abbreviation: "X", name: "Numeric collision", has_task_sheet: true },
+          { id: 27, abbreviation: "1", name: "Search", has_task_sheet: true },
+        ],
+      });
+      assert.equal(url.pathname, "/api/units/15/task_definitions/27/task_pdf");
+      return new Response(new TextEncoder().encode("%PDF-1.4\n"), {
+        headers: { "Content-Type": "application/pdf", "Content-Disposition": "attachment; filename=FIT1061-P1.pdf" },
+      });
+    },
+  });
+  const app = new OnTrackApplication({ current: session("student") }, new OnTrackClient(http), createClock("2026-07-26T12:00:00Z"));
+  try {
+    const receipt = await app.taskSheetDownload(5183, "1", { output });
+    assert.equal((receipt as { readonly task: string }).task, "1");
+    assert.equal(await readFile(output, "utf8"), "%PDF-1.4\n");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
 export async function test_application_refuses_a_missing_task_resource_before_download(): Promise<void> {
   const urls: string[] = [];
   const http = new HttpClient({
@@ -134,4 +172,112 @@ export async function test_application_refuses_a_missing_task_resource_before_do
     (error) => error instanceof CliError && error.category === "upstream_api" && /no resources/i.test(error.message),
   );
   assert.deepEqual(urls, ["/api/projects/5183", "/api/units/15"]);
+}
+
+export async function test_application_rejects_upstream_placeholder_files_without_writing_output(): Promise<void> {
+  for (const kind of ["sheet", "resources"] as const) {
+    const directory = await mkdtemp(join(tmpdir(), `ontrack-placeholder-${kind}-`));
+    const output = join(directory, kind === "sheet" ? "sheet.pdf" : "resources.zip");
+    const http = new HttpClient({
+      baseUrl: "https://school.example.edu",
+      credentials: { username: "student", accessToken: "secret" },
+      fetch: async (input) => {
+        const url = new URL(input instanceof Request ? input.url : input);
+        if (url.pathname === "/api/projects/5183") return Response.json({
+          id: 5183,
+          unit: { id: 15, code: "FIT1061", name: "AI" },
+          tasks: [{ id: 21, task_definition_id: 27, status: "not_started" }],
+        });
+        if (url.pathname === "/api/units/15") return Response.json({
+          id: 15,
+          code: "FIT1061",
+          name: "AI",
+          task_definitions: [{
+            id: 27,
+            abbreviation: "1.1",
+            name: "Search",
+            has_task_sheet: true,
+            has_task_resources: true,
+          }],
+        });
+        return new Response(new TextEncoder().encode("%PDF-1.4\n"), {
+          headers: {
+            "Content-Type": "application/pdf",
+            "Content-Disposition": "attachment; filename=FileNotFound.pdf",
+          },
+        });
+      },
+    });
+    const app = new OnTrackApplication({ current: session("student") }, new OnTrackClient(http), createClock("2026-07-26T12:00:00Z"));
+    try {
+      const operation = kind === "sheet"
+        ? app.taskSheetDownload(5183, "1.1", { output })
+        : app.taskResourcesDownload(5183, "1.1", { output });
+      await assert.rejects(operation, (error) => error instanceof CliError && /no (task sheet|resources)/iu.test(error.message));
+      assert.deepEqual(await readdir(directory), []);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+}
+
+export async function test_application_lists_chat_summaries_without_marking_messages_read(): Promise<void> {
+  const urls: string[] = [];
+  const http = new HttpClient({
+    baseUrl: "https://school.example.edu",
+    credentials: { username: "student", accessToken: "secret" },
+    fetch: async (input) => {
+      const url = new URL(input instanceof Request ? input.url : input);
+      urls.push(url.pathname);
+      if (url.pathname === "/api/projects/5183") return Response.json({
+        id: 5183,
+        unit: { id: 15, code: "FIT1061", name: "AI" },
+        tasks: [{ id: 21, task_definition_id: 27, status: "rediscuss", num_new_comments: 3 }],
+      });
+      return Response.json({
+        id: 15,
+        code: "FIT1061",
+        name: "AI",
+        task_definitions: [{ id: 27, abbreviation: "1.1", name: "Search" }],
+      });
+    },
+  });
+  const app = new OnTrackApplication({ current: session("student") }, new OnTrackClient(http), createClock("2026-07-26T12:00:00Z"));
+
+  assert.deepEqual(await app.chats(5183, {}), [{
+    task_definition_id: 27,
+    task: "1.1",
+    name: "Search",
+    status: "rediscuss",
+    unread_comments: 3,
+  }]);
+  assert.deepEqual(urls, ["/api/projects/5183", "/api/units/15"]);
+}
+
+export async function test_application_fetches_one_task_chat_by_abbreviation(): Promise<void> {
+  const urls: string[] = [];
+  const http = new HttpClient({
+    baseUrl: "https://school.example.edu",
+    credentials: { username: "student", accessToken: "secret" },
+    fetch: async (input) => {
+      const url = new URL(input instanceof Request ? input.url : input);
+      urls.push(url.pathname);
+      if (url.pathname === "/api/projects/5183") return Response.json({
+        id: 5183,
+        unit: { id: 15, code: "FIT1061", name: "AI" },
+        tasks: [{ id: 21, task_definition_id: 27, status: "rediscuss" }],
+      });
+      if (url.pathname === "/api/units/15") return Response.json({
+        id: 15,
+        code: "FIT1061",
+        name: "AI",
+        task_definitions: [{ id: 27, abbreviation: "1.1", name: "Search" }],
+      });
+      return Response.json([]);
+    },
+  });
+  const app = new OnTrackApplication({ current: session("student") }, new OnTrackClient(http), createClock("2026-07-26T12:00:00Z"));
+
+  assert.deepEqual(await app.chats(5183, { task: "1.1" }), []);
+  assert.deepEqual(urls, ["/api/projects/5183", "/api/units/15", "/api/projects/5183/task_def_id/27/comments"]);
 }

@@ -28,7 +28,7 @@ Each boundary has one job:
 
 ## Authentication boundary
 
-Explicit credentials take precedence over the local session cache and browser cookies. Browser cookies are filtered for the target deployment and exchanged in memory for an OnTrack access token. Refresh cookies are not copied into the CLI cache.
+Explicit credentials take precedence over the local session cache and browser cookies. Browser cookies are filtered for the target deployment and exchanged in memory for an OnTrack access token. Browser profiles are searched first; compatible Playwright storage-state files are an optional fallback. Refresh cookies are not copied into the CLI cache.
 
 The cache stores the deployment URL, username, access token, expiry, and credential source with file mode `0600`. A rejected GET request may refresh credentials and retry once. The client does not retry mutating requests.
 
@@ -44,9 +44,11 @@ OnTrack API readers receive upstream responses as `unknown` and validate them be
 
 The CLI distinguishes calendar dates from timestamps. Task schedules combine unit defaults, target-grade dates, project overrides, extensions, and special consideration without converting civil dates into artificial instants.
 
-Successful non-interactive `--json` commands write one JSON value to stdout and leave stderr empty. Interactive authentication may write prompts to stderr while keeping stdout machine-readable. Failures leave stdout empty. Usage errors exit with code `2`, cancellation exits with `130`, and other failures exit with `1`.
+Terminal commands render command-specific tables by default. Successful `--json` commands write one JSON value to stdout. Prompts and diagnostics stay on stderr, including the warning emitted before reading task chat history. Failures leave stdout empty. Usage errors exit with code `2`, cancellation exits with `130`, and other failures exit with `1`.
 
-Resource downloads resolve the unit through the selected project, fetch the aggregate archive through the same authenticated transport, and validate every central-directory record. Archives are limited to 256 MiB and collected in one bounded, growing buffer. The complete response is received before an abortable sibling temporary-file write begins. A hard-link commit prevents overwriting an existing destination, and temporary-file cleanup is attempted after success or failure.
+Resource downloads resolve the unit through the selected project. The aggregate route returns a unit-wide ZIP; individual routes return a PDF, ZIP, or linked resource. Task selection normally follows generated project tasks. If the API returns no project tasks, selection falls back to definitions from that project's authorized unit, which remain visible in the project output. The transport follows validated HTTP 206 ranges, including credential refresh between chunks. Responses are limited to 256 MiB. ZIP and PDF signatures are validated where applicable, upstream placeholder files are rejected, and filenames are reduced to safe basenames. An atomic no-overwrite commit prevents replacing an existing destination.
+
+Chat summaries use unread counts already present in the project snapshot and do not fetch comment streams. History requests are restricted to one selected task to avoid an implicit N+1 request and unexpected read-state changes. The upstream history route returns group-task comments chronologically and marks non-discussion comments as read; the CLI reports that side effect on stderr. Terminal rendering omits email addresses and strips control sequences while JSON preserves the validated API payload.
 
 ## Verification
 

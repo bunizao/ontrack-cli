@@ -12,6 +12,7 @@ export interface CliApplication {
   resourcesDownload(projectId: number, options: { readonly output?: string }): Promise<unknown>;
   taskSheetDownload(projectId: number, task: string, options: { readonly output?: string }): Promise<unknown>;
   taskResourcesDownload(projectId: number, task: string, options: { readonly output?: string }): Promise<unknown>;
+  chats(projectId: number, options: { readonly task?: string }): Promise<unknown>;
   roles(options: { readonly showAll: boolean }): Promise<unknown>;
 }
 
@@ -26,15 +27,17 @@ interface Dependencies {
   readonly authLogin?: () => Promise<unknown>;
   readonly version: string;
   readonly sensitiveValues?: readonly string[];
+  readonly onDiagnostic?: (message: string) => void;
 }
 
-type OutputView = "auth-check" | "auth-login" | "download" | "project" | "projects" | "roles" | "tasks" | "user";
+type OutputView = "auth-check" | "auth-login" | "chats-history" | "chats-summary" | "download" | "project" | "projects" | "roles" | "tasks" | "user";
 
 interface InvocationResult {
   readonly value: unknown;
   readonly json: boolean;
   readonly view: OutputView;
   readonly emptyMessage?: string;
+  readonly diagnostic?: string;
 }
 
 const secretKeys = new Set([
@@ -79,6 +82,7 @@ function rootHelp(): string {
     "  resources download <project_id> Download project resources",
     "  task sheet <project_id> <task> Download one task sheet",
     "  task resources <project_id> <task> Download one task's resources",
+    "  chats <project_id> [task] Show unread chat counts or one task's history",
     "  roles                List teaching roles",
     "",
     "Project arguments use the id from `ontrack projects`, not list positions.",
@@ -143,15 +147,21 @@ function helpFor(argv: readonly string[]): string | undefined {
   );
   if (key === "task sheet") return commandHelp(
     "ontrack task sheet <project_id> <task>",
-    "Download one task sheet by the abbreviation shown in `ontrack tasks`.",
+    "Download one task sheet by an abbreviation shown in `ontrack project`.",
     ["  --output <path>      Destination PDF; defaults to <unit>-<task>.pdf"],
     "A numeric task-definition ID is accepted as a fallback. Existing files are never replaced.",
   );
   if (key === "task resources") return commandHelp(
     "ontrack task resources <project_id> <task>",
-    "Download one task's linked file or resource ZIP.",
+    "Download one task's linked file or resource ZIP using an abbreviation shown in `ontrack project`.",
     ["  --output <path>      Destination path; defaults to the server filename"],
     "A numeric task-definition ID is accepted as a fallback. Existing files are never replaced.",
+  );
+  if (args[0] === "chats") return commandHelp(
+    "ontrack chats <project_id> [task]",
+    "Show per-task unread counts, or one task's chronological chat history.",
+    [],
+    "Viewing one task's history marks its non-discussion comments as read in OnTrack.",
   );
   if (args[0] === "roles") return commandHelp("ontrack roles", "List teaching and administrative roles.", ["  --all                 Include inactive roles"]);
   return undefined;
@@ -199,6 +209,19 @@ function taskTable(value: unknown): string {
   return renderTable(rows, [["task", "Task"], ["name", "Name"], ["status", "Status"], ["due", "Due"], ["grade", "Grade"], ["quality", "Quality"], ["overdue", "Overdue"]]);
 }
 
+function taskDefinitionTable(value: unknown): string {
+  const rows = records(value).map((task) => ({ task: task.abbreviation, name: task.name }));
+  return renderTable(rows, [["task", "Task"], ["name", "Name"]]);
+}
+
+function terminalText(value: unknown): string {
+  if (typeof value !== "string") return "-";
+  const text = value.replace(/\x1B\[[0-?]*[ -/]*[@-~]/gu, "").replace(/\s+/gu, " ").trim();
+  if (!text) return "-";
+  const characters = Array.from(text);
+  return characters.length <= 120 ? text : `${characters.slice(0, 117).join("")}...`;
+}
+
 function formatBytes(value: unknown): string {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return "-";
   if (value < 1_024) return `${value} B`;
@@ -223,6 +246,21 @@ function terminal(view: OutputView, value: unknown, emptyMessage?: string): stri
     return renderTable(rows, [["id", "ID"], ["unit", "Unit"], ["name", "Name"], ["role", "Role"], ["start", "Start"], ["end", "End"], ["active", "Active"]]);
   }
   if (view === "tasks") return taskTable(value);
+  if (view === "chats-summary") {
+    const rows = records(value).map((chat) => ({ task: chat.task, name: chat.name, status: chat.status, unread: chat.unread_comments }));
+    return renderTable(rows, [["task", "Task"], ["name", "Name"], ["status", "Status"], ["unread", "Unread"]]);
+  }
+  if (view === "chats-history") {
+    const rows = records(value).map((chat) => ({
+      time: chat.created_at,
+      author: personName(chat.author),
+      type: chat.type,
+      message: terminalText(chat.comment),
+      attachment: chat.has_attachment === true ? "Yes" : "No",
+      reply: chat.reply_to_id,
+    }));
+    return renderTable(rows, [["time", "Time"], ["author", "Author"], ["type", "Type"], ["message", "Message"], ["attachment", "Attachment"], ["reply", "Reply To"]]);
+  }
   if (view === "roles") {
     const rows = records(value).map((role) => {
       const unit = nested(role, "unit");
@@ -234,15 +272,18 @@ function terminal(view: OutputView, value: unknown, emptyMessage?: string): stri
   if (view === "project") {
     const project = nested(data, "project");
     const unit = nested(data, "unit");
+    const unitSummary = nested(unit, "summary");
     const summary = recordTable([
       ["Project ID", project.id],
-      ["Unit", unit.code ?? nested(project, "unit").code],
-      ["Name", unit.name ?? nested(project, "unit").name],
+      ["Unit", unitSummary.code ?? unit.code ?? nested(project, "unit").code],
+      ["Name", unitSummary.name ?? unit.name ?? nested(project, "unit").name],
       ["Target grade", project.target_grade],
       ["Submitted grade", project.submitted_grade],
     ]);
     const tasks = records(data.tasks);
-    return `${summary}\nTasks\n${tasks.length ? taskTable(tasks) : "No tasks found.\n"}`;
+    if (tasks.length) return `${summary}\nTasks\n${taskTable(tasks)}`;
+    const definitions = records(unit.task_definitions);
+    return `${summary}\nTasks\nNo project tasks found.\n${definitions.length ? `\nAvailable unit tasks\n${taskDefinitionTable(definitions)}` : ""}`;
   }
   if (view === "download") {
     const file = data.file_path;
@@ -352,6 +393,23 @@ async function invoke(argv: readonly string[], dependencies: Dependencies): Prom
       view: "download",
     };
   }
+  if (command === "chats") {
+    const parsed = parseArgs({ args: rest, options: common, allowPositionals: true, strict: true });
+    if (parsed.positionals.length < 1 || parsed.positionals.length > 2) {
+      throw new CliError("usage", "chats requires a project_id and accepts one optional task abbreviation");
+    }
+    const task = parsed.positionals[1]?.trim();
+    if (parsed.positionals.length === 2 && !task) throw new CliError("usage", "task abbreviation must not be empty");
+    const diagnostic = "Note: Viewing task chat marks its non-discussion comments as read in OnTrack.\n";
+    if (task) dependencies.onDiagnostic?.(diagnostic);
+    return {
+      value: await app.chats(projectId(parsed.positionals[0]), task ? { task } : {}),
+      json: parsed.values.json ?? false,
+      view: task ? "chats-history" : "chats-summary",
+      emptyMessage: task ? "No chat messages found." : "No project tasks found.",
+      ...(task && !dependencies.onDiagnostic ? { diagnostic } : {}),
+    };
+  }
   if (command === "roles") {
     const parsed = parseArgs({ args: rest, options: { ...common, all: { type: "boolean" } }, allowPositionals: false, strict: true });
     const showAll = parsed.values.all ?? false;
@@ -378,7 +436,11 @@ export async function executeCli(argv: readonly string[], dependencies: Dependen
     const result = await invoke(argv, dependencies);
     const value = sanitized(result.value);
     const stdout = result.json ? renderJson(value) : terminal(result.view, value, result.emptyMessage);
-    return { exitCode: 0, stdout: redact(stdout, sensitiveValues), stderr: "" };
+    return {
+      exitCode: 0,
+      stdout: redact(stdout, sensitiveValues),
+      stderr: redact(result.diagnostic ?? "", sensitiveValues),
+    };
   } catch (error) {
     const cliError = error instanceof CliError
       ? error

@@ -5,16 +5,17 @@
 [![Bun 1.3.14+](https://img.shields.io/badge/Bun-1.3.14%2B-000000?logo=bun&logoColor=white)](https://bun.sh/)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-A read-only command-line client for [Doubtfire / OnTrack](https://github.com/doubtfire-lms/doubtfire-api).
+A command-line client for [Doubtfire / OnTrack](https://github.com/doubtfire-lms/doubtfire-api).
 
-Use it to inspect projects, tasks, grades, and teaching roles from a terminal or script. The CLI reuses your OnTrack browser session and does not require a separate authentication package.
+Inspect projects, tasks, grades, chats, and teaching roles from a terminal or script. Download unit resources or one task's files without installing a separate authentication package.
 
 ## Features
 
 - Read projects, task schedules, grades, and teaching roles.
-- Download all task sheets and task resources for a project as one ZIP archive.
+- Download one task sheet, one task's resources, or the unit-wide resource archive.
+- Review unread chat counts and task comment history.
 - Sign in through your existing browser session.
-- Return stable JSON for scripts or readable tables for terminals.
+- Show readable tables by default and stable JSON with `--json`.
 - Run the same package with Node.js or Bun.
 - Refresh an expired access token from the browser without storing refresh cookies.
 
@@ -52,11 +53,11 @@ ontrack projects
 4. waits for the browser to complete sign-in; and
 5. exchanges the new OnTrack cookies for a short-lived access token.
 
-You do not need to install or configure `okta-auth`, and you do not need to click **Sign in** on the OnTrack landing page. Normal data commands never open a browser; they ask you to run `ontrack auth login` when authentication is required.
+You do not need to install or configure `okta-auth`. Normal data commands never open a browser; they ask you to run `ontrack auth login` when authentication is required.
 
 Automatic completion requires **Remember me** to be enabled in OnTrack. The OnTrack API only creates reusable browser cookies when that setting is enabled; otherwise the browser can sign in successfully but the CLI cannot import the session. The command reports its five-minute waiting limit and explains this setting if it times out.
 
-Cookie discovery is provided by [`@steipete/sweet-cookie`](https://github.com/steipete/sweet-cookie). It reads every local profile for Chrome, Edge, and Firefox on macOS, Windows, and Linux, plus Safari and Brave on macOS. It uses the operating system credential store and does not require a global `sqlite3` command.
+Cookie discovery is provided by [`@steipete/sweet-cookie`](https://github.com/steipete/sweet-cookie). It reads local Chrome, Edge, and Firefox profiles on macOS, Windows, and Linux, plus Safari and Brave on macOS. It uses the operating system credential store and does not require a global `sqlite3` command. The CLI can also reuse compatible Playwright storage-state files in `~/.okta-auth/sessions`; this is optional and does not add an `okta-auth` dependency.
 
 Browser security rules still apply. On macOS, grant Full Disk Access to the application that launches `ontrack`—for example Terminal, iTerm, or ChatGPT—not to the CLI itself. Chromium may also request Keychain access. When access is denied, `auth login` prints the relevant System Settings location without exposing browser paths or Cookie values. Recent Chrome and Edge releases on Windows may protect cookies with App-Bound Encryption; the CLI can still try another supported browser profile.
 
@@ -70,21 +71,33 @@ Browser security rules still apply. On macOS, grant Full Disk Access to the appl
 | `ontrack projects` | List current projects. |
 | `ontrack project <project_id>` | Show a project and its task snapshot. |
 | `ontrack tasks <project_id>` | List tasks for a project. |
-| `ontrack resources download <project_id>` | Download task sheets and resources as a ZIP archive. |
+| `ontrack resources download <project_id>` | Download the project's unit-wide resource ZIP. |
+| `ontrack task sheet <project_id> <task>` | Download one task sheet. |
+| `ontrack task resources <project_id> <task>` | Download one task's linked file or resource ZIP. |
+| `ontrack chats <project_id>` | List tasks and unread comment counts without opening chat streams. |
+| `ontrack chats <project_id> <task>` | Show one task's chronological comment history. |
 | `ontrack roles` | List teaching and administrative roles. |
 
-Every command supports `--json`:
+Commands print tables by default. Use `--json` for automation:
 
 ```bash
 ontrack projects --include-inactive --json
 ontrack tasks 12345 --status rediscuss --json
+ontrack chats 12345 --json
+ontrack chats 12345 1.1 --json
+ontrack task sheet 12345 1.1 --output FIT1061-1.1.pdf --json
+ontrack task resources 12345 1.1 --output 1.1-resources.zip --json
 ontrack resources download 5183 --output FIT1061-resources.zip --json
 ontrack roles --all --json
 ```
 
 Use the `id` field from `ontrack projects --include-inactive`; project IDs are not list positions.
 
-Without `--output`, resource downloads use `ontrack-resources-<project_id>.zip` in the current directory. Existing files are never replaced. The archive contains task sheets and task resources exposed by OnTrack; it does not include general unit website content.
+The task selector accepts an abbreviation shown by `ontrack project`; a task-definition ID is also accepted. When OnTrack has not generated project task instances, the project table lists the authorized unit definitions that remain available for download. Server filenames are used when possible. Existing files are never replaced, downloads are written atomically, and large ranged responses are assembled before the file is committed.
+
+`resources download` retrieves the complete unit archive exposed by OnTrack. It is not filtered to the student's current task rows. The archive does not include general unit website content.
+
+`chats <project_id>` reads unread counts from the project snapshot and does not open comment streams. Reading one task's history causes OnTrack to mark returned non-discussion comments as read; the CLI prints this side effect to stderr before presenting the result.
 
 Successful JSON commands write only the result to stdout. Diagnostics and interactive prompts go to stderr.
 
