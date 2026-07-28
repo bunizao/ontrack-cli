@@ -186,7 +186,7 @@ export async function test_project_403_explains_how_to_find_an_accessible_id(): 
     (error) => error instanceof CliError
       && error.category === "upstream_api"
       && error.statusCode === 403
-      && error.message === "Project 1 is not accessible. Run `ontrack projects --include-inactive` to find your project IDs.",
+      && error.message === "Project 1 is not accessible. Project arguments use the id from `ontrack projects --include-inactive`, not list positions.",
   );
 }
 

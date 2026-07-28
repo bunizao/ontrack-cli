@@ -61,7 +61,7 @@ export class OnTrackClient {
       if (error instanceof CliError && error.statusCode === 403) {
         throw new CliError(
           "upstream_api",
-          `Project ${id} is not accessible. Run \`ontrack projects --include-inactive\` to find your project IDs.`,
+          `Project ${id} is not accessible. Project arguments use the id from \`ontrack projects --include-inactive\`, not list positions.`,
           403,
         );
       }

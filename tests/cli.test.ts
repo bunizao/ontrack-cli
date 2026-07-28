@@ -218,6 +218,7 @@ export async function test_help_and_version_succeed_without_resolving_the_applic
   for (const command of ["user", "auth", "projects", "project", "tasks", "resources", "roles"]) {
     assert.match(help.stdout, new RegExp(`\\b${command}\\b`));
   }
+  assert.match(help.stdout, /project arguments use the id from.*projects.*not list positions/is);
 
   const version = await executeCli(["--version"], { app, version: "0.2.0" });
   assert.deepEqual(version, { exitCode: 0, stdout: "ontrack 0.2.0\n", stderr: "" });
@@ -230,6 +231,9 @@ export async function test_command_help_does_not_resolve_the_application(): Prom
     const result = await executeCli(argv, { app, version: "0.2.0" });
     assert.equal(result.exitCode, 0, argv.join(" "));
     assert.match(result.stdout, /^Usage: ontrack /, argv.join(" "));
+    if (["project", "tasks", "resources"].includes(argv[0] ?? "")) {
+      assert.match(result.stdout, /project arguments use the id from.*projects.*not list positions/is, argv.join(" "));
+    }
     assert.equal(result.stderr, "", argv.join(" "));
     assert.deepEqual(invocations, [], argv.join(" "));
   }

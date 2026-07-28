@@ -68,6 +68,8 @@ function help(): string {
     "  resources download <project_id> Download project resources",
     "  roles                List teaching roles",
     "",
+    "Project arguments use the id from `ontrack projects`, not list positions.",
+    "",
     "Options:",
     "  --json               Output JSON",
     "  --help               Show help",

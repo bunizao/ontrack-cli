@@ -195,7 +195,7 @@ export async function test_process_project_403_explains_how_to_find_an_accessibl
       code: 1,
       signal: null,
       stdout: "",
-      stderr: "upstream api error: Project 1 is not accessible. Run `ontrack projects --include-inactive` to find your project IDs.\n",
+      stderr: "upstream api error: Project 1 is not accessible. Project arguments use the id from `ontrack projects --include-inactive`, not list positions.\n",
     });
     assert.doesNotMatch(`${result.stdout}${result.stderr}`, /process-secret|auth login/);
   } finally {
