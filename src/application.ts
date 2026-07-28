@@ -136,6 +136,17 @@ export class OnTrackApplication implements CliApplication {
     return tasks.map((task) => ({ ...task }));
   }
 
+  async taskShow(projectId: number, task: string): Promise<unknown> {
+    const selected = selectedTask(await this.snapshot(projectId), task);
+    return {
+      ...selected.row,
+      description: selected.definition.description,
+      has_task_sheet: selected.definition.has_task_sheet,
+      has_task_resources: selected.definition.has_task_resources,
+      upload_requirements: selected.definition.upload_requirements,
+    };
+  }
+
   async chats(projectId: number, options: { readonly task?: string }): Promise<unknown> {
     const snapshot = await this.snapshot(projectId);
     if (options.task) {
@@ -154,6 +165,19 @@ export class OnTrackApplication implements CliApplication {
         unread_comments: unreadByTaskDefinition.get(row.task_definition_id) ?? 0,
       };
     });
+  }
+
+  async chatMarkRead(projectId: number, task: string): Promise<unknown> {
+    const snapshot = await this.snapshot(projectId);
+    const selected = selectedTask(snapshot, task);
+    const comments = await this.client.getTaskComments(projectId, selected.definition.id);
+    return {
+      project_id: projectId,
+      task_definition_id: selected.definition.id,
+      task: selected.definition.abbreviation,
+      comments: comments.length,
+      marked_read: true,
+    };
   }
 
   async prepareChatSend(projectId: number, task: string, message: string): Promise<ChatSendConfirmation> {

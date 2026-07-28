@@ -31,8 +31,9 @@
     "verify:golden": "node scripts/golden-check.mjs",
     "verify:oracle": "node scripts/golden-verify-oracle.mjs",
     "verify:source": "node scripts/verify-source.mjs",
-    "verify:live": "npm run build && node dist/cli.js auth check --json",
+    "verify:live": "npm run build && node dist/cli.js auth status --json",
     "coverage:domain": "npm run build && tsc -p tsconfig.json && node scripts/check-domain-coverage.mjs",
+    "skill:generate": "npm run build && node dist/cli.js skills generate > SKILL.md",
     "prepack": "npm run build"
   },
   "devDependencies": {
@@ -45,6 +46,7 @@
     "url": "git+https://github.com/bunizao/ontrack-cli.git"
   },
   "dependencies": {
+    "@bunizao/cli-kit": "file:../cli-kit",
     "@opendocsg/pdf2md": "0.2.7",
     "@steipete/sweet-cookie": "0.4.0"
   }

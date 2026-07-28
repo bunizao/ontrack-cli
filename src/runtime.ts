@@ -1,6 +1,17 @@
 import { spawn } from "node:child_process";
 
+import { CliError } from "./errors.js";
+
 const SQLITE_REEXEC_MARKER = "ONTRACK_NODE_SQLITE_REEXEC";
+
+export function assertSupportedRuntime(nodeVersion: string, bunVersion?: string): void {
+  if (bunVersion) return;
+  const [majorText, minorText] = nodeVersion.split(".");
+  const major = Number.parseInt(majorText ?? "", 10);
+  const minor = Number.parseInt(minorText ?? "", 10);
+  if (major > 22 || (major === 22 && minor >= 5)) return;
+  throw new CliError("config", `Node.js ${nodeVersion} is unsupported. OnTrack requires Node.js 22.5 or newer, or Bun.`);
+}
 
 export interface NodeSqliteRuntime {
   readonly nodeVersion: string;

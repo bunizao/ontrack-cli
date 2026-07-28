@@ -74,7 +74,8 @@ async function createOracleWorkspace(): Promise<OracleWorkspace> {
   }, null, 2)}\n`;
   const stdout = "[]\n";
   const harness = await readFile(join(scriptsDirectory, harnessName));
-  const argv = ["projects", "--json"];
+  const oracleArgv = ["projects", "--json"];
+  const argv = ["units", "list", "--json"];
   const artifactPath = "commands/projects/current-json.json";
   const replayHarnessSha256 = sha256(harness);
   const replaySessionSha256 = sha256(session);
@@ -114,7 +115,7 @@ async function createOracleWorkspace(): Promise<OracleWorkspace> {
       replay_entrypoint: "ontrack_cli.cli",
       replay_harness_sha256: replayHarnessSha256,
       replay_session_sha256: replaySessionSha256,
-      argv,
+      argv: oracleArgv,
       env: {},
       stdout,
       stdout_sha256: stdoutSha256,
@@ -131,7 +132,7 @@ async function createOracleWorkspace(): Promise<OracleWorkspace> {
         session_sha256: replaySessionSha256,
         replay_harness_sha256: replayHarnessSha256,
         replay_tool_commit: replayToolCommit,
-        argv,
+        argv: oracleArgv,
         env_allowlist: [],
         env: {},
         stdout_sha256: stdoutSha256,

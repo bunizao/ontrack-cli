@@ -93,7 +93,7 @@ export function test_credential_precedence_is_environment_config_then_migration(
   };
   assert.deepEqual(resolveCredentialSource({
     ONTRACK_USERNAME: "env-user",
-    ONTRACK_AUTH_TOKEN: "env-token",
+    ONTRACK_TOKEN: "env-token",
     ONTRACK_DOUBTFIRE_USER_JSON: JSON.stringify({ username: "env-migration", authenticationToken: "env-migration-token" }),
   }, config), { username: "env-user", accessToken: "env-token", provenance: "environment", user: null });
   assert.deepEqual(resolveCredentialSource({}, config), {
@@ -220,7 +220,7 @@ export async function test_explicit_and_cached_credentials_precede_browser_cooki
   const explicit = await resolveAuthenticatedSession({
     baseUrl: "https://school.example.edu",
     sessionFile,
-    env: { ONTRACK_USERNAME: "alice", ONTRACK_AUTH_TOKEN: "explicit-token" },
+    env: { ONTRACK_USERNAME: "alice", ONTRACK_TOKEN: "explicit-token" },
     browserCookieProvider: async () => { browserReads += 1; return []; },
   });
   assert.equal(explicit.provenance, "environment");

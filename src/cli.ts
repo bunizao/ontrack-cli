@@ -4,6 +4,9 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
+import { unlink } from "node:fs/promises";
+
+import { writeOutput } from "@bunizao/cli-kit";
 
 import { OnTrackApplication } from "./application.js";
 import { loginAuthenticatedSession, resolveAuthenticatedSession } from "./auth.js";
@@ -42,22 +45,41 @@ async function terminalAnswer(question: string, unavailableMessage: string, sign
 async function confirmChatSend(details: ChatSendConfirmation, signal: AbortSignal): Promise<boolean> {
   const message = JSON.stringify(details.message);
   const answer = await terminalAnswer(
-    `Send this OnTrack chat message to project ${details.projectId}, task ${details.task}?\n${message}\nType "send" to confirm: `,
+    `Send this OnTrack chat message to project ${details.projectId}, task ${details.task}?\n${message}\nContinue? y/N `,
     "Chat sending requires an interactive terminal or --yes after explicit user confirmation.",
     signal,
   );
-  return answer.trim() === "send";
+  return answer.trim().toLowerCase() === "y";
 }
 
 async function confirmTaskSubmit(plan: TaskSubmissionPlan, signal: AbortSignal): Promise<boolean> {
   const files = plan.uploads.map((upload, index) => `  ${index + 1}. ${upload.requirementName} (${upload.requirementType}, ${upload.bytes.length} bytes): ${upload.path}`).join("\n");
-  const expected = `submit ${plan.task}`;
   const answer = await terminalAnswer(
-    `Submit task ${plan.task} in project ${plan.projectId} as ${plan.type}?\n${files}\nTurnitin EULA accepted: ${plan.acceptTiiEula ? "yes" : "no"}\nType "${expected}" to confirm: `,
+    `Submit task ${plan.task} in project ${plan.projectId} as ${plan.type}?\n${files}\nTurnitin EULA accepted: ${plan.acceptTiiEula ? "yes" : "no"}\nContinue? y/N `,
     "Task submission requires an interactive terminal or --yes after explicit user confirmation.",
     signal,
   );
-  return answer.trim() === expected;
+  return answer.trim().toLowerCase() === "y";
+}
+
+async function confirmMutation(summary: string, signal: AbortSignal): Promise<boolean> {
+  const answer = await terminalAnswer(`${summary}\nContinue? y/N `, "Mutation requires an interactive terminal or --yes.", signal);
+  return answer.trim().toLowerCase() === "y";
+}
+
+async function authLogout(env: Environment, platform: NodeJS.Platform): Promise<unknown> {
+  const cwd = process.cwd();
+  const paths = resolveConfigPaths({
+    env,
+    platform,
+    homeDir: homedir(),
+    cwd,
+    cwdConfigExists: existsSync(join(cwd, "config.yaml")),
+  });
+  await unlink(paths.sessionFile).catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== "ENOENT") throw error;
+  });
+  return { logged_out: true };
 }
 
 function lazyApplication(signal: AbortSignal, env: Environment, platform: NodeJS.Platform): CliApplication {
@@ -73,6 +95,7 @@ function lazyApplication(signal: AbortSignal, env: Environment, platform: NodeJS
     projects: async (options) => (await resolve()).projects(options),
     project: async (projectId) => (await resolve()).project(projectId),
     tasks: async (projectId, options) => (await resolve()).tasks(projectId, options),
+    taskShow: async (projectId, task) => (await resolve()).taskShow(projectId, task),
     resourcesDownload: async (projectId, options) => (await resolve()).resourcesDownload(projectId, options),
     taskSheetDownload: async (projectId, task, options) => (await resolve()).taskSheetDownload(projectId, task, options),
     taskResourcesDownload: async (projectId, task, options) => (await resolve()).taskResourcesDownload(projectId, task, options),
@@ -81,6 +104,7 @@ function lazyApplication(signal: AbortSignal, env: Environment, platform: NodeJS
     prepareTaskSubmission: async (projectId, task, options) => (await resolve()).prepareTaskSubmission(projectId, task, options),
     submitTask: async (plan) => (await resolve()).submitTask(plan),
     chats: async (projectId, options) => (await resolve()).chats(projectId, options),
+    chatMarkRead: async (projectId, task) => (await resolve()).chatMarkRead(projectId, task),
     prepareChatSend: async (projectId, task, message) => (await resolve()).prepareChatSend(projectId, task, message),
     chatSend: async (plan) => (await resolve()).chatSend(plan),
     roles: async (options) => (await resolve()).roles(options),
@@ -174,14 +198,21 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     const result = await executeCli(argv, {
       app: lazyApplication(controller.signal, env, platform),
       authLogin: () => authLogin(controller.signal, env, platform),
+      authLogout: () => authLogout(env, platform),
       confirmChatSend: (details) => confirmChatSend(details, controller.signal),
       confirmTaskSubmit: (plan) => confirmTaskSubmit(plan, controller.signal),
+      confirmMutation: (summary) => confirmMutation(summary, controller.signal),
       interactive: process.stdin.isTTY === true,
+      stdoutIsTty: process.stdout.isTTY === true,
+      runtime: {
+        nodeVersion: process.versions.node,
+        ...(Reflect.get(process.versions, "bun") ? { bunVersion: String(Reflect.get(process.versions, "bun")) } : {}),
+      },
       onDiagnostic: (message) => { process.stderr.write(message); },
       version: VERSION,
     });
     if (result.stderr) process.stderr.write(result.stderr);
-    if (result.stdout) process.stdout.write(result.stdout);
+    if (result.stdout) await writeOutput(result.stdout, result.output ? { output: result.output } : {});
     return result.exitCode;
   } finally {
     process.removeListener("SIGINT", cancel);

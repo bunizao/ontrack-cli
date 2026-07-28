@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { nodeSqliteRelaunchArgs } from "../src/runtime.js";
+import { assertSupportedRuntime, nodeSqliteRelaunchArgs } from "../src/runtime.js";
 
 export function test_node_22_relaunches_with_sqlite_enabled(): void {
   assert.deepEqual(nodeSqliteRelaunchArgs({
@@ -63,4 +63,10 @@ export function test_sqlite_relaunch_is_skipped_for_supported_or_already_configu
     argv,
     nodeOptions: "--experimental-sqlite",
   }), undefined);
+}
+
+export function test_runtime_gate_rejects_old_node_but_allows_bun(): void {
+  assert.throws(() => assertSupportedRuntime("18.14.0"), /Node\.js 18\.14\.0.*22\.5/u);
+  assert.doesNotThrow(() => assertSupportedRuntime("22.5.0"));
+  assert.doesNotThrow(() => assertSupportedRuntime("18.14.0", "1.3.0"));
 }

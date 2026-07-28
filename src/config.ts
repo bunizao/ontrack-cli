@@ -148,7 +148,14 @@ export function loadConfig(paths: ConfigPaths): OnTrackConfig {
 
 export function resolveBaseUrl(env: Environment, config: OnTrackConfig): string {
   const candidate = nonEmptyString(env.ONTRACK_BASE_URL) ?? nonEmptyString(config.base_url);
-  if (!candidate) throw new CliError("config", "No base_url configured.");
+  if (!candidate) {
+    throw new CliError(
+      "config",
+      "No base_url configured.",
+      undefined,
+      "Set ONTRACK_BASE_URL or add base_url to ~/.config/ontrack-cli/config.yaml.",
+    );
+  }
   let url: URL;
   try {
     url = new URL(candidate);
@@ -189,7 +196,7 @@ function credentials(
 }
 
 export function resolveCredentialSource(env: Environment, config: OnTrackConfig): CredentialSource | undefined {
-  const environment = credentials(env.ONTRACK_USERNAME, env.ONTRACK_AUTH_TOKEN, "environment");
+  const environment = credentials(env.ONTRACK_USERNAME, env.ONTRACK_TOKEN ?? env.ONTRACK_AUTH_TOKEN, "environment");
   if (environment) return environment;
   const configured = credentials(config.username, config.auth_token, "config");
   if (configured) return configured;
