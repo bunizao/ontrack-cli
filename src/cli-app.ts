@@ -2,7 +2,7 @@ import { parseArgs } from "node:util";
 
 import { CliError, exitCodeFor } from "./errors.js";
 import { renderJson, renderTable } from "./render.js";
-import type { TaskSubmissionOptions, TaskSubmissionPlan } from "./submission.js";
+import { submissionType, type TaskSubmissionOptions, type TaskSubmissionPlan } from "./submission.js";
 
 export interface CliApplication {
   resolveProject(reference: string): Promise<number>;
@@ -418,12 +418,12 @@ async function invoke(argv: readonly string[], dependencies: Dependencies): Prom
   }
   if (command === "project") {
     const parsed = parseArgs({ args: rest, options: common, allowPositionals: true, strict: true });
-    if (parsed.positionals.length !== 1) throw new CliError("usage", "project requires one project_id integer");
+    if (parsed.positionals.length !== 1) throw new CliError("usage", "project requires one project ID or unit code");
     return { value: await app.project(await resolvedProjectId(parsed.positionals[0], app)), json: parsed.values.json ?? false, view: "project" };
   }
   if (command === "tasks") {
     const parsed = parseArgs({ args: rest, options: { ...common, status: { type: "string", multiple: true } }, allowPositionals: true, strict: true });
-    if (parsed.positionals.length !== 1) throw new CliError("usage", "tasks requires one project_id integer");
+    if (parsed.positionals.length !== 1) throw new CliError("usage", "tasks requires one project ID or unit code");
     const statuses = parsed.values.status ?? [];
     return {
       value: await app.tasks(await resolvedProjectId(parsed.positionals[0], app), { statuses }),
@@ -439,7 +439,7 @@ async function invoke(argv: readonly string[], dependencies: Dependencies): Prom
       allowPositionals: true,
       strict: true,
     });
-    if (parsed.positionals.length !== 1) throw new CliError("usage", "resources download requires one project_id integer");
+    if (parsed.positionals.length !== 1) throw new CliError("usage", "resources download requires one project ID or unit code");
     if (parsed.values.output !== undefined && !parsed.values.output.trim()) throw new CliError("usage", "output path must not be empty");
     return {
       value: await app.resourcesDownload(
@@ -458,7 +458,7 @@ async function invoke(argv: readonly string[], dependencies: Dependencies): Prom
       allowPositionals: true,
       strict: true,
     });
-    if (parsed.positionals.length !== 2) throw new CliError("usage", `task ${kind} requires a project_id and task abbreviation`);
+    if (parsed.positionals.length !== 2) throw new CliError("usage", `task ${kind} requires a project and task abbreviation`);
     const task = parsed.positionals[1]?.trim();
     if (!task) throw new CliError("usage", "task abbreviation must not be empty");
     if (parsed.values.output !== undefined && !parsed.values.output.trim()) throw new CliError("usage", "output path must not be empty");
@@ -473,7 +473,7 @@ async function invoke(argv: readonly string[], dependencies: Dependencies): Prom
   }
   if (command === "task" && rest[0] === "read") {
     const parsed = parseArgs({ args: rest.slice(1), options: common, allowPositionals: true, strict: true });
-    if (parsed.positionals.length !== 2) throw new CliError("usage", "task read requires a project_id and task abbreviation");
+    if (parsed.positionals.length !== 2) throw new CliError("usage", "task read requires a project and task abbreviation");
     const task = parsed.positionals[1]?.trim();
     if (!task) throw new CliError("usage", "task abbreviation must not be empty");
     return {
@@ -514,9 +514,10 @@ async function invoke(argv: readonly string[], dependencies: Dependencies): Prom
     if (!task) throw new CliError("usage", "task abbreviation must not be empty");
     const files = parsed.values.file ?? [];
     if (files.length === 0 || files.some((file) => !file.trim())) throw new CliError("usage", "task submit requires at least one non-empty --file path");
-    const type = parsed.values.type?.trim() || "ready_for_feedback";
+    const type = submissionType(parsed.values.type?.trim() || "ready_for_feedback");
     const comment = parsed.values.comment;
     if (comment !== undefined && !comment.trim()) throw new CliError("usage", "submission comment must not be empty");
+    if (comment !== undefined && Array.from(comment).length > 4_095) throw new CliError("usage", "submission comment must not exceed 4095 characters");
     const confirmTaskSubmit = dependencies.confirmTaskSubmit;
     if (!parsed.values.yes && !confirmTaskSubmit) {
       throw new CliError("usage", "Task submission requires confirmation. Use --yes only after the user confirms the exact project, task, file list, and submission type.");
@@ -570,7 +571,7 @@ async function invoke(argv: readonly string[], dependencies: Dependencies): Prom
   if (command === "chats") {
     const parsed = parseArgs({ args: rest, options: common, allowPositionals: true, strict: true });
     if (parsed.positionals.length < 1 || parsed.positionals.length > 2) {
-      throw new CliError("usage", "chats requires a project_id and accepts one optional task abbreviation");
+      throw new CliError("usage", "chats requires a project and accepts one optional task abbreviation");
     }
     const task = parsed.positionals[1]?.trim();
     if (parsed.positionals.length === 2 && !task) throw new CliError("usage", "task abbreviation must not be empty");

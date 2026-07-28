@@ -147,6 +147,18 @@ export async function test_task_submit_yes_preserves_file_order_and_submission_t
   assert.equal(invocations[1]?.command, "submitTask");
 }
 
+export async function test_task_submit_rejects_invalid_options_before_application_work(): Promise<void> {
+  for (const argv of [
+    ["task", "submit", "7", "1.1", "--file", "/tmp/report.pdf", "--type", "working_on_it", "--yes"],
+    ["task", "submit", "7", "1.1", "--file", "/tmp/report.pdf", "--comment", "x".repeat(4096), "--yes"],
+  ]) {
+    const { app, invocations } = await fakeApplication();
+    const result = await executeCli(argv, { app, version: "0.2.0" });
+    assert.equal(result.exitCode, 2);
+    assert.deepEqual(invocations, []);
+  }
+}
+
 export async function test_chat_send_yes_is_explicit_noninteractive_confirmation(): Promise<void> {
   const { app, invocations } = await fakeApplication();
   const result = await executeCli(["chats", "send", "7", "1.1", "--message", "Please review this.", "-y", "--json"], {
@@ -477,6 +489,8 @@ export async function test_default_output_uses_command_aware_tables(): Promise<v
     { argv: ["resources", "download", "7"], headers: /Project\s+Unit\s+Archive\s+Size/u },
     { argv: ["task", "sheet", "7", "1.1"], headers: /Project\s+Unit\s+Task\s+File\s+Size/u },
     { argv: ["task", "resources", "7", "1.1"], headers: /Project\s+Unit\s+Task\s+File\s+Size/u },
+    { argv: ["task", "state", "7", "1.1", "working_on_it"], headers: /Field\s+Value[\s\S]*previous_status[\s\S]*working_on_it/u },
+    { argv: ["task", "submit", "7", "1.1", "--file", "/tmp/report.pdf", "--yes"], headers: /Field\s+Value[\s\S]*Processing asynchronously\s+Yes/u },
     { argv: ["chats", "7"], headers: /Task\s+Name\s+Status\s+Unread/u },
   ];
   for (const { argv, headers } of cases) {

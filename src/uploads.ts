@@ -4,7 +4,7 @@ import { basename, extname } from "node:path";
 import { CliError } from "./errors.js";
 import type { UploadRequirement, UploadRequirementType } from "./types.js";
 
-const maxFileBytes = 10 * 1024 * 1024;
+const maxFileBytes = 100 * 1024 * 1024;
 const maxTotalBytes = 100 * 1024 * 1024;
 
 export interface PreparedUpload {
@@ -49,10 +49,24 @@ export async function prepareUploads(
       throw new CliError("usage", `Upload ${index + 1} must be a readable regular file: ${path}`);
     }
     if (before.size <= 0) throw new CliError("usage", `Upload ${index + 1} is empty: ${path}`);
-    if (before.size > maxFileBytes) throw new CliError("usage", `Upload ${index + 1} exceeds the 10 MiB limit: ${path}`);
-    const bytes = new Uint8Array(await readFile(path, { signal }));
+    if (before.size > maxFileBytes) throw new CliError("usage", `Upload ${index + 1} exceeds the 100 MiB local safety limit: ${path}`);
+    let bytes: Uint8Array;
+    try {
+      bytes = new Uint8Array(await readFile(path, { signal }));
+    } catch {
+      if (signal?.aborted) throw new CliError("cancellation", "Submission preparation cancelled");
+      throw new CliError("usage", `Upload ${index + 1} must be readable: ${path}`);
+    }
     const after = await lstat(path).catch(() => undefined);
-    if (!after?.isFile() || after.isSymbolicLink() || after.dev !== before.dev || after.ino !== before.ino || after.size !== bytes.length) {
+    if (
+      !after?.isFile()
+      || after.isSymbolicLink()
+      || after.dev !== before.dev
+      || after.ino !== before.ino
+      || after.size !== bytes.length
+      || after.mtimeMs !== before.mtimeMs
+      || after.ctimeMs !== before.ctimeMs
+    ) {
       throw new CliError("usage", `Upload ${index + 1} changed while it was being read: ${path}`);
     }
     totalBytes += bytes.length;
