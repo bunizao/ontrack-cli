@@ -29,39 +29,35 @@ async function promptForBrowserLogin(message: string, signal: AbortSignal): Prom
   }
 }
 
-async function confirmChatSend(details: ChatSendConfirmation, signal: AbortSignal): Promise<boolean> {
-  if (!process.stdin.isTTY) {
-    throw new CliError("usage", "Chat sending requires an interactive terminal or --yes after explicit user confirmation.");
-  }
+async function terminalAnswer(question: string, unavailableMessage: string, signal: AbortSignal): Promise<string> {
+  if (!process.stdin.isTTY) throw new CliError("usage", unavailableMessage);
   const prompt = createInterface({ input: process.stdin, output: process.stderr });
-  const message = JSON.stringify(details.message);
   try {
-    const answer = await prompt.question(
-      `Send this OnTrack chat message to project ${details.projectId}, task ${details.task}?\n${message}\nType "send" to confirm: `,
-      { signal },
-    );
-    return answer.trim() === "send";
+    return await prompt.question(question, { signal });
   } finally {
     prompt.close();
   }
 }
 
+async function confirmChatSend(details: ChatSendConfirmation, signal: AbortSignal): Promise<boolean> {
+  const message = JSON.stringify(details.message);
+  const answer = await terminalAnswer(
+    `Send this OnTrack chat message to project ${details.projectId}, task ${details.task}?\n${message}\nType "send" to confirm: `,
+    "Chat sending requires an interactive terminal or --yes after explicit user confirmation.",
+    signal,
+  );
+  return answer.trim() === "send";
+}
+
 async function confirmTaskSubmit(plan: TaskSubmissionPlan, signal: AbortSignal): Promise<boolean> {
-  if (!process.stdin.isTTY) {
-    throw new CliError("usage", "Task submission requires an interactive terminal or --yes after explicit user confirmation.");
-  }
-  const prompt = createInterface({ input: process.stdin, output: process.stderr });
   const files = plan.uploads.map((upload, index) => `  ${index + 1}. ${upload.requirementName} (${upload.requirementType}, ${upload.bytes.length} bytes): ${upload.path}`).join("\n");
   const expected = `submit ${plan.task}`;
-  try {
-    const answer = await prompt.question(
-      `Submit task ${plan.task} in project ${plan.projectId} as ${plan.type}?\n${files}\nTurnitin EULA accepted: ${plan.acceptTiiEula ? "yes" : "no"}\nType "${expected}" to confirm: `,
-      { signal },
-    );
-    return answer.trim() === expected;
-  } finally {
-    prompt.close();
-  }
+  const answer = await terminalAnswer(
+    `Submit task ${plan.task} in project ${plan.projectId} as ${plan.type}?\n${files}\nTurnitin EULA accepted: ${plan.acceptTiiEula ? "yes" : "no"}\nType "${expected}" to confirm: `,
+    "Task submission requires an interactive terminal or --yes after explicit user confirmation.",
+    signal,
+  );
+  return answer.trim() === expected;
 }
 
 function lazyApplication(signal: AbortSignal, env: Environment, platform: NodeJS.Platform): CliApplication {

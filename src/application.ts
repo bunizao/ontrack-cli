@@ -17,15 +17,20 @@ export interface SessionState {
 }
 
 function selectedTask(snapshot: ProjectSnapshot, reference: string): { readonly row: TaskRow; readonly definition: TaskDefinition } {
-  const normalized = reference.trim().toLowerCase();
-  const byAbbreviation = snapshot.tasks.find((task) => task.abbreviation.toLowerCase() === normalized);
-  const numericId = /^\d+$/u.test(normalized) ? Number(normalized) : undefined;
-  const row = byAbbreviation ?? (numericId === undefined ? undefined : snapshot.tasks.find((task) => task.task_definition_id === numericId));
+  const row = assignedTask(snapshot, reference);
   const definition = row && snapshot.unit.task_definitions.find((candidate) => candidate.id === row.task_definition_id);
   if (!row || !definition) {
     throw new CliError("usage", `Task ${reference} is not in project ${snapshot.project.id}. Use the abbreviation shown by \`ontrack tasks ${snapshot.project.id}\`.`);
   }
   return { row, definition };
+}
+
+function assignedTask(snapshot: ProjectSnapshot, reference: string): TaskRow | undefined {
+  const normalized = reference.trim().toLowerCase();
+  const byAbbreviation = snapshot.tasks.find((task) => task.abbreviation.toLowerCase() === normalized);
+  if (byAbbreviation) return byAbbreviation;
+  const numericId = /^\d+$/u.test(normalized) ? Number(normalized) : undefined;
+  return numericId === undefined ? undefined : snapshot.tasks.find((task) => task.task_definition_id === numericId);
 }
 
 function selectedDownloadTask(
@@ -34,8 +39,7 @@ function selectedDownloadTask(
 ): { readonly abbreviation: string; readonly definition: TaskDefinition } {
   const normalized = reference.trim().toLowerCase();
   const numericId = /^\d+$/u.test(normalized) ? Number(normalized) : undefined;
-  const assigned = snapshot.tasks.find((task) => task.abbreviation.toLowerCase() === normalized)
-    ?? (numericId === undefined ? undefined : snapshot.tasks.find((task) => task.task_definition_id === numericId));
+  const assigned = assignedTask(snapshot, reference);
   const unitDefinition = snapshot.unit.task_definitions.find((candidate) => candidate.abbreviation.toLowerCase() === normalized)
     ?? (numericId === undefined ? undefined : snapshot.unit.task_definitions.find((candidate) => candidate.id === numericId));
   const definition = assigned
