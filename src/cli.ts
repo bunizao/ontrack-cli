@@ -35,6 +35,7 @@ function lazyApplication(signal: AbortSignal, env: Environment, platform: NodeJS
     return application;
   };
   return {
+    resolveProject: async (reference) => (await resolve()).resolveProject(reference),
     user: async () => (await resolve()).user(),
     authCheck: async () => (await resolve()).authCheck(),
     projects: async (options) => (await resolve()).projects(options),
@@ -44,6 +45,7 @@ function lazyApplication(signal: AbortSignal, env: Environment, platform: NodeJS
     taskSheetDownload: async (projectId, task, options) => (await resolve()).taskSheetDownload(projectId, task, options),
     taskResourcesDownload: async (projectId, task, options) => (await resolve()).taskResourcesDownload(projectId, task, options),
     taskRead: async (projectId, task) => (await resolve()).taskRead(projectId, task),
+    taskState: async (projectId, task, state) => (await resolve()).taskState(projectId, task, state),
     chats: async (projectId, options) => (await resolve()).chats(projectId, options),
     roles: async (options) => (await resolve()).roles(options),
   };

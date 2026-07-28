@@ -4,6 +4,7 @@ import { CliError, exitCodeFor } from "./errors.js";
 import { renderJson, renderTable } from "./render.js";
 
 export interface CliApplication {
+  resolveProject(reference: string): Promise<number>;
   user(): Promise<unknown>;
   authCheck(): Promise<unknown>;
   projects(options: { readonly includeInactive: boolean }): Promise<unknown>;
@@ -13,6 +14,7 @@ export interface CliApplication {
   taskSheetDownload(projectId: number, task: string, options: { readonly output?: string }): Promise<unknown>;
   taskResourcesDownload(projectId: number, task: string, options: { readonly output?: string }): Promise<unknown>;
   taskRead(projectId: number, task: string): Promise<unknown>;
+  taskState(projectId: number, task: string, state: string): Promise<unknown>;
   chats(projectId: number, options: { readonly task?: string }): Promise<unknown>;
   roles(options: { readonly showAll: boolean }): Promise<unknown>;
 }
@@ -31,7 +33,7 @@ interface Dependencies {
   readonly onDiagnostic?: (message: string) => void;
 }
 
-type OutputView = "auth-check" | "auth-login" | "chats-history" | "chats-summary" | "download" | "markdown" | "project" | "projects" | "roles" | "tasks" | "user";
+type OutputView = "auth-check" | "auth-login" | "chats-history" | "chats-summary" | "download" | "markdown" | "project" | "projects" | "roles" | "task-state" | "tasks" | "user";
 
 interface InvocationResult {
   readonly value: unknown;
@@ -78,16 +80,17 @@ function rootHelp(): string {
     "  auth check           Validate current credentials",
     "  auth login           Sign in through OnTrack in a browser",
     "  projects             List current projects",
-    "  project <project_id> Show one project",
-    "  tasks <project_id>   List project tasks",
-    "  resources download <project_id> Download project resources",
-    "  task sheet <project_id> <task> Download one task sheet",
-    "  task resources <project_id> <task> Download one task's resources",
-    "  task read <project_id> <task> Print one task sheet as Markdown",
-    "  chats <project_id> [task] Show unread chat counts or one task's history",
+    "  project <project>    Show one project",
+    "  tasks <project>      List project tasks",
+    "  resources download <project> Download project resources",
+    "  task sheet <project> <task> Download one task sheet",
+    "  task resources <project> <task> Download one task's resources",
+    "  task read <project> <task> Print one task sheet as Markdown",
+    "  task state <project> <task> <state> Change one task's workflow state",
+    "  chats <project> [task] Show unread chat counts or one task's history",
     "  roles                List teaching roles",
     "",
-    "Project arguments use the id from `ontrack projects`, not list positions.",
+    "Project arguments accept a unique unit code such as FIT1045 or the ID from `ontrack projects`.",
     "",
     "Options:",
     "  --json               Output JSON",
@@ -120,53 +123,59 @@ function helpFor(argv: readonly string[]): string | undefined {
     return "Usage: ontrack auth <command>\n\nCommands:\n  check    Validate current credentials\n  login    Sign in through OnTrack in a browser\n";
   }
   if (args.length === 1 && args[0] === "resources") {
-    return "Usage: ontrack resources <command>\n\nCommands:\n  download <project_id> Download all task sheets and resources\n";
+    return "Usage: ontrack resources <command>\n\nCommands:\n  download <project> Download all task sheets and resources\n";
   }
   if (args.length === 1 && args[0] === "task") {
-    return "Usage: ontrack task <command>\n\nCommands:\n  sheet <project_id> <task>     Download one task sheet\n  resources <project_id> <task> Download one task's resources\n  read <project_id> <task>      Print one task sheet as Markdown\n";
+    return "Usage: ontrack task <command>\n\nCommands:\n  sheet <project> <task>        Download one task sheet\n  resources <project> <task>    Download one task's resources\n  read <project> <task>         Print one task sheet as Markdown\n  state <project> <task> <state> Change one task's workflow state\n";
   }
   if (args[0] === "user") return commandHelp("ontrack user", "Show the resolved signed-in user.", []);
   if (key === "auth check") return commandHelp("ontrack auth check", "Validate current credentials.", []);
   if (key === "auth login") return commandHelp("ontrack auth login", "Reuse browser cookies or open the OnTrack SAML sign-in URL.", []);
   if (args[0] === "projects") return commandHelp("ontrack projects", "List projects available to the signed-in user.", ["  --include-inactive   Include past projects"]);
   if (args[0] === "project") return commandHelp(
-    "ontrack project <project_id>",
+    "ontrack project <project>",
     "Show a project and its task snapshot.",
     [],
-    "Use the ID shown by `ontrack projects --include-inactive`, not list positions.",
+    "Use a unique unit code or the ID shown by `ontrack projects --include-inactive`; list positions are not accepted.",
   );
   if (args[0] === "tasks") return commandHelp(
-    "ontrack tasks <project_id>",
+    "ontrack tasks <project>",
     "List project tasks.",
     ["  --status <status>    Match a raw task status; repeat to match more than one"],
-    "Use the ID shown by `ontrack projects --include-inactive`, not list positions.",
+    "Use a unique unit code or a project ID; list positions are not accepted.",
   );
   if (key === "resources download") return commandHelp(
-    "ontrack resources download <project_id>",
+    "ontrack resources download <project>",
     "Download all task sheets and resources for the project's unit.",
     ["  --output <path>      Destination ZIP; defaults to ontrack-resources-<project_id>.zip"],
     "Existing files are never replaced. Project IDs are not list positions.",
   );
   if (key === "task sheet") return commandHelp(
-    "ontrack task sheet <project_id> <task>",
+    "ontrack task sheet <project> <task>",
     "Download one task sheet by an abbreviation shown in `ontrack project`.",
     ["  --output <path>      Destination PDF; defaults to <unit>-<task>.pdf"],
     "A numeric task-definition ID is accepted as a fallback. Existing files are never replaced.",
   );
   if (key === "task resources") return commandHelp(
-    "ontrack task resources <project_id> <task>",
+    "ontrack task resources <project> <task>",
     "Download one task's linked file or resource ZIP using an abbreviation shown in `ontrack project`.",
     ["  --output <path>      Destination path; defaults to the server filename"],
     "A numeric task-definition ID is accepted as a fallback. Existing files are never replaced.",
   );
   if (key === "task read") return commandHelp(
-    "ontrack task read <project_id> <task>",
+    "ontrack task read <project> <task>",
     "Download a task sheet in memory and print built-in PDF-to-Markdown output.",
     [],
     "No PDF file or external pdftotext command is required.",
   );
+  if (key === "task state") return commandHelp(
+    "ontrack task state <project> <task> <state>",
+    "Change one assigned task's workflow state.",
+    [],
+    "Student states are not_started, working_on_it, and need_help. This does not submit files.",
+  );
   if (args[0] === "chats") return commandHelp(
-    "ontrack chats <project_id> [task]",
+    "ontrack chats <project> [task]",
     "Show per-task unread counts, or one task's chronological chat history.",
     [],
     "Viewing one task's history marks its non-discussion comments as read in OnTrack.",
@@ -180,6 +189,14 @@ function projectId(value: string | undefined): number {
   const id = Number(value);
   if (!Number.isSafeInteger(id) || id <= 0) throw new CliError("usage", "project_id must be a positive safe integer");
   return id;
+}
+
+async function resolvedProjectId(value: string | undefined, app: CliApplication): Promise<number> {
+  if (!value?.trim()) throw new CliError("usage", "project must be a project ID or unit code");
+  const reference = value.trim();
+  if (/^\d+$/u.test(reference)) return projectId(reference);
+  if (/^[a-z]{2,}\d{3,}[a-z0-9_-]*$/iu.test(reference)) return app.resolveProject(reference);
+  throw new CliError("usage", "project_id must be an integer or a unit code such as FIT1045");
 }
 
 function record(value: unknown): Record<string, unknown> {
@@ -350,14 +367,14 @@ async function invoke(argv: readonly string[], dependencies: Dependencies): Prom
   if (command === "project") {
     const parsed = parseArgs({ args: rest, options: common, allowPositionals: true, strict: true });
     if (parsed.positionals.length !== 1) throw new CliError("usage", "project requires one project_id integer");
-    return { value: await app.project(projectId(parsed.positionals[0])), json: parsed.values.json ?? false, view: "project" };
+    return { value: await app.project(await resolvedProjectId(parsed.positionals[0], app)), json: parsed.values.json ?? false, view: "project" };
   }
   if (command === "tasks") {
     const parsed = parseArgs({ args: rest, options: { ...common, status: { type: "string", multiple: true } }, allowPositionals: true, strict: true });
     if (parsed.positionals.length !== 1) throw new CliError("usage", "tasks requires one project_id integer");
     const statuses = parsed.values.status ?? [];
     return {
-      value: await app.tasks(projectId(parsed.positionals[0]), { statuses }),
+      value: await app.tasks(await resolvedProjectId(parsed.positionals[0], app), { statuses }),
       json: parsed.values.json ?? false,
       view: "tasks",
       emptyMessage: statuses.length ? `No tasks match status: ${statuses.join(", ")}.` : "No tasks found.",
@@ -374,7 +391,7 @@ async function invoke(argv: readonly string[], dependencies: Dependencies): Prom
     if (parsed.values.output !== undefined && !parsed.values.output.trim()) throw new CliError("usage", "output path must not be empty");
     return {
       value: await app.resourcesDownload(
-        projectId(parsed.positionals[0]),
+        await resolvedProjectId(parsed.positionals[0], app),
         parsed.values.output === undefined ? {} : { output: parsed.values.output },
       ),
       json: parsed.values.json ?? false,
@@ -396,8 +413,8 @@ async function invoke(argv: readonly string[], dependencies: Dependencies): Prom
     const options = parsed.values.output === undefined ? {} : { output: parsed.values.output };
     return {
       value: kind === "sheet"
-        ? await app.taskSheetDownload(projectId(parsed.positionals[0]), task, options)
-        : await app.taskResourcesDownload(projectId(parsed.positionals[0]), task, options),
+        ? await app.taskSheetDownload(await resolvedProjectId(parsed.positionals[0], app), task, options)
+        : await app.taskResourcesDownload(await resolvedProjectId(parsed.positionals[0], app), task, options),
       json: parsed.values.json ?? false,
       view: "download",
     };
@@ -408,9 +425,22 @@ async function invoke(argv: readonly string[], dependencies: Dependencies): Prom
     const task = parsed.positionals[1]?.trim();
     if (!task) throw new CliError("usage", "task abbreviation must not be empty");
     return {
-      value: await app.taskRead(projectId(parsed.positionals[0]), task),
+      value: await app.taskRead(await resolvedProjectId(parsed.positionals[0], app), task),
       json: parsed.values.json ?? false,
       view: "markdown",
+    };
+  }
+  if (command === "task" && rest[0] === "state") {
+    const parsed = parseArgs({ args: rest.slice(1), options: common, allowPositionals: true, strict: true });
+    if (parsed.positionals.length !== 3) throw new CliError("usage", "task state requires a project, task, and state");
+    const task = parsed.positionals[1]?.trim();
+    const state = parsed.positionals[2]?.trim();
+    if (!task) throw new CliError("usage", "task abbreviation must not be empty");
+    if (!state) throw new CliError("usage", "task state must not be empty");
+    return {
+      value: await app.taskState(await resolvedProjectId(parsed.positionals[0], app), task, state),
+      json: parsed.values.json ?? false,
+      view: "task-state",
     };
   }
   if (command === "chats") {
@@ -423,7 +453,7 @@ async function invoke(argv: readonly string[], dependencies: Dependencies): Prom
     const diagnostic = "Note: Viewing task chat marks its non-discussion comments as read in OnTrack.\n";
     if (task) dependencies.onDiagnostic?.(diagnostic);
     return {
-      value: await app.chats(projectId(parsed.positionals[0]), task ? { task } : {}),
+      value: await app.chats(await resolvedProjectId(parsed.positionals[0], app), task ? { task } : {}),
       json: parsed.values.json ?? false,
       view: task ? "chats-history" : "chats-summary",
       emptyMessage: task ? "No chat messages found." : "No project tasks found.",

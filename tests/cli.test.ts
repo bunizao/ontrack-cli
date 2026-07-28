@@ -26,6 +26,7 @@ async function fakeApplication(): Promise<{
   readonly invocations: Invocation[];
 }> {
   const values = {
+    resolveProject: 7,
     user: await fixture("user"),
     authCheck: await fixture("auth-check"),
     projects: await fixture("projects"),
@@ -35,6 +36,7 @@ async function fakeApplication(): Promise<{
     taskSheetDownload: { project_id: 7, unit_id: 9, task_definition_id: 12, task: "1.1", file_path: "/tmp/FIT9999-1.1.pdf", bytes_written: 6, content_type: "application/pdf" },
     taskResourcesDownload: { project_id: 7, unit_id: 9, task_definition_id: 12, task: "1.1", file_path: "/tmp/1.1-resources.zip", bytes_written: 4, content_type: "application/zip" },
     taskRead: { project_id: 7, unit_id: 9, task_definition_id: 12, task: "1.1", pages: 1, markdown: "# FIT9999 1.1 Task Sheet\n\nRead me.\n" },
+    taskState: { project_id: 7, task_definition_id: 12, task: "1.1", previous_status: "not_started", status: "working_on_it" },
     chatsSummary: [{ task_definition_id: 12, task: "1.1", name: "Example task", status: "rediscuss", unread_comments: 2 }],
     chatsHistory: await fixture("chats"),
     roles: await fixture("roles"),
@@ -48,6 +50,7 @@ async function fakeApplication(): Promise<{
 
   return {
     app: {
+      resolveProject: record("resolveProject", values.resolveProject) as CliApplication["resolveProject"],
       user: record("user", values.user),
       authCheck: record("authCheck", values.authCheck),
       projects: record("projects", values.projects),
@@ -57,6 +60,7 @@ async function fakeApplication(): Promise<{
       taskSheetDownload: record("taskSheetDownload", values.taskSheetDownload),
       taskResourcesDownload: record("taskResourcesDownload", values.taskResourcesDownload),
       taskRead: record("taskRead", values.taskRead),
+      taskState: record("taskState", values.taskState),
       chats: async (projectId, options) => record("chats", options.task ? values.chatsHistory : values.chatsSummary)(projectId, options),
       roles: record("roles", values.roles),
     },
@@ -135,6 +139,26 @@ export async function test_command_flags_reach_the_application_seam(): Promise<v
   ]);
 }
 
+export async function test_unit_code_resolves_before_a_project_scoped_command(): Promise<void> {
+  const { app, invocations } = await fakeApplication();
+  const result = await executeCli(["project", "fit1045", "--json"], { app, version: "0.2.0" });
+
+  assert.equal(result.exitCode, 0);
+  assert.deepEqual(invocations, [
+    { command: "resolveProject", arguments: ["fit1045"] },
+    { command: "project", arguments: [7] },
+  ]);
+}
+
+export async function test_task_state_updates_one_task_without_submission_confirmation(): Promise<void> {
+  const { app, invocations } = await fakeApplication();
+  const result = await executeCli(["task", "state", "7", "1.1", "working_on_it", "--json"], { app, version: "0.2.0" });
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.stderr, "");
+  assert.deepEqual(invocations, [{ command: "taskState", arguments: [7, "1.1", "working_on_it"] }]);
+}
+
 export async function test_yaml_is_a_usage_error_for_every_command(): Promise<void> {
   const commands = [
     ["user", "--yaml"],
@@ -184,6 +208,7 @@ export async function test_secret_sentinel_is_removed_from_results_and_diagnosti
     result: await value,
   });
   const leaking: CliApplication = {
+    resolveProject: async (reference) => app.resolveProject(reference),
     user: async () => expose(app.user()),
     authCheck: async () => expose(app.authCheck()),
     projects: async (options) => expose(app.projects(options)),
@@ -193,6 +218,7 @@ export async function test_secret_sentinel_is_removed_from_results_and_diagnosti
     taskSheetDownload: async (projectId, task, options) => expose(app.taskSheetDownload(projectId, task, options)),
     taskResourcesDownload: async (projectId, task, options) => expose(app.taskResourcesDownload(projectId, task, options)),
     taskRead: async (projectId, task) => expose(app.taskRead(projectId, task)),
+    taskState: async (projectId, task, state) => expose(app.taskState(projectId, task, state)),
     chats: async (projectId, options) => expose(app.chats(projectId, options)),
     roles: async (options) => expose(app.roles(options)),
   };
@@ -249,7 +275,7 @@ export async function test_help_and_version_succeed_without_resolving_the_applic
   for (const command of ["user", "auth", "projects", "project", "tasks", "resources", "roles"]) {
     assert.match(help.stdout, new RegExp(`\\b${command}\\b`));
   }
-  assert.match(help.stdout, /project arguments use the id from.*projects.*not list positions/is);
+  assert.match(help.stdout, /project arguments accept.*unit code.*ID from.*projects/is);
 
   const version = await executeCli(["--version"], { app, version: "0.2.0" });
   assert.deepEqual(version, { exitCode: 0, stdout: "ontrack 0.2.0\n", stderr: "" });
@@ -262,13 +288,14 @@ export async function test_command_help_does_not_resolve_the_application(): Prom
     { argv: ["auth", "check", "--help"], usage: "ontrack auth check", option: "--json" },
     { argv: ["auth", "login", "--help"], usage: "ontrack auth login", option: "--json" },
     { argv: ["projects", "--help"], usage: "ontrack projects", option: "--include-inactive" },
-    { argv: ["project", "--help"], usage: "ontrack project <project_id>", option: "not list positions" },
-    { argv: ["tasks", "--help"], usage: "ontrack tasks <project_id>", option: "--status" },
-    { argv: ["resources", "download", "--help"], usage: "ontrack resources download <project_id>", option: "--output" },
-    { argv: ["task", "sheet", "--help"], usage: "ontrack task sheet <project_id> <task>", option: "--output" },
-    { argv: ["task", "resources", "--help"], usage: "ontrack task resources <project_id> <task>", option: "--output" },
-    { argv: ["task", "read", "--help"], usage: "ontrack task read <project_id> <task>", option: "Markdown" },
-    { argv: ["chats", "--help"], usage: "ontrack chats <project_id> [task]", option: "marks" },
+    { argv: ["project", "--help"], usage: "ontrack project <project>", option: "unit code" },
+    { argv: ["tasks", "--help"], usage: "ontrack tasks <project>", option: "--status" },
+    { argv: ["resources", "download", "--help"], usage: "ontrack resources download <project>", option: "--output" },
+    { argv: ["task", "sheet", "--help"], usage: "ontrack task sheet <project> <task>", option: "--output" },
+    { argv: ["task", "resources", "--help"], usage: "ontrack task resources <project> <task>", option: "--output" },
+    { argv: ["task", "read", "--help"], usage: "ontrack task read <project> <task>", option: "Markdown" },
+    { argv: ["task", "state", "--help"], usage: "ontrack task state <project> <task> <state>", option: "working_on_it" },
+    { argv: ["chats", "--help"], usage: "ontrack chats <project> [task]", option: "marks" },
     { argv: ["roles", "--help"], usage: "ontrack roles", option: "--all" },
   ];
   for (const { argv, usage, option } of cases) {

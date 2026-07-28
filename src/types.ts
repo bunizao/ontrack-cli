@@ -48,6 +48,12 @@ export interface Task {
   readonly num_new_comments?: number;
 }
 
+export interface TaskUpdate {
+  readonly id: number;
+  readonly task_definition_id: number;
+  readonly status: string;
+}
+
 export interface Project {
   readonly id: number;
   readonly unit: UnitSummary;

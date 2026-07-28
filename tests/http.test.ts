@@ -25,6 +25,26 @@ export async function test_ontrack_projects_sends_auth_headers_and_validates_the
   assert.equal(request?.headers.get("Accept"), "application/json");
 }
 
+export async function test_ontrack_updates_one_task_state_with_a_canonical_trigger(): Promise<void> {
+  let request: Request | undefined;
+  const client = new OnTrackClient(new HttpClient({
+    baseUrl: "https://ontrack.example.edu",
+    credentials: { username: "student", accessToken: "secret-token" },
+    fetch: async (input, init) => {
+      request = new Request(input, init);
+      return Response.json({ id: 21, task_definition_id: 27, status: "working_on_it" });
+    },
+  }));
+
+  const task = await client.updateTaskState(5183, 27, "working_on_it");
+
+  assert.deepEqual(task, { id: 21, task_definition_id: 27, status: "working_on_it" });
+  assert.equal(request?.method, "PUT");
+  assert.equal(request?.url, "https://ontrack.example.edu/api/projects/5183/task_def_id/27");
+  assert.equal(request?.headers.get("Content-Type"), "application/json");
+  assert.deepEqual(await request?.json(), { trigger: "working_on_it" });
+}
+
 export async function test_http_download_returns_binary_response(): Promise<void> {
   let request: Request | undefined;
   const client = new HttpClient({

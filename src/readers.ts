@@ -5,6 +5,7 @@ import type {
   Project,
   ProjectSummary,
   Task,
+  TaskUpdate,
   TaskComment,
   TaskCommentParty,
   TaskDefinition,
@@ -125,6 +126,15 @@ function readTask(value: unknown): Task {
     quality_pts: nullableNumber(data.quality_pts, "task quality_pts"),
     include_in_portfolio: nullableBoolean(data.include_in_portfolio, "task include_in_portfolio"),
     num_new_comments: nonnegativeInteger(data.num_new_comments, "task num_new_comments"),
+  };
+}
+
+export function readTaskUpdate(value: unknown): TaskUpdate {
+  const data = object(value, "task update");
+  return {
+    id: requiredPositiveInteger(data.id, "task update id"),
+    task_definition_id: requiredPositiveInteger(data.task_definition_id, "task update task_definition_id"),
+    status: requiredString(data.status, "task update status"),
   };
 }
 

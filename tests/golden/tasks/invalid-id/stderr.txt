@@ -1,1 +1,1 @@
-usage error: project_id must be an integer
+usage error: project_id must be an integer or a unit code such as FIT1045

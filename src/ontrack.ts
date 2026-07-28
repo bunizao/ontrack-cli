@@ -1,7 +1,7 @@
 import { CliError } from "./errors.js";
 import { HttpClient, type DownloadResponse } from "./http.js";
-import { readProject, readProjects, readRoles, readTaskComments, readUnit } from "./readers.js";
-import type { Project, ProjectSummary, TaskComment, Unit, UnitRole } from "./types.js";
+import { readProject, readProjects, readRoles, readTaskComments, readTaskUpdate, readUnit } from "./readers.js";
+import type { Project, ProjectSummary, TaskComment, TaskUpdate, Unit, UnitRole } from "./types.js";
 
 export interface ProjectResourcesArchive {
   readonly projectId: number;
@@ -103,6 +103,17 @@ export class OnTrackClient {
   async getTaskComments(projectId: number, taskDefinitionId: number): Promise<TaskComment[]> {
     return readTaskComments(await this.http.request(
       `api/projects/${projectId}/task_def_id/${taskDefinitionId}/comments`,
+    ));
+  }
+
+  async updateTaskState(projectId: number, taskDefinitionId: number, state: string): Promise<TaskUpdate> {
+    return readTaskUpdate(await this.http.request(
+      `api/projects/${projectId}/task_def_id/${taskDefinitionId}`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ trigger: state }),
+      },
     ));
   }
 

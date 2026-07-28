@@ -55,6 +55,8 @@ function isPdf(bytes: Uint8Array): boolean {
   return bytes.length >= 5 && new TextDecoder().decode(bytes.subarray(0, 5)) === "%PDF-";
 }
 
+const writableTaskStates = ["not_started", "working_on_it", "need_help"] as const;
+
 export class OnTrackApplication implements CliApplication {
   constructor(
     private readonly sessionState: SessionState,
@@ -62,6 +64,17 @@ export class OnTrackApplication implements CliApplication {
     private readonly clock: Clock,
     private readonly signal?: AbortSignal,
   ) {}
+
+  async resolveProject(reference: string): Promise<number> {
+    const unitCode = reference.trim().toLowerCase();
+    const active = (await this.client.getProjects(false)).filter((project) => project.unit.code.toLowerCase() === unitCode);
+    if (active.length === 1) return active[0]!.id;
+    if (active.length > 1) throw this.ambiguousProject(reference, active.map((project) => project.id));
+    const all = (await this.client.getProjects(true)).filter((project) => project.unit.code.toLowerCase() === unitCode);
+    if (all.length === 1) return all[0]!.id;
+    if (all.length > 1) throw this.ambiguousProject(reference, all.map((project) => project.id));
+    throw new CliError("usage", `No project found for unit ${reference}. Use \`ontrack projects --include-inactive\` to find a project ID.`);
+  }
 
   async user(): Promise<unknown> {
     const [authMethod] = await Promise.all([
@@ -231,6 +244,25 @@ export class OnTrackApplication implements CliApplication {
     };
   }
 
+  async taskState(projectId: number, task: string, state: string): Promise<unknown> {
+    if (!writableTaskStates.includes(state as (typeof writableTaskStates)[number])) {
+      throw new CliError("usage", `state must be one of: ${writableTaskStates.join(", ")}`);
+    }
+    const snapshot = await this.snapshot(projectId);
+    const selected = selectedTask(snapshot, task);
+    const updated = await this.client.updateTaskState(projectId, selected.definition.id, state);
+    if (updated.task_definition_id !== selected.definition.id || updated.status !== state) {
+      throw new CliError("upstream_contract", `OnTrack did not update task ${selected.definition.abbreviation} to ${state}`);
+    }
+    return {
+      project_id: projectId,
+      task_definition_id: selected.definition.id,
+      task: selected.definition.abbreviation,
+      previous_status: selected.row.status,
+      status: updated.status,
+    };
+  }
+
   private async snapshot(projectId: number) {
     const project = await this.client.getProject(projectId);
     const unit = await this.client.getUnit(project.unit.id);
@@ -239,5 +271,9 @@ export class OnTrackApplication implements CliApplication {
       unit,
       this.clock,
     );
+  }
+
+  private ambiguousProject(reference: string, projectIds: readonly number[]): CliError {
+    return new CliError("usage", `Unit ${reference} matches multiple projects: ${projectIds.join(", ")}. Use a project ID.`);
   }
 }

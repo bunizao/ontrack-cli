@@ -58,6 +58,87 @@ export async function test_application_reads_the_current_session_after_refresh()
   });
 }
 
+export async function test_application_resolves_a_unique_active_project_by_unit_code(): Promise<void> {
+  const http = new HttpClient({
+    baseUrl: "https://school.example.edu",
+    credentials: { username: "student", accessToken: "secret" },
+    fetch: async (input) => {
+      const url = new URL(input instanceof Request ? input.url : input);
+      assert.equal(url.pathname, "/api/projects");
+      assert.equal(url.search, "?include_inactive=false");
+      return Response.json([
+        { id: 5183, unit: { id: 15, code: "FIT1061", name: "AI" } },
+        { id: 6200, unit: { id: 16, code: "FIT1045", name: "Algorithms" } },
+      ]);
+    },
+  });
+  const app = new OnTrackApplication({ current: session("student") }, new OnTrackClient(http), createClock("2026-07-26T12:00:00Z"));
+
+  assert.equal(await app.resolveProject("fit1045"), 6200);
+}
+
+export async function test_application_refuses_an_ambiguous_unit_code(): Promise<void> {
+  const http = new HttpClient({
+    baseUrl: "https://school.example.edu",
+    credentials: { username: "student", accessToken: "secret" },
+    fetch: async () => Response.json([
+      { id: 6200, unit: { id: 16, code: "FIT1045", name: "Algorithms" } },
+      { id: 6300, unit: { id: 17, code: "FIT1045", name: "Algorithms" } },
+    ]),
+  });
+  const app = new OnTrackApplication({ current: session("student") }, new OnTrackClient(http), createClock("2026-07-26T12:00:00Z"));
+
+  await assert.rejects(
+    app.resolveProject("FIT1045"),
+    (error) => error instanceof CliError && error.category === "usage" && /6200, 6300.*project ID/iu.test(error.message),
+  );
+}
+
+export async function test_application_updates_one_assigned_task_state_and_verifies_the_response(): Promise<void> {
+  const requests: Request[] = [];
+  const http = new HttpClient({
+    baseUrl: "https://school.example.edu",
+    credentials: { username: "student", accessToken: "secret" },
+    fetch: async (input, init) => {
+      const request = new Request(input, init);
+      requests.push(request);
+      const url = new URL(request.url);
+      if (url.pathname === "/api/projects/5183") return Response.json({
+        id: 5183,
+        unit: { id: 15, code: "FIT1061", name: "AI" },
+        tasks: [{ id: 21, task_definition_id: 27, status: "not_started" }],
+      });
+      if (url.pathname === "/api/units/15") return Response.json({
+        id: 15,
+        code: "FIT1061",
+        name: "AI",
+        task_definitions: [{ id: 27, abbreviation: "P1", name: "Search" }],
+      });
+      return Response.json({ id: 21, task_definition_id: 27, status: "working_on_it" });
+    },
+  });
+  const app = new OnTrackApplication({ current: session("student") }, new OnTrackClient(http), createClock("2026-07-26T12:00:00Z"));
+
+  assert.deepEqual(await app.taskState(5183, "P1", "working_on_it"), {
+    project_id: 5183,
+    task_definition_id: 27,
+    task: "P1",
+    previous_status: "not_started",
+    status: "working_on_it",
+  });
+  assert.equal(requests.at(-1)?.method, "PUT");
+}
+
+export async function test_application_rejects_an_unsupported_student_task_state_before_writing(): Promise<void> {
+  const http = { request: async () => { throw new Error("must not request"); } } as unknown as HttpClient;
+  const app = new OnTrackApplication({ current: session("student") }, new OnTrackClient(http), createClock("2026-07-26T12:00:00Z"));
+
+  await assert.rejects(
+    app.taskState(5183, "P1", "complete"),
+    (error) => error instanceof CliError && error.category === "usage" && /not_started.*working_on_it.*need_help/u.test(error.message),
+  );
+}
+
 export async function test_application_downloads_a_task_sheet_by_abbreviation(): Promise<void> {
   const directory = await mkdtemp(join(tmpdir(), "ontrack-task-sheet-"));
   const output = join(directory, "sheet.pdf");
