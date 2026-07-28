@@ -51,6 +51,7 @@ export interface ResolveAuthenticatedSessionOptions extends BrowserSessionOption
 }
 
 export interface LoginAuthenticatedSessionOptions extends BrowserSessionOptions {
+  readonly activeLogin?: (url: string) => Promise<readonly BrowserCookieCandidate[]>;
   readonly loginTimeoutMs?: number;
   readonly loginPollIntervalMs?: number;
   readonly onLoginUrl?: (url: string) => void;
@@ -410,6 +411,24 @@ export async function loginAuthenticatedSession(
     exchangeTimeoutMs,
     options.signal,
   );
+  if (options.activeLogin) {
+    const signInPage = new URL("/sign_in", options.baseUrl).href;
+    let candidates: readonly BrowserCookieCandidate[];
+    try {
+      candidates = await options.activeLogin(signInPage);
+    } catch {
+      if (options.signal?.aborted) throw new CliError("cancellation", "Authentication cancelled.");
+      throw authError("Interactive OnTrack sign-in failed.");
+    }
+    const session = await exchangeBrowserCookieCandidates(
+      { ...options, browserCookieProvider: async () => candidates },
+      currentTime(options),
+      fetchImplementation,
+      exchangeTimeoutMs,
+    );
+    if (session) return session;
+    throw authError("Interactive sign-in completed, but OnTrack did not provide a reusable session.");
+  }
   if (!options.promptEnter || !options.openBrowser) {
     throw authError("Interactive browser login is unavailable in this environment.");
   }

@@ -38,6 +38,7 @@ export interface BrowserCookieOptions {
 }
 
 export interface AuthenticationCookieOptions extends BrowserCookieOptions {
+  readonly includeBrowsers?: boolean;
   readonly storageStateDirectory?: string;
 }
 
@@ -47,7 +48,7 @@ export async function authenticationCookieCandidates(
   baseUrl: string,
   options: AuthenticationCookieOptions = {},
 ): Promise<BrowserCookieCandidate[]> {
-  const browser = await browserCookieCandidates(baseUrl, options);
+  const browser = options.includeBrowsers === false ? [] : await browserCookieCandidates(baseUrl, options);
   const directory = options.storageStateDirectory ?? join(options.homeDir ?? homedir(), ".okta-auth", "sessions");
   const stored = await storageStateCookieCandidates(directory);
   return [...browser, ...stored];

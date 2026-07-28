@@ -266,6 +266,48 @@ export async function test_auth_login_reuses_browser_cookies_without_prompting()
   assert.equal(opened, false);
 }
 
+export async function test_active_login_helper_avoids_full_disk_access_and_default_browser_fallback(): Promise<void> {
+  const directory = await temporaryDirectory();
+  const events: string[] = [];
+  let cookieReads = 0;
+  const session = await loginAuthenticatedSession({
+    baseUrl: "https://school.example.edu",
+    sessionFile: join(directory, "session.json"),
+    browserCookieProvider: async () => {
+      cookieReads += 1;
+      events.push(`cookies:${cookieReads}`);
+      return cookieReads === 1 ? [] : browserCandidate(validCookies());
+    },
+    activeLogin: async (url) => {
+      events.push(`active:${url}`);
+      return browserCandidate(validCookies());
+    },
+    promptEnter: async () => { throw new Error("must not prompt"); },
+    openBrowser: async () => { throw new Error("must not open the default browser"); },
+    now: () => new Date("2029-01-01T00:00:00Z"),
+    fetch: async (input, init) => {
+      const request = new Request(input, init);
+      events.push(`${request.method}:${request.url}`);
+      if (request.url.endsWith("/api/auth/method")) {
+        return Response.json({ method: "saml", redirect_to: "https://identity.example.edu/ontrack/saml" });
+      }
+      return exchangeResponse({
+        auth_token: "access-secret",
+        auth_token_expiry: "2030-01-01T00:00:00Z",
+        user: { username: "alice" },
+      })(input, init);
+    },
+  });
+
+  assert.equal(session.provenance, "browser");
+  assert.deepEqual(events, [
+    "cookies:1",
+    "GET:https://school.example.edu/api/auth/method",
+    "active:https://school.example.edu/sign_in",
+    "POST:https://school.example.edu/api/auth/access-token",
+  ]);
+}
+
 export async function test_interactive_browser_login_discovers_redirect_and_retries_browser_cookies(): Promise<void> {
   const directory = await temporaryDirectory();
   const events: string[] = [];

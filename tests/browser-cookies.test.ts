@@ -57,6 +57,21 @@ export async function test_authentication_cookie_discovery_prefers_browsers_then
   assert.deepEqual(candidates.map((candidate) => candidate.source), ["chrome:default", "browser-session:saved"]);
 }
 
+export async function test_interactive_login_can_skip_protected_browser_databases(): Promise<void> {
+  const directory = await mkdtemp(join(tmpdir(), "ontrack-auth-owned-browser-"));
+  let browserReads = 0;
+  await authenticationCookieCandidates("https://ontrack.example.edu", {
+    includeBrowsers: false,
+    storageStateDirectory: directory,
+    getCookies: async () => {
+      browserReads += 1;
+      return { cookies: [], warnings: [] };
+    },
+  });
+
+  assert.equal(browserReads, 0);
+}
+
 export async function test_browser_cookie_discovery_reads_supported_browsers_and_all_profiles(): Promise<void> {
   const received: GetCookiesOptions[] = [];
   const getCookies: CookieExtractor = async (options) => {

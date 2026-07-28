@@ -16,13 +16,12 @@ import { executeCli, type ChatSendConfirmation, type CliApplication } from "./cl
 import { loadConfig, resolveBaseUrl, resolveConfigPaths, type Environment } from "./config.js";
 import { CliError } from "./errors.js";
 import { HttpClient } from "./http.js";
+import { loginInOwnedBrowser } from "./interactive-browser.js";
 import { OnTrackClient } from "./ontrack.js";
 import { relaunchForNodeSqlite } from "./runtime.js";
 import { createClock } from "./time.js";
 import type { TaskSubmissionPlan } from "./submission.js";
 import { VERSION } from "./version.js";
-
-const INTERACTIVE_KEYCHAIN_PROMPT_TIMEOUT_MS = 120_000;
 
 async function promptForBrowserLogin(message: string, signal: AbortSignal): Promise<void> {
   if (!process.stdin.isTTY) throw new CliError("auth", "Interactive browser login requires a terminal.");
@@ -124,20 +123,15 @@ async function authLogin(signal: AbortSignal, env: Environment, platform: NodeJS
   });
   const config = loadConfig(paths);
   const baseUrl = resolveBaseUrl(env, config);
-  const shownWarnings = new Set<string>();
-  const showWarning = (warning: string): void => {
-    if (shownWarnings.has(warning)) return;
-    shownWarnings.add(warning);
-    process.stderr.write(`Browser cookie warning: ${warning}\n`);
-  };
   const session = await loginAuthenticatedSession({
     baseUrl,
     sessionFile: paths.sessionFile,
     signal,
-    browserCookieProvider: () => authenticationCookieCandidates(baseUrl, {
-      keychainPromptTimeoutMs: INTERACTIVE_KEYCHAIN_PROMPT_TIMEOUT_MS,
-      onWarning: showWarning,
-    }),
+    browserCookieProvider: () => authenticationCookieCandidates(baseUrl, { includeBrowsers: false }),
+    activeLogin: (url) => {
+      process.stderr.write("Opening a temporary Chrome window for OnTrack sign-in.\n");
+      return loginInOwnedBrowser(url, baseUrl, { signal });
+    },
     onLoginUrl: (url) => { process.stderr.write(`Sign-in URL: ${url}\n`); },
     onBrowserWait: (timeoutMs) => {
       process.stderr.write(`Waiting up to ${Math.ceil(timeoutMs / 1_000)} seconds for a reusable browser session (Remember me must be enabled). Press Ctrl-C to cancel.\n`);
