@@ -225,7 +225,7 @@ export async function test_application_rejects_an_unsupported_student_task_state
   const app = new OnTrackApplication({ current: session("student") }, new OnTrackClient(http), createClock("2026-07-26T12:00:00Z"));
 
   await assert.rejects(
-    app.taskState(5183, "P1", "complete"),
+    app.taskState(5183, "P1", "complete" as never),
     (error) => error instanceof CliError && error.category === "usage" && /not_started.*working_on_it.*need_help/u.test(error.message),
   );
 }

@@ -60,6 +60,15 @@ export async function test_process_mutations_reject_noninteractive_calls_without
   assert.equal(JSON.parse(result.stderr).error.code, "usage");
 }
 
+export async function test_process_chat_read_requires_explicit_side_effect_acknowledgement(): Promise<void> {
+  const result = await run(process.execPath, [resolve("dist/cli.js"), "chats", "read", "7", "1.1"]);
+  assert.equal(result.code, 2);
+  assert.equal(result.stdout, "");
+  const error = JSON.parse(result.stderr) as { error: { message: string; hint: string } };
+  assert.match(error.error.message, /marks non-discussion comments read/u);
+  assert.match(error.error.hint, /--yes/u);
+}
+
 export async function test_process_dry_run_prints_plan_without_authentication(): Promise<void> {
   const result = await run(process.execPath, [resolve("dist/cli.js"), "tasks", "set", "7", "1.1", "working_on_it", "--dry-run"]);
   assert.equal(result.code, 0);

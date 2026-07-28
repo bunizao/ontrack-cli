@@ -27,7 +27,7 @@ ontrack units                         # units list
 ontrack courses FIT1045               # units show FIT1045
 ontrack tasks FIT1045                 # tasks list FIT1045
 ontrack tasks FIT1045 1.1             # tasks show FIT1045 1.1
-ontrack chats FIT1045 1.1             # chats read FIT1045 1.1
+ontrack chats FIT1045 1.1 --yes       # chats read FIT1045 1.1
 ```
 
 The normalized command surface is:
@@ -103,7 +103,7 @@ ontrack tasks set FIT1045 1.1 working_on_it --dry-run
 ontrack chats send FIT1045 1.1 --message 'Please review this.' --yes
 ```
 
-`chats read` is separated from `chats mark-read`, but the current OnTrack history endpoint itself marks non-discussion comments read. The CLI warns on stderr whenever that endpoint is used.
+`chats read` is separated from `chats mark-read`, but the current OnTrack history endpoint itself marks non-discussion comments read. It always requires `-y`/`--yes` and prints that side effect on stderr before fetching history.
 
 Downloads use `--dest`; global `-o/--output` always redirects structured CLI output. Pass `--force` to replace an existing download atomically.
 

@@ -79,8 +79,9 @@ Everything in this section is identical across all three tools. Deviation is a b
 | `set` | change state | yes |
 | `mark-read` | mark as read upstream | yes |
 
-`read` must never issue a non-idempotent upstream request. This rule exists because both
-edstem-cli and ontrack-cli currently violate it in different ways.
+`read` must never issue a non-idempotent upstream request. The sole documented exception is
+`ontrack chats read`: Doubtfire exposes no side-effect-free history route, so the command always
+requires `-y`/`--yes` and prints the read-state change before making the request.
 
 **The verb may be omitted; it is inferred from the count of positional arguments.**
 
@@ -422,7 +423,7 @@ Nouns: `auth`, `units` (alias `courses`, `projects`), `tasks`, `chats`, `roles`,
 | `tasks set <unit> <task> <state>` | `task state` |
 | `tasks submit <unit> <task> --file` | `task submit` |
 | `chats <unit>` | `chats <p>` |
-| `chats read <unit> <task>` | `chats <p> <t>` — **no longer marks read** |
+| `chats read <unit> <task>` | `chats <p> <t>` — marks comments read and requires `--yes` |
 | `chats mark-read <unit> <task>` | *(new — the side effect, split out)* |
 | `chats send <unit> <task> --message` | `chats send` |
 | `roles` | `roles` |
@@ -618,8 +619,8 @@ Things that will bite the implementer, all verified:
    rename, but any script or agent calling it will break loudly. That is the intent.
 4. **ontrack `chats <p> <t>` marks comments read** (`src/application.ts:143`). Splitting the read
    path from `mark-read` requires an upstream-behaviour check: confirm whether the history endpoint
-   can be called without the read side effect. If it cannot, `chats read` must print a stderr
-   warning and the split becomes cosmetic — document whichever turns out to be true.
+   can be called without the read side effect. It cannot, so `chats read` must require `--yes`,
+   print a stderr warning, and document that the command changes read state.
 5. **moodle activity ID namespace** — confirm the six activity types share one ID space before
    merging them into `activities show <id>`. The existing type switch at `src/cli.ts:356-381`
    suggests they do, but verify against a live account rather than assuming.

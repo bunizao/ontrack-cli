@@ -12,7 +12,7 @@ import { OnTrackApplication } from "./application.js";
 import { loginAuthenticatedSession, resolveAuthenticatedSession } from "./auth.js";
 import { openSystemBrowser } from "./browser.js";
 import { authenticationCookieCandidates } from "./browser-cookies.js";
-import { executeCli, type ChatSendConfirmation, type CliApplication } from "./cli-app.js";
+import { executeCli, type ChatSendConfirmation } from "./cli-app.js";
 import { loadConfig, resolveBaseUrl, resolveConfigPaths, type Environment } from "./config.js";
 import { CliError } from "./errors.js";
 import { HttpClient } from "./http.js";
@@ -83,32 +83,11 @@ async function authLogout(env: Environment, platform: NodeJS.Platform): Promise<
   return { logged_out: true };
 }
 
-function lazyApplication(signal: AbortSignal, env: Environment, platform: NodeJS.Platform): CliApplication {
+function applicationResolver(signal: AbortSignal, env: Environment, platform: NodeJS.Platform): () => Promise<OnTrackApplication> {
   let application: Promise<OnTrackApplication> | undefined;
-  const resolve = (): Promise<OnTrackApplication> => {
+  return () => {
     application ??= createApplication(signal, env, platform);
     return application;
-  };
-  return {
-    resolveProject: async (reference) => (await resolve()).resolveProject(reference),
-    user: async () => (await resolve()).user(),
-    authCheck: async () => (await resolve()).authCheck(),
-    projects: async (options) => (await resolve()).projects(options),
-    project: async (projectId) => (await resolve()).project(projectId),
-    tasks: async (projectId, options) => (await resolve()).tasks(projectId, options),
-    taskShow: async (projectId, task) => (await resolve()).taskShow(projectId, task),
-    resourcesDownload: async (projectId, options) => (await resolve()).resourcesDownload(projectId, options),
-    taskSheetDownload: async (projectId, task, options) => (await resolve()).taskSheetDownload(projectId, task, options),
-    taskResourcesDownload: async (projectId, task, options) => (await resolve()).taskResourcesDownload(projectId, task, options),
-    taskRead: async (projectId, task) => (await resolve()).taskRead(projectId, task),
-    taskState: async (projectId, task, state) => (await resolve()).taskState(projectId, task, state),
-    prepareTaskSubmission: async (projectId, task, options) => (await resolve()).prepareTaskSubmission(projectId, task, options),
-    submitTask: async (plan) => (await resolve()).submitTask(plan),
-    chats: async (projectId, options) => (await resolve()).chats(projectId, options),
-    chatMarkRead: async (projectId, task) => (await resolve()).chatMarkRead(projectId, task),
-    prepareChatSend: async (projectId, task, message) => (await resolve()).prepareChatSend(projectId, task, message),
-    chatSend: async (plan) => (await resolve()).chatSend(plan),
-    roles: async (options) => (await resolve()).roles(options),
   };
 }
 
@@ -195,7 +174,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   if (platform === "win32") process.once("SIGBREAK", cancel);
   try {
     const result = await executeCli(argv, {
-      app: lazyApplication(controller.signal, env, platform),
+      application: applicationResolver(controller.signal, env, platform),
       authLogin: () => authLogin(controller.signal, env, platform),
       authLogout: () => authLogout(env, platform),
       confirmChatSend: (details) => confirmChatSend(details, controller.signal),

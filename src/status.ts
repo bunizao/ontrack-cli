@@ -1,3 +1,5 @@
+import { CliError } from "./errors.js";
+
 interface StatusMetadata {
   readonly label: string;
   readonly final: boolean;
@@ -21,6 +23,16 @@ const statuses = {
   attention_required: { label: "Attention Required", final: false, submitted: true },
   rediscuss: { label: "Rediscuss", final: false, submitted: true },
 } as const satisfies Record<string, StatusMetadata>;
+
+export const writableTaskStates = ["not_started", "working_on_it", "need_help"] as const;
+export type WritableTaskState = (typeof writableTaskStates)[number];
+
+export function writableTaskState(value: string): WritableTaskState {
+  if (!writableTaskStates.includes(value as WritableTaskState)) {
+    throw new CliError("usage", `state must be one of: ${writableTaskStates.join(", ")}`);
+  }
+  return value as WritableTaskState;
+}
 
 function metadata(key: string): StatusMetadata | undefined {
   return (statuses as Record<string, StatusMetadata>)[key];

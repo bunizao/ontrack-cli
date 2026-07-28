@@ -276,8 +276,8 @@ export function readTaskComment(value: unknown): TaskComment {
   const createdAt = instant(data.created_at, "task comment created_at");
   if (!createdAt) return contract("task comment created_at must be an instant");
   const recipientReadTime = instant(data.recipient_read_time, "task comment recipient_read_time");
+  const status = data.status === undefined ? undefined : requiredString(data.status, "task comment status");
   return {
-    ...data,
     id: requiredPositiveInteger(data.id, "task comment id"),
     comment: requiredString(data.comment, "task comment comment"),
     has_attachment: requiredBoolean(data.has_attachment, "task comment has_attachment"),
@@ -290,6 +290,7 @@ export function readTaskComment(value: unknown): TaskComment {
     recipient: readTaskCommentParty(data.recipient, "task comment recipient"),
     created_at: createdAt.toString(),
     recipient_read_time: recipientReadTime?.toString() ?? null,
+    ...(status === undefined ? {} : { status }),
   };
 }
 

@@ -10,6 +10,7 @@ import type { TaskDefinition } from "./types.js";
 import type { Clock } from "./time.js";
 import { pdfToMarkdown } from "./pdf.js";
 import { submissionType, type TaskSubmissionOptions, type TaskSubmissionPlan } from "./submission.js";
+import { writableTaskState, type WritableTaskState } from "./status.js";
 import { prepareUploads } from "./uploads.js";
 
 export interface SessionState {
@@ -60,8 +61,6 @@ function placeholderFile(filename: string | null): boolean {
 function isPdf(bytes: Uint8Array): boolean {
   return bytes.length >= 5 && new TextDecoder().decode(bytes.subarray(0, 5)) === "%PDF-";
 }
-
-const writableTaskStates = ["not_started", "working_on_it", "need_help"] as const;
 
 export class OnTrackApplication implements CliApplication {
   constructor(
@@ -222,18 +221,7 @@ export class OnTrackApplication implements CliApplication {
   }
 
   async taskSheetDownload(projectId: number, task: string, options: { readonly output?: string; readonly force?: boolean }): Promise<unknown> {
-    const snapshot = await this.snapshot(projectId);
-    const selected = selectedDownloadTask(snapshot, task);
-    if (selected.definition.has_task_sheet === false) {
-      throw new CliError("upstream_api", `Task ${selected.abbreviation} has no task sheet.`);
-    }
-    const destination = options.output ?? `${snapshot.unit.code}-${selected.abbreviation}.pdf`;
-    if (!options.force) await assertOutputAvailable(destination);
-    const download = await this.client.downloadTaskSheet(snapshot.unit.id, selected.definition.id);
-    if (placeholderFile(download.filename)) throw new CliError("upstream_api", `Task ${selected.abbreviation} has no task sheet.`);
-    if (download.contentType !== "application/pdf" || !isPdf(download.bytes)) {
-      throw new CliError("upstream_contract", "OnTrack returned an invalid task sheet PDF");
-    }
+    const { snapshot, selected, download, destination } = await this.validatedTaskSheet(projectId, task, options);
     const filePath = await writeDownloadedFile(destination, download.bytes, this.signal, undefined, options.force);
     return {
       project_id: projectId,
@@ -273,16 +261,7 @@ export class OnTrackApplication implements CliApplication {
   }
 
   async taskRead(projectId: number, task: string): Promise<unknown> {
-    const snapshot = await this.snapshot(projectId);
-    const selected = selectedDownloadTask(snapshot, task);
-    if (selected.definition.has_task_sheet === false) {
-      throw new CliError("upstream_api", `Task ${selected.abbreviation} has no task sheet.`);
-    }
-    const download = await this.client.downloadTaskSheet(snapshot.unit.id, selected.definition.id);
-    if (placeholderFile(download.filename)) throw new CliError("upstream_api", `Task ${selected.abbreviation} has no task sheet.`);
-    if (download.contentType !== "application/pdf" || !isPdf(download.bytes)) {
-      throw new CliError("upstream_contract", "OnTrack returned an invalid task sheet PDF");
-    }
+    const { snapshot, selected, download } = await this.validatedTaskSheet(projectId, task);
     const document = await pdfToMarkdown(download.bytes, `${snapshot.unit.code} ${selected.abbreviation} Task Sheet`);
     return {
       project_id: projectId,
@@ -294,15 +273,13 @@ export class OnTrackApplication implements CliApplication {
     };
   }
 
-  async taskState(projectId: number, task: string, state: string): Promise<unknown> {
-    if (!writableTaskStates.includes(state as (typeof writableTaskStates)[number])) {
-      throw new CliError("usage", `state must be one of: ${writableTaskStates.join(", ")}`);
-    }
+  async taskState(projectId: number, task: string, state: WritableTaskState): Promise<unknown> {
+    const parsedState = writableTaskState(state);
     const snapshot = await this.snapshot(projectId);
     const selected = selectedTask(snapshot, task);
-    const updated = await this.client.updateTaskState(projectId, selected.definition.id, state);
-    if (updated.task_definition_id !== selected.definition.id || updated.status !== state) {
-      throw new CliError("upstream_contract", `OnTrack did not update task ${selected.definition.abbreviation} to ${state}`);
+    const updated = await this.client.updateTaskState(projectId, selected.definition.id, parsedState);
+    if (updated.task_definition_id !== selected.definition.id || updated.status !== parsedState) {
+      throw new CliError("upstream_contract", `OnTrack did not update task ${selected.definition.abbreviation} to ${parsedState}`);
     }
     return {
       project_id: projectId,
@@ -361,6 +338,26 @@ export class OnTrackApplication implements CliApplication {
       unit,
       this.clock,
     );
+  }
+
+  private async validatedTaskSheet(
+    projectId: number,
+    task: string,
+    options?: { readonly output?: string; readonly force?: boolean },
+  ) {
+    const snapshot = await this.snapshot(projectId);
+    const selected = selectedDownloadTask(snapshot, task);
+    if (selected.definition.has_task_sheet === false) {
+      throw new CliError("upstream_api", `Task ${selected.abbreviation} has no task sheet.`);
+    }
+    const destination = options?.output ?? `${snapshot.unit.code}-${selected.abbreviation}.pdf`;
+    if (options && !options.force) await assertOutputAvailable(destination);
+    const download = await this.client.downloadTaskSheet(snapshot.unit.id, selected.definition.id);
+    if (placeholderFile(download.filename)) throw new CliError("upstream_api", `Task ${selected.abbreviation} has no task sheet.`);
+    if (download.contentType !== "application/pdf" || !isPdf(download.bytes)) {
+      throw new CliError("upstream_contract", "OnTrack returned an invalid task sheet PDF");
+    }
+    return { snapshot, selected, download, destination };
   }
 
   private ambiguousProject(reference: string, projectIds: readonly number[]): CliError {

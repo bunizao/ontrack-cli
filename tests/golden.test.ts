@@ -130,8 +130,9 @@ async function applicationFor(testCase: GoldenCase): Promise<CliApplication> {
 }
 
 async function execute(testCase: GoldenCase): Promise<CliExecution> {
+  const application = await applicationFor(testCase);
   return executeCli(testCase.argv, {
-    app: await applicationFor(testCase),
+    application: async () => application,
     version: "0.2.0",
     sensitiveValues: [secretSentinel],
   });
@@ -177,8 +178,9 @@ export async function test_command_goldens_match_or_regenerate_mechanically(): P
 
 export async function test_every_parser_command_has_a_golden_case(): Promise<void> {
   const cases = await goldenCases();
+  const application = await applicationFor(cases[0]!);
   const description = await executeCli(["commands", "--json"], {
-    app: await applicationFor(cases[0]!),
+    application: async () => application,
     version: "0.2.0",
   });
   const tree = JSON.parse(description.stdout) as {

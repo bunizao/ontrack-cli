@@ -3,6 +3,7 @@ import { HttpClient, type DownloadResponse } from "./http.js";
 import { readProject, readProjects, readRoles, readTaskComment, readTaskComments, readTaskUpdate, readUnit } from "./readers.js";
 import type { Project, ProjectSummary, TaskComment, TaskUpdate, Unit, UnitRole } from "./types.js";
 import type { PreparedUpload } from "./uploads.js";
+import type { WritableTaskState } from "./status.js";
 
 export interface ProjectResourcesArchive {
   readonly projectId: number;
@@ -107,7 +108,7 @@ export class OnTrackClient {
     ));
   }
 
-  async updateTaskState(projectId: number, taskDefinitionId: number, state: string): Promise<TaskUpdate> {
+  async updateTaskState(projectId: number, taskDefinitionId: number, state: WritableTaskState): Promise<TaskUpdate> {
     return readTaskUpdate(await this.http.request(
       `api/projects/${projectId}/task_def_id/${taskDefinitionId}`,
       {

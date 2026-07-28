@@ -14,7 +14,8 @@ import {
 import { CliError } from "./errors.js";
 import { assertSupportedRuntime } from "./runtime.js";
 import { renderSkill } from "./skill.js";
-import { submissionType, type TaskSubmissionOptions, type TaskSubmissionPlan } from "./submission.js";
+import { submissionType, submissionTypes, type TaskSubmissionOptions, type TaskSubmissionPlan } from "./submission.js";
+import { writableTaskState, writableTaskStates, type WritableTaskState } from "./status.js";
 
 export interface CliApplication {
   resolveProject(reference: string): Promise<number>;
@@ -28,7 +29,7 @@ export interface CliApplication {
   taskSheetDownload(projectId: number, task: string, options: DownloadOptions): Promise<unknown>;
   taskResourcesDownload(projectId: number, task: string, options: DownloadOptions): Promise<unknown>;
   taskRead(projectId: number, task: string): Promise<unknown>;
-  taskState(projectId: number, task: string, state: string): Promise<unknown>;
+  taskState(projectId: number, task: string, state: WritableTaskState): Promise<unknown>;
   prepareTaskSubmission(projectId: number, task: string, options: TaskSubmissionOptions): Promise<TaskSubmissionPlan>;
   submitTask(plan: TaskSubmissionPlan): Promise<unknown>;
   chats(projectId: number, options: { readonly task?: string }): Promise<unknown>;
@@ -51,7 +52,7 @@ export interface CliExecution {
 }
 
 interface Dependencies {
-  readonly app: CliApplication;
+  readonly application: () => Promise<CliApplication>;
   readonly authLogin?: () => Promise<unknown>;
   readonly authLogout?: () => Promise<unknown>;
   readonly version: string;
@@ -90,9 +91,16 @@ interface GlobalOptions {
   readonly dryRun?: boolean;
 }
 
+const taskNounSpec: NounSpec = {
+  name: "tasks",
+  verbs: ["list", "show", "read", "get", "set", "submit"],
+  valueFlags: ["--status"],
+  defaultByArity: { 1: "list", 2: "show" },
+};
+
 export const nounSpecs: readonly NounSpec[] = [
   { name: "units", aliases: ["courses", "projects"], verbs: ["list", "show", "get"], defaultByArity: { 0: "list", 1: "show" } },
-  { name: "tasks", verbs: ["list", "show", "read", "get", "set", "submit"], valueFlags: ["--status"], defaultByArity: { 1: "list", 2: "show" } },
+  taskNounSpec,
   { name: "chats", verbs: ["list", "read", "send", "mark-read"], defaultByArity: { 1: "list", 2: "read" } },
   { name: "roles", verbs: ["list"], defaultByArity: { 0: "list" } },
 ];
@@ -101,7 +109,20 @@ const secretKeys = new Set([
   "authentication_token", "auth_token", "access_token", "refresh_token",
   "authenticationToken", "authToken", "accessToken", "refreshToken",
 ]);
-const taskStates = ["not_started", "working_on_it", "need_help"] as const;
+
+function normalizedArgv(argv: readonly string[]): string[] {
+  const result = insertDefaultVerb(argv, nounSpecs);
+  if (result.length !== argv.length + 1) return result;
+  const nounIndex = result.findIndex((token, index) => token === "tasks" && result[index + 1] === "show");
+  if (nounIndex === -1) return result;
+  const commandArguments = result.slice(nounIndex + 2);
+  const terminator = commandArguments.indexOf("--");
+  const options = terminator === -1 ? commandArguments : commandArguments.slice(0, terminator);
+  if (options.includes("--status")) {
+    result[nounIndex + 1] = "list";
+  }
+  return result;
+}
 
 function sanitized(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(sanitized);
@@ -127,10 +148,10 @@ function positiveId(value: string): number {
   return id;
 }
 
-async function resolvedProjectId(value: string, app: CliApplication): Promise<number> {
+async function resolvedProjectId(value: string, application: () => Promise<CliApplication>): Promise<number> {
   const reference = value.trim();
   if (/^\d+$/u.test(reference)) return positiveId(reference);
-  if (/^[a-z]{2,}\d{3,}[a-z0-9_-]*$/iu.test(reference)) return app.resolveProject(reference);
+  if (/^[a-z]{2,}\d{3,}[a-z0-9_-]*$/iu.test(reference)) return (await application()).resolveProject(reference);
   throw new CliError("usage", "unit must be a project ID or unit code such as FIT1045");
 }
 
@@ -203,6 +224,7 @@ export async function executeCli(argv: readonly string[], dependencies: Dependen
     version: dependencies.version,
     description: "Terminal-first CLI for OnTrack and Doubtfire",
   });
+  const application = dependencies.application;
   program.configureOutput({
     writeOut: (text) => { stdout += text; },
     writeErr: (text) => { stderr += text; },
@@ -212,7 +234,7 @@ export async function executeCli(argv: readonly string[], dependencies: Dependen
   const globalOptions = (): GlobalOptions => program.opts<GlobalOptions>();
 
   program.command("user").description("Show the signed-in user").action(async () => {
-    setResult({ value: await dependencies.app.user() });
+    setResult({ value: await (await application()).user() });
   });
 
   const auth = program.command("auth").description("Manage authentication");
@@ -221,7 +243,7 @@ export async function executeCli(argv: readonly string[], dependencies: Dependen
     setResult({ value: await dependencies.authLogin() });
   });
   auth.command("status").description("Validate current credentials").action(async () => {
-    setResult({ value: await dependencies.app.authCheck() });
+    setResult({ value: await (await application()).authCheck() });
   });
   auth.command("logout").description("Remove the cached session").action(async () => {
     if (!dependencies.authLogout) throw new CliError("config", "Logout is unavailable.");
@@ -230,29 +252,29 @@ export async function executeCli(argv: readonly string[], dependencies: Dependen
 
   const units = program.command("units").aliases(["courses", "projects"]).description("OnTrack enrolments");
   units.command("list").description("List units").option("--include-inactive", "Include past units").action(async (options) => {
-    setResult({ value: await dependencies.app.projects({ includeInactive: options.includeInactive === true }) });
+    setResult({ value: await (await application()).projects({ includeInactive: options.includeInactive === true }) });
   });
   units.command("show <unit>").description("Show one unit").action(async (unit) => {
-    setResult({ value: await dependencies.app.project(await resolvedProjectId(unit, dependencies.app)) });
+    setResult({ value: await (await application()).project(await resolvedProjectId(unit, application)) });
   });
   units.command("get <unit>").description("Download unit resources")
     .option("--dest <path>", "Destination ZIP")
     .option("--force", "Replace an existing destination")
     .action(async (unit, options) => {
-      setResult({ value: await dependencies.app.resourcesDownload(await resolvedProjectId(unit, dependencies.app), downloadOptions(options)) });
+      setResult({ value: await (await application()).resourcesDownload(await resolvedProjectId(unit, application), downloadOptions(options)) });
     });
 
   const tasks = program.command("tasks").description("OnTrack tasks");
   tasks.command("list <unit>").description("List tasks")
     .option("--status <status...>", "Filter by raw task status")
     .action(async (unit, options) => {
-      setResult({ value: await dependencies.app.tasks(await resolvedProjectId(unit, dependencies.app), { statuses: options.status ?? [] }) });
+      setResult({ value: await (await application()).tasks(await resolvedProjectId(unit, application), { statuses: options.status ?? [] }) });
     });
   tasks.command("show <unit> <task>").description("Show one task").action(async (unit, task) => {
-    setResult({ value: await dependencies.app.taskShow(await resolvedProjectId(unit, dependencies.app), nonEmpty(task, "task")) });
+    setResult({ value: await (await application()).taskShow(await resolvedProjectId(unit, application), nonEmpty(task, "task")) });
   });
   tasks.command("read <unit> <task>").description("Print a task sheet as Markdown").action(async (unit, task) => {
-    const value = await dependencies.app.taskRead(await resolvedProjectId(unit, dependencies.app), nonEmpty(task, "task"));
+    const value = await (await application()).taskRead(await resolvedProjectId(unit, application), nonEmpty(task, "task"));
     const markdown = typeof value === "object" && value !== null && "markdown" in value
       ? String((value as { readonly markdown: unknown }).markdown)
       : String(value);
@@ -263,25 +285,26 @@ export async function executeCli(argv: readonly string[], dependencies: Dependen
     .option("--dest <path>", "Destination path")
     .option("--force", "Replace an existing destination")
     .action(async (unit, task, options) => {
-      const projectId = await resolvedProjectId(unit, dependencies.app);
+      const projectId = await resolvedProjectId(unit, application);
       const reference = nonEmpty(task, "task");
+      const app = await application();
       const value = options.resources
-        ? await dependencies.app.taskResourcesDownload(projectId, reference, downloadOptions(options))
-        : await dependencies.app.taskSheetDownload(projectId, reference, downloadOptions(options));
+        ? await app.taskResourcesDownload(projectId, reference, downloadOptions(options))
+        : await app.taskSheetDownload(projectId, reference, downloadOptions(options));
       setResult({ value });
     });
-  mutating(tasks.command("set <unit> <task> <state>").description("Change task workflow state").action(async (unit, task, state) => {
-    if (!taskStates.includes(state as typeof taskStates[number])) {
-      throw new CliError("usage", `state must be one of: ${taskStates.join(", ")}`);
-    }
-    const summary = `Set task ${task} in ${unit} to ${state}.`;
+  const setTask = tasks.command("set <unit> <task>").description("Change task workflow state")
+    .addArgument(tasks.createArgument("<state>", "Workflow state").choices(writableTaskStates));
+  mutating(setTask.action(async (unit, task, state) => {
+    const parsedState = writableTaskState(state);
+    const summary = `Set task ${task} in ${unit} to ${parsedState}.`;
     const confirmation = await requireConfirmation(summary, globalOptions(), dependencies);
     if (confirmation) return setResult(confirmation);
-    setResult({ value: await dependencies.app.taskState(await resolvedProjectId(unit, dependencies.app), nonEmpty(task, "task"), nonEmpty(state, "state")) });
+    setResult({ value: await (await application()).taskState(await resolvedProjectId(unit, application), nonEmpty(task, "task"), parsedState) });
   }));
   mutating(tasks.command("submit <unit> <task>").description("Submit task files")
     .requiredOption("--file <path...>", "Files in upload-requirement order")
-    .option("--type <type>", "Submission type", "ready_for_feedback")
+    .addOption(tasks.createOption("--type <type>", "Submission type").choices(submissionTypes).default("ready_for_feedback"))
     .option("--comment <text>", "Submission comment")
     .option("--accept-tii-eula", "Accept the Turnitin EULA")
     .action(async (unit, task, options) => {
@@ -292,31 +315,41 @@ export async function executeCli(argv: readonly string[], dependencies: Dependen
       const summary = `Submit ${files.length} file(s) for task ${task} in ${unit} as ${type}.`;
       if (globalOptions().dryRun) return setResult({ dryRun: summary });
       if (!globalOptions().yes && dependencies.interactive === false) throw new CliError("usage", "Mutation requires --yes when stdin is not interactive.");
-      const projectId = await resolvedProjectId(unit, dependencies.app);
+      const projectId = await resolvedProjectId(unit, application);
       const base = { files, type, acceptTiiEula: options.acceptTiiEula === true };
-      const plan = await dependencies.app.prepareTaskSubmission(projectId, nonEmpty(task, "task"), comment ? { ...base, comment } : base);
+      const plan = await (await application()).prepareTaskSubmission(projectId, nonEmpty(task, "task"), comment ? { ...base, comment } : base);
       const confirmation = await requireConfirmation(summary, globalOptions(), dependencies, dependencies.confirmTaskSubmit ? () => dependencies.confirmTaskSubmit!(plan) : undefined);
       if (confirmation) return setResult(confirmation);
-      setResult({ value: await dependencies.app.submitTask(plan) });
+      setResult({ value: await (await application()).submitTask(plan) });
     }));
 
   const chats = program.command("chats").description("Task chats");
   chats.command("list <unit>").description("List unread chat counts").action(async (unit) => {
-    setResult({ value: await dependencies.app.chats(await resolvedProjectId(unit, dependencies.app), {}) });
+    setResult({ value: await (await application()).chats(await resolvedProjectId(unit, application), {}) });
   });
-  chats.command("read <unit> <task>").description("Read task chat history").action(async (unit, task) => {
-    const diagnostic = "warning: OnTrack marks non-discussion comments read when chat history is fetched.\n";
-    if (!globalOptions().quiet) dependencies.onDiagnostic?.(diagnostic);
+  mutating(chats.command("read <unit> <task>").description("Read task chat history and mark comments read").action(async (unit, task) => {
+    const summary = `Read chat history for task ${task} in ${unit}; OnTrack will mark non-discussion comments read.`;
+    if (globalOptions().dryRun) return setResult({ dryRun: summary });
+    if (!globalOptions().yes) {
+      throw new CliError(
+        "usage",
+        "Reading OnTrack chat history marks non-discussion comments read.",
+        undefined,
+        "Re-run with --yes after acknowledging this side effect.",
+      );
+    }
+    const diagnostic = "warning: Reading OnTrack chat history marks non-discussion comments read.\n";
+    dependencies.onDiagnostic?.(diagnostic);
     setResult({
-      value: await dependencies.app.chats(await resolvedProjectId(unit, dependencies.app), { task: nonEmpty(task, "task") }),
-      ...(!globalOptions().quiet && !dependencies.onDiagnostic ? { diagnostic } : {}),
+      value: await (await application()).chats(await resolvedProjectId(unit, application), { task: nonEmpty(task, "task") }),
+      ...(!dependencies.onDiagnostic ? { diagnostic } : {}),
     });
-  });
+  }));
   mutating(chats.command("mark-read <unit> <task>").description("Mark task chat comments read").action(async (unit, task) => {
     const summary = `Mark chat comments read for task ${task} in ${unit}.`;
     const confirmation = await requireConfirmation(summary, globalOptions(), dependencies);
     if (confirmation) return setResult(confirmation);
-    setResult({ value: await dependencies.app.chatMarkRead(await resolvedProjectId(unit, dependencies.app), nonEmpty(task, "task")) });
+    setResult({ value: await (await application()).chatMarkRead(await resolvedProjectId(unit, application), nonEmpty(task, "task")) });
   }));
   mutating(chats.command("send <unit> <task>").description("Send a task chat message")
     .requiredOption("--message <text>", "Exact message to send")
@@ -326,15 +359,15 @@ export async function executeCli(argv: readonly string[], dependencies: Dependen
       const summary = `Send a chat message to task ${task} in ${unit}: ${JSON.stringify(message)}`;
       if (globalOptions().dryRun) return setResult({ dryRun: summary });
       if (!globalOptions().yes && dependencies.interactive === false) throw new CliError("usage", "Mutation requires --yes when stdin is not interactive.");
-      const plan = await dependencies.app.prepareChatSend(await resolvedProjectId(unit, dependencies.app), nonEmpty(task, "task"), message);
+      const plan = await (await application()).prepareChatSend(await resolvedProjectId(unit, application), nonEmpty(task, "task"), message);
       const confirmation = await requireConfirmation(summary, globalOptions(), dependencies, dependencies.confirmChatSend ? () => dependencies.confirmChatSend!(plan) : undefined);
       if (confirmation) return setResult(confirmation);
-      setResult({ value: await dependencies.app.chatSend(plan) });
+      setResult({ value: await (await application()).chatSend(plan) });
     }));
 
   const roles = program.command("roles").description("Teaching roles");
   roles.command("list").description("List teaching roles").option("--all", "Include inactive roles").action(async (options) => {
-    setResult({ value: await dependencies.app.roles({ showAll: options.all === true }) });
+    setResult({ value: await (await application()).roles({ showAll: options.all === true }) });
   });
 
   program.command("commands").description("Describe the complete command tree").action(() => {
@@ -346,11 +379,11 @@ export async function executeCli(argv: readonly string[], dependencies: Dependen
   });
 
   try {
-    const normalizedArgv = insertDefaultVerb(argv, nounSpecs);
-    if (normalizedArgv.length === 0) {
+    const args = normalizedArgv(argv);
+    if (args.length === 0) {
       program.outputHelp();
     } else {
-      await program.parseAsync(normalizedArgv, { from: "user" });
+      await program.parseAsync(args, { from: "user" });
     }
     const options = globalOptions();
     format = resolveFormat(options, dependencies.stdoutIsTty ?? false);

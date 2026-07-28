@@ -116,7 +116,6 @@ export interface TaskCommentParty {
 }
 
 export interface TaskComment {
-  readonly [key: string]: unknown;
   readonly id: number;
   readonly comment: string;
   readonly has_attachment: boolean;
@@ -127,4 +126,5 @@ export interface TaskComment {
   readonly recipient: TaskCommentParty;
   readonly created_at: string;
   readonly recipient_read_time: string | null;
+  readonly status?: string;
 }

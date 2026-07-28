@@ -13,6 +13,7 @@ Use `ontrack` to inspect and update OnTrack from a terminal. Prefer `--json` for
 - `ontrack commands --json` is the source of truth for this tool's command tree; the published `@bunizao/cli-kit` npm package (`^0.1.0`) defines the shared CLI contract.
 - Piped output defaults to JSON; terminal output defaults to a table.
 - Mutating commands require an interactive y/N confirmation or `--yes`.
+- `chats read` is an upstream exception: it marks comments read and always requires `--yes`.
 - Use `--dry-run` before a mutation when the intended target is uncertain.
 - Never print or copy session tokens, browser cookies, or authentication files.
 
@@ -36,7 +37,7 @@ Use `ontrack` to inspect and update OnTrack from a terminal. Prefer `--json` for
 - `ontrack tasks submit <unit> <task>` — Submit task files [mutating; requires confirmation or --yes]
 - `ontrack chats` — Task chats
 - `ontrack chats list <unit>` — List unread chat counts
-- `ontrack chats read <unit> <task>` — Read task chat history
+- `ontrack chats read <unit> <task>` — Read task chat history and mark comments read [mutating; requires --yes]
 - `ontrack chats mark-read <unit> <task>` — Mark task chat comments read [mutating; requires confirmation or --yes]
 - `ontrack chats send <unit> <task>` — Send a task chat message [mutating; requires confirmation or --yes]
 - `ontrack roles` — Teaching roles

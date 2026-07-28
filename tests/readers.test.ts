@@ -121,8 +121,26 @@ export function test_task_comment_reader_validates_base_fields_and_preserves_sub
     created_at: "2026-07-28T01:02:03Z",
     recipient_read_time: null,
     status: "complete",
+    ignored_metadata: { token: "not part of the comment contract" },
   }]);
   assert.equal(comments[0]?.created_at, "2026-07-28T01:02:03.000Z");
   assert.equal(comments[0]?.status, "complete");
+  assert.equal("ignored_metadata" in comments[0]!, false);
   assert.throws(() => readTaskComments([{ id: 1 }]), (error) => error instanceof CliError && error.category === "upstream_contract");
+  assert.throws(
+    () => readTaskComments([{
+      id: 41,
+      comment: "Reviewed",
+      has_attachment: false,
+      type: "status",
+      is_new: true,
+      reply_to_id: null,
+      author: { id: 2, first_name: "Example", last_name: "Tutor", email: "tutor@example.invalid" },
+      recipient: { id: 1, first_name: "Example", last_name: "Student", email: "student@example.invalid" },
+      created_at: "2026-07-28T01:02:03Z",
+      recipient_read_time: null,
+      status: { value: "complete" },
+    }]),
+    (error) => error instanceof CliError && error.category === "upstream_contract",
+  );
 }
