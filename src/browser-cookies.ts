@@ -194,6 +194,10 @@ function extractorFailure(browser: BrowserName, error: unknown, platform: NodeJS
 }
 
 function normalizeWarning(browser: BrowserName, warning: string, platform: NodeJS.Platform): string {
+  if (platform === "darwin" && /Failed to read macOS Keychain/iu.test(warning)) {
+    const label = `${browser[0]?.toUpperCase() ?? ""}${browser.slice(1)}`;
+    return `macOS Keychain did not authorize ${label} cookie decryption. Approve the Touch ID prompt for ontrack, then retry.`;
+  }
   const code = warning.match(/\b(EPERM|EACCES)\b/iu)?.[1]?.toUpperCase();
   return code === "EPERM" || code === "EACCES"
     ? permissionWarning(browser, code, platform)

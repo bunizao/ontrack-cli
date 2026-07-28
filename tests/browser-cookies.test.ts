@@ -237,6 +237,25 @@ export async function test_macos_permission_warnings_explain_full_disk_access_wi
   assert.doesNotMatch(warnings.join("\n"), /Users|\/tmp/u);
 }
 
+export async function test_macos_keychain_denial_is_not_reported_as_full_disk_access(): Promise<void> {
+  const warnings: string[] = [];
+  await browserCookieCandidates("https://ontrack.example.edu", {
+    platform: "darwin",
+    onWarning: (warning) => warnings.push(warning),
+    getCookies: async (options) => ({
+      cookies: [],
+      warnings: options.browsers?.[0] === "chrome"
+        ? ["Failed to read macOS Keychain (Chrome Safe Storage): EPERM: user denied"]
+        : [],
+    }),
+  });
+
+  assert.deepEqual(warnings, [
+    "macOS Keychain did not authorize Chrome cookie decryption. Approve the Touch ID prompt for ontrack, then retry.",
+  ]);
+  assert.doesNotMatch(warnings.join("\n"), /Full Disk Access|user denied/u);
+}
+
 export async function test_browser_cookie_discovery_maps_url_only_cookies_to_the_request_host(): Promise<void> {
   const result: GetCookiesResult = {
     cookies: [

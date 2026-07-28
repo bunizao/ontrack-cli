@@ -1,8 +1,18 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+export function test_macos_keychain_access_matches_browser_cookie3_authorization_command(): void {
+  const source = readFileSync(
+    "node_modules/@steipete/sweet-cookie/dist/providers/chromium/macosKeychain.js",
+    "utf8",
+  );
+
+  assert.match(source, /execCapture\("\/usr\/bin\/security", \["-q", "find-generic-password"/u);
+  assert.doesNotMatch(source, /execCapture\("security", \["find-generic-password"/u);
+}
 
 export function test_chromium_expiry_larger_than_number_is_read_on_supported_node_versions(): void {
   const directory = mkdtempSync(join(tmpdir(), "ontrack-cookie-compat-"));

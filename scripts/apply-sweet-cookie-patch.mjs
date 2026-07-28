@@ -3,17 +3,32 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const packageEntry = fileURLToPath(import.meta.resolve("@steipete/sweet-cookie"));
-const target = join(dirname(packageEntry), "providers/chromeSqlite/shared.js");
-const original = "const rows = db.prepare(options.sql).all();";
-const replacement = `const statement = db.prepare(options.sql);
+const providersDirectory = join(dirname(packageEntry), "providers");
+
+const sqliteTarget = join(providersDirectory, "chromeSqlite/shared.js");
+const sqliteOriginal = "const rows = db.prepare(options.sql).all();";
+const sqliteReplacement = `const statement = db.prepare(options.sql);
             if (typeof statement.setReadBigInts === "function") {
                 statement.setReadBigInts(true);
             }
             const rows = statement.all();`;
-const source = readFileSync(target, "utf8");
+const sqliteSource = readFileSync(sqliteTarget, "utf8");
 
-if (source.includes(replacement)) process.exit(0);
-if (!source.includes(original)) {
-  throw new Error("Unsupported @steipete/sweet-cookie source; update the compatibility patch.");
+if (!sqliteSource.includes(sqliteReplacement)) {
+  if (!sqliteSource.includes(sqliteOriginal)) {
+    throw new Error("Unsupported @steipete/sweet-cookie SQLite source; update the compatibility patch.");
+  }
+  writeFileSync(sqliteTarget, sqliteSource.replace(sqliteOriginal, sqliteReplacement), "utf8");
 }
-writeFileSync(target, source.replace(original, replacement), "utf8");
+
+const keychainTarget = join(providersDirectory, "chromium/macosKeychain.js");
+const keychainOriginal = "execCapture(\"security\", [\"find-generic-password\"";
+const keychainReplacement = "execCapture(\"/usr/bin/security\", [\"-q\", \"find-generic-password\"";
+const keychainSource = readFileSync(keychainTarget, "utf8");
+
+if (!keychainSource.includes(keychainReplacement)) {
+  if (!keychainSource.includes(keychainOriginal)) {
+    throw new Error("Unsupported @steipete/sweet-cookie Keychain source; update the compatibility patch.");
+  }
+  writeFileSync(keychainTarget, keychainSource.replace(keychainOriginal, keychainReplacement), "utf8");
+}
