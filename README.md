@@ -12,15 +12,6 @@ Requires Node.js 22.5 or newer, or Bun.
 npm install --global ontrack
 ```
 
-For development:
-
-```bash
-git clone https://github.com/bunizao/ontrack-cli.git
-cd ontrack-cli
-npm install
-npm test
-```
-
 ## Command model
 
 Commands follow one grammar:
@@ -52,7 +43,7 @@ commands
 skills generate
 ```
 
-Run `ontrack commands --json` for the full command tree, aliases, positionals, options, enum values, and mutation metadata.
+Run `ontrack commands --json` for the full command tree, aliases, positionals, options, enum values, and mutation metadata. The shared contract is supplied by the tagged `@bunizao/cli-kit` v0.1.0 source archive, so installs do not depend on a sibling checkout.
 
 ## Output
 
@@ -115,19 +106,6 @@ ontrack chats send FIT1045 1.1 --message 'Please review this.' --yes
 `chats read` is separated from `chats mark-read`, but the current OnTrack history endpoint itself marks non-discussion comments read. The CLI warns on stderr whenever that endpoint is used.
 
 Downloads use `--dest`; global `-o/--output` always redirects structured CLI output. Pass `--force` to replace an existing download atomically.
-
-## Development gates
-
-```bash
-npm run typecheck
-npm test
-npm run test:bun
-npm run verify:oracle
-npm run skill:generate
-npm pack --dry-run
-```
-
-The Python oracle payloads remain immutable evidence. The verifier explicitly checks the approved old-to-normalized argv mapping while comparing the same captured data projection.
 
 ## License
 
