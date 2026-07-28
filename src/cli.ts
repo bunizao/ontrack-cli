@@ -8,7 +8,7 @@ import { createInterface } from "node:readline/promises";
 import { OnTrackApplication } from "./application.js";
 import { loginAuthenticatedSession, resolveAuthenticatedSession } from "./auth.js";
 import { openSystemBrowser } from "./browser.js";
-import { browserCookieCandidates } from "./browser-cookies.js";
+import { authenticationCookieCandidates } from "./browser-cookies.js";
 import { executeCli, type CliApplication } from "./cli-app.js";
 import { loadConfig, resolveBaseUrl, resolveConfigPaths, type Environment } from "./config.js";
 import { CliError } from "./errors.js";
@@ -66,7 +66,7 @@ async function authLogin(signal: AbortSignal, env: Environment, platform: NodeJS
     baseUrl,
     sessionFile: paths.sessionFile,
     signal,
-    browserCookieProvider: () => browserCookieCandidates(baseUrl, { onWarning: showWarning }),
+    browserCookieProvider: () => authenticationCookieCandidates(baseUrl, { onWarning: showWarning }),
     onLoginUrl: (url) => { process.stderr.write(`Sign-in URL: ${url}\n`); },
     onBrowserWait: (timeoutMs) => {
       process.stderr.write(`Waiting up to ${Math.ceil(timeoutMs / 1_000)} seconds for a reusable browser session (Remember me must be enabled). Press Ctrl-C to cancel.\n`);
@@ -97,7 +97,7 @@ async function createApplication(signal: AbortSignal, env: Environment, platform
     env,
     config,
     signal,
-    browserCookieProvider: () => browserCookieCandidates(baseUrl),
+    browserCookieProvider: () => authenticationCookieCandidates(baseUrl),
   });
   const sessionState = { current: session };
   const http = new HttpClient({
@@ -112,7 +112,7 @@ async function createApplication(signal: AbortSignal, env: Environment, platform
         config,
         signal: refreshSignal,
         skipCache: true,
-        browserCookieProvider: () => browserCookieCandidates(baseUrl),
+        browserCookieProvider: () => authenticationCookieCandidates(baseUrl),
       });
       sessionState.current = session;
       return { username: session.username, accessToken: session.accessToken };

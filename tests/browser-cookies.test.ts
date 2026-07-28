@@ -1,8 +1,61 @@
 import assert from "node:assert/strict";
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { ALL_PROFILES, type GetCookiesOptions, type GetCookiesResult } from "@steipete/sweet-cookie";
 
-import { browserCookieCandidates, type CookieExtractor } from "../src/browser-cookies.js";
+import {
+  authenticationCookieCandidates,
+  browserCookieCandidates,
+  storageStateCookieCandidates,
+  type CookieExtractor,
+} from "../src/browser-cookies.js";
+
+export async function test_playwright_storage_state_supplies_a_reusable_cookie_pair(): Promise<void> {
+  const directory = await mkdtemp(join(tmpdir(), "ontrack-storage-state-"));
+  await Promise.all([
+    writeFile(join(directory, "monashuni.okta.com.json"), JSON.stringify({ cookies: [
+      { name: "username", value: "alice", domain: "ontrack.example.edu", path: "/api/auth", secure: true, expires: 2_000_000_000 },
+      { name: "refresh_token", value: "refresh", domain: "ontrack.example.edu", path: "/api/auth", secure: true, expires: 2_000_000_000 },
+      { name: "analytics", value: "ignored", domain: "example.edu", path: "/" },
+    ] })),
+    writeFile(join(directory, "incomplete.json"), JSON.stringify({ cookies: [
+      { name: "username", value: "other", domain: "ontrack.example.edu", path: "/api/auth" },
+    ] })),
+    writeFile(join(directory, "broken.json"), "not json"),
+    writeFile(join(directory, "ignored.meta.json"), JSON.stringify({ cookies: [] })),
+  ]);
+
+  assert.deepEqual(await storageStateCookieCandidates(directory), [{
+    source: "browser-session:monashuni.okta.com",
+    cookies: [
+      { name: "username", value: "alice", domain: "ontrack.example.edu", path: "/api/auth", secure: true, expires: 2_000_000_000 },
+      { name: "refresh_token", value: "refresh", domain: "ontrack.example.edu", path: "/api/auth", secure: true, expires: 2_000_000_000 },
+    ],
+  }]);
+}
+
+export async function test_authentication_cookie_discovery_prefers_browsers_then_saved_storage_state(): Promise<void> {
+  const directory = await mkdtemp(join(tmpdir(), "ontrack-auth-cookies-"));
+  await writeFile(join(directory, "saved.json"), JSON.stringify({ cookies: [
+    { name: "username", value: "saved-user", domain: "ontrack.example.edu", path: "/api/auth" },
+    { name: "refresh_token", value: "saved-refresh", domain: "ontrack.example.edu", path: "/api/auth" },
+  ] }));
+  const candidates = await authenticationCookieCandidates("https://ontrack.example.edu", {
+    platform: "linux",
+    storageStateDirectory: directory,
+    getCookies: async (options) => ({
+      cookies: options.browsers?.[0] === "chrome" ? [
+        { name: "username", value: "chrome-user", domain: "ontrack.example.edu", path: "/api/auth", source: { browser: "chrome" } },
+        { name: "refresh_token", value: "chrome-refresh", domain: "ontrack.example.edu", path: "/api/auth", source: { browser: "chrome" } },
+      ] : [],
+      warnings: [],
+    }),
+  });
+
+  assert.deepEqual(candidates.map((candidate) => candidate.source), ["chrome:default", "browser-session:saved"]);
+}
 
 export async function test_browser_cookie_discovery_reads_supported_browsers_and_all_profiles(): Promise<void> {
   const received: GetCookiesOptions[] = [];
