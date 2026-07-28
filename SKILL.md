@@ -10,7 +10,7 @@ Use `ontrack` to inspect and update OnTrack from a terminal. Prefer `--json` for
 ## Contract
 
 - `units`, `courses`, and `projects` are interchangeable.
-- `ontrack commands --json` is the source of truth for this tool's command tree; the tagged `@bunizao/cli-kit` v0.1.0 archive defines the shared CLI contract.
+- `ontrack commands --json` is the source of truth for this tool's command tree; the published `@bunizao/cli-kit` npm package (`^0.1.0`) defines the shared CLI contract.
 - Piped output defaults to JSON; terminal output defaults to a table.
 - Mutating commands require an interactive y/N confirmation or `--yes`.
 - Use `--dry-run` before a mutation when the intended target is uncertain.

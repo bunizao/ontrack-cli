@@ -43,7 +43,7 @@ commands
 skills generate
 ```
 
-Run `ontrack commands --json` for the full command tree, aliases, positionals, options, enum values, and mutation metadata. The shared contract is supplied by the tagged `@bunizao/cli-kit` v0.1.0 source archive, so installs do not depend on a sibling checkout.
+Run `ontrack commands --json` for the full command tree, aliases, positionals, options, enum values, and mutation metadata. The shared contract is supplied by the published `@bunizao/cli-kit` npm package (`^0.1.0`).
 
 ## Output
 
