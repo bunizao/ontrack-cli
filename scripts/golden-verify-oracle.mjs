@@ -47,6 +47,16 @@ function fail(message) {
   process.stderr.write(`${message}\n`);
 }
 
+function normalizedArgv(argv) {
+  const [command, ...rest] = argv;
+  if (command === "auth" && rest[0] === "check") return ["auth", "status", ...rest.slice(1)];
+  if (command === "project") return ["units", "show", ...rest];
+  if (command === "projects") return ["units", "list", ...rest];
+  if (command === "tasks") return ["tasks", "list", ...rest];
+  if (command === "roles") return ["roles", "list", ...rest];
+  return argv;
+}
+
 async function directories(path) {
   return (await readdir(path, { withFileTypes: true }))
     .filter((entry) => entry.isDirectory())
@@ -178,8 +188,8 @@ for (const sourceId of await directories(sourcesRoot)) {
       }
       const argv = await readJson(join(caseDirectory, "argv"));
       const env = await readJson(join(caseDirectory, "env"));
-      if (JSON.stringify(argv) !== JSON.stringify(artifact.argv) || JSON.stringify(env) !== JSON.stringify(artifact.env)) {
-        throw new Error("argv or env differs from the Python command capture");
+      if (JSON.stringify(argv) !== JSON.stringify(normalizedArgv(artifact.argv)) || JSON.stringify(env) !== JSON.stringify(artifact.env)) {
+        throw new Error("argv is not the approved normalization of the Python command capture, or env differs");
       }
       const goldenText = await readFile(join(caseDirectory, "stdout.json"), "utf8");
       const golden = JSON.parse(goldenText);

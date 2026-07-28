@@ -1,1 +1,1 @@
-["tasks", "1", "--json"]
+["tasks", "list", "1", "--json"]

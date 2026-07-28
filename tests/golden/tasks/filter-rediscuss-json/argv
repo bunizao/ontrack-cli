@@ -1,1 +1,1 @@
-["tasks", "1", "--status", "rediscuss", "--json"]
+["tasks", "list", "1", "--status", "rediscuss", "--json"]

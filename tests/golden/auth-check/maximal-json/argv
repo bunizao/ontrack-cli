@@ -1,1 +1,1 @@
-["auth", "check", "--json"]
+["auth", "status", "--json"]

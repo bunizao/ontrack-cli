@@ -1,1 +1,8 @@
-usage error: project_id must be an integer or a unit code such as FIT1045
+{
+  "ok": false,
+  "error": {
+    "code": "usage",
+    "message": "unit must be a project ID or unit code such as FIT1045"
+  },
+  "exit_code": 2
+}

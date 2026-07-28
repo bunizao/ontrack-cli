@@ -1,1 +1,1 @@
-["roles", "--all", "--json"]
+["roles", "list", "--all", "--json"]

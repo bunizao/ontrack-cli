@@ -1,1 +1,1 @@
-["projects", "--include-inactive", "--json"]
+["units", "list", "--include-inactive", "--json"]

@@ -1,1 +1,1 @@
-["roles", "--yaml"]
+["roles", "list", "--yaml"]
