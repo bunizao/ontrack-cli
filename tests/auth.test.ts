@@ -310,6 +310,33 @@ export async function test_interactive_browser_login_discovers_redirect_and_retr
   ]);
 }
 
+export async function test_browser_cookie_permission_error_stops_before_interactive_login(): Promise<void> {
+  const directory = await temporaryDirectory();
+  const permissionError = new CliError(
+    "auth",
+    "Chrome cookie access is disabled for this terminal.",
+    undefined,
+    "Enable Chrome in System Settings > Privacy & Security > Files & Folders, then retry.",
+  );
+  let requestedLoginUrl = false;
+  let prompted = false;
+
+  await assert.rejects(loginAuthenticatedSession({
+    baseUrl: "https://school.example.edu",
+    sessionFile: join(directory, "session.json"),
+    browserCookieProvider: async () => { throw permissionError; },
+    promptEnter: async () => { prompted = true; },
+    openBrowser: async () => { throw new Error("must not open"); },
+    fetch: async () => {
+      requestedLoginUrl = true;
+      throw new Error("must not fetch");
+    },
+  }), (error) => error === permissionError);
+
+  assert.equal(requestedLoginUrl, false);
+  assert.equal(prompted, false);
+}
+
 export async function test_interactive_browser_login_rejects_invalid_redirects_before_prompting(): Promise<void> {
   const directory = await temporaryDirectory();
   for (const payload of [

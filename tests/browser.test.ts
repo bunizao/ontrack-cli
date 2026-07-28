@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { openSystemBrowser, type BrowserCommandRunner } from "../src/browser.js";
+import { openMacosFilesAndFoldersSettings, openSystemBrowser, type BrowserCommandRunner } from "../src/browser.js";
 
 export async function test_system_browser_opener_uses_platform_default_handlers(): Promise<void> {
   const calls: Array<{ command: string; args: readonly string[] }> = [];
@@ -26,4 +26,14 @@ export async function test_system_browser_opener_propagates_launch_failures(): P
     }),
     /xdg-open is unavailable/u,
   );
+}
+
+export async function test_macos_files_and_folders_opener_targets_the_privacy_pane(): Promise<void> {
+  const calls: Array<{ command: string; args: readonly string[] }> = [];
+  await openMacosFilesAndFoldersSettings(async (command, args) => { calls.push({ command, args }); });
+
+  assert.deepEqual(calls, [{
+    command: "open",
+    args: ["x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders"],
+  }]);
 }

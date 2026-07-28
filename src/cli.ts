@@ -10,7 +10,7 @@ import { writeOutput } from "@bunizao/cli-kit";
 
 import { OnTrackApplication } from "./application.js";
 import { loginAuthenticatedSession, resolveAuthenticatedSession } from "./auth.js";
-import { openSystemBrowser } from "./browser.js";
+import { openMacosFilesAndFoldersSettings, openSystemBrowser } from "./browser.js";
 import { authenticationCookieCandidates } from "./browser-cookies.js";
 import { executeCli, type ChatSendConfirmation } from "./cli-app.js";
 import { loadConfig, resolveBaseUrl, resolveConfigPaths, type Environment } from "./config.js";
@@ -105,18 +105,34 @@ async function authLogin(signal: AbortSignal, env: Environment, platform: NodeJS
   const baseUrl = resolveBaseUrl(env, config);
   const shownWarnings = new Set<string>();
   const showWarning = (warning: string): void => {
+    if (warning.endsWith("cookies database not found.")) return;
     if (shownWarnings.has(warning)) return;
     shownWarnings.add(warning);
     process.stderr.write(`Browser cookie warning: ${warning}\n`);
+  };
+  const browserCookieProvider = async () => {
+    const warnings: string[] = [];
+    const candidates = await authenticationCookieCandidates(baseUrl, {
+      keychainPromptTimeoutMs: INTERACTIVE_KEYCHAIN_PROMPT_TIMEOUT_MS,
+      onWarning: (warning) => warnings.push(warning),
+    });
+    if (candidates.length > 0) return candidates;
+    for (const warning of warnings) showWarning(warning);
+    const chromePermissionDenied = warnings.some((warning) => warning.startsWith("Permission denied while reading Chrome cookies ("));
+    if (platform !== "darwin" || !chromePermissionDenied) return candidates;
+    const settingsOpened = await openMacosFilesAndFoldersSettings().then(() => true, () => false);
+    throw new CliError(
+      "auth",
+      "Chrome cookie access is disabled for the terminal or app that launched ontrack.",
+      undefined,
+      `${settingsOpened ? "System Settings was opened. " : ""}In Privacy & Security > Files & Folders, expand your terminal app, enable Chrome, then rerun \`ontrack auth login\`.`,
+    );
   };
   const session = await loginAuthenticatedSession({
     baseUrl,
     sessionFile: paths.sessionFile,
     signal,
-    browserCookieProvider: () => authenticationCookieCandidates(baseUrl, {
-      keychainPromptTimeoutMs: INTERACTIVE_KEYCHAIN_PROMPT_TIMEOUT_MS,
-      onWarning: showWarning,
-    }),
+    browserCookieProvider,
     onLoginUrl: (url) => { process.stderr.write(`Sign-in URL: ${url}\n`); },
     onBrowserWait: (timeoutMs) => {
       process.stderr.write(`Waiting up to ${Math.ceil(timeoutMs / 1_000)} seconds for a reusable browser session (Remember me must be enabled). Press Ctrl-C to cancel.\n`);

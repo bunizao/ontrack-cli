@@ -154,7 +154,7 @@ function normalizeWarning(browser: BrowserName, warning: string, platform: NodeJ
 function permissionWarning(browser: BrowserName, code: "EPERM" | "EACCES", platform: NodeJS.Platform): string {
   const label = `${browser[0]?.toUpperCase() ?? ""}${browser.slice(1)}`;
   const action = platform === "darwin"
-    ? "In System Settings > Privacy & Security > Full Disk Access, allow the terminal or app that launched ontrack, then retry."
+    ? `In System Settings > Privacy & Security > Files & Folders, enable ${label} for the terminal or app that launched ontrack, then retry.`
     : "Allow the terminal or app that launched ontrack to access browser data, then retry.";
   return `Permission denied while reading ${label} cookies (${code}). ${action}`;
 }

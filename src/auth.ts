@@ -318,7 +318,8 @@ async function exchangeBrowserCookieCandidates(
   let candidates: readonly BrowserCookieCandidate[];
   try {
     candidates = await options.browserCookieProvider();
-  } catch {
+  } catch (error) {
+    if (error instanceof CliError) throw error;
     return undefined;
   }
   for (const candidate of candidates) {

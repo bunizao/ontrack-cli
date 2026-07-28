@@ -199,7 +199,7 @@ export async function test_browser_cookie_discovery_preserves_permission_failure
   assert.doesNotMatch(warnings.join("\n"), /secret details/u);
 }
 
-export async function test_macos_permission_warnings_explain_full_disk_access_without_leaking_paths(): Promise<void> {
+export async function test_macos_permission_warnings_explain_files_and_folders_without_leaking_paths(): Promise<void> {
   const warnings: string[] = [];
   await browserCookieCandidates("https://ontrack.example.edu", {
     platform: "darwin",
@@ -213,7 +213,7 @@ export async function test_macos_permission_warnings_explain_full_disk_access_wi
   });
 
   assert.deepEqual(warnings, [
-    "Permission denied while reading Chrome cookies (EPERM). In System Settings > Privacy & Security > Full Disk Access, allow the terminal or app that launched ontrack, then retry.",
+    "Permission denied while reading Chrome cookies (EPERM). In System Settings > Privacy & Security > Files & Folders, enable Chrome for the terminal or app that launched ontrack, then retry.",
   ]);
   assert.doesNotMatch(warnings.join("\n"), /Users|\/tmp/u);
 }
@@ -235,6 +235,24 @@ export async function test_macos_keychain_denial_is_not_reported_as_full_disk_ac
     "macOS Keychain did not authorize Chrome cookie decryption. Approve the Touch ID prompt for ontrack, then retry.",
   ]);
   assert.doesNotMatch(warnings.join("\n"), /Full Disk Access|user denied/u);
+}
+
+export async function test_macos_safari_permission_warning_names_the_safari_toggle(): Promise<void> {
+  const warnings: string[] = [];
+  await browserCookieCandidates("https://ontrack.example.edu", {
+    platform: "darwin",
+    onWarning: (warning) => warnings.push(warning),
+    getCookies: async (options) => ({
+      cookies: [],
+      warnings: options.browsers?.[0] === "safari"
+        ? ["Failed to read Safari cookies: EPERM"]
+        : [],
+    }),
+  });
+
+  assert.deepEqual(warnings, [
+    "Permission denied while reading Safari cookies (EPERM). In System Settings > Privacy & Security > Files & Folders, enable Safari for the terminal or app that launched ontrack, then retry.",
+  ]);
 }
 
 export async function test_browser_cookie_discovery_maps_url_only_cookies_to_the_request_host(): Promise<void> {
