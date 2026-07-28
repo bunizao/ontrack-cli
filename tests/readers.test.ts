@@ -50,11 +50,13 @@ export function test_readers_retain_maximal_schedule_and_grade_fields(): void {
       grade: 1,
       quality_pts: 4,
       include_in_portfolio: true,
+      num_new_comments: 3,
     }],
   });
   assert.equal(project.flexible_dates, true);
   assert.equal(project.special_consideration_days, 3);
   assert.equal(project.tasks[0]?.discuss_timeout_expiry_at?.toString(), "2026-07-26T01:00:00.000Z");
+  assert.equal(project.tasks[0]?.num_new_comments, 3);
 
   const unit = readUnit({
     ...unitSummary,
@@ -69,12 +71,16 @@ export function test_readers_retain_maximal_schedule_and_grade_fields(): void {
       start_date: "2026-07-01",
       target_date: "2026-07-10",
       due_date: "2026-07-12",
+      has_task_sheet: true,
+      has_task_resources: false,
       grade_due_dates: [{ target_grade: 2, target_due_date: "2026-07-09", start_date: "2026-07-02" }],
     }],
   });
   assert.equal(unit.grade_definitions[0]?.id, "hd");
   assert.equal(unit.task_definitions[0]?.grade_due_dates["2"]?.toString(), "2026-07-09");
   assert.equal(unit.task_definitions[0]?.grade_start_dates["2"]?.toString(), "2026-07-02");
+  assert.equal(unit.task_definitions[0]?.has_task_sheet, true);
+  assert.equal(unit.task_definitions[0]?.has_task_resources, false);
 }
 
 export function test_wrong_shapes_are_contract_errors_not_empty_successes(): void {

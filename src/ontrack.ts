@@ -1,5 +1,5 @@
 import { CliError } from "./errors.js";
-import { HttpClient } from "./http.js";
+import { HttpClient, type DownloadResponse } from "./http.js";
 import { readProject, readProjects, readRoles, readUnit } from "./readers.js";
 import type { Project, ProjectSummary, Unit, UnitRole } from "./types.js";
 
@@ -88,6 +88,16 @@ export class OnTrackClient {
       throw new CliError("upstream_contract", "OnTrack returned an invalid resource archive");
     }
     return { projectId, unitId: project.unit.id, bytes };
+  }
+
+  async downloadTaskSheet(unitId: number, taskDefinitionId: number): Promise<DownloadResponse> {
+    return this.http.downloadFile(`api/units/${unitId}/task_definitions/${taskDefinitionId}/task_pdf`, {
+      query: { as_attachment: true },
+    });
+  }
+
+  async downloadTaskResources(unitId: number, taskDefinitionId: number): Promise<DownloadResponse> {
+    return this.http.downloadFile(`api/units/${unitId}/task_definitions/${taskDefinitionId}/task_resources`);
   }
 
   async getRoles(activeOnly = true): Promise<UnitRole[]> {

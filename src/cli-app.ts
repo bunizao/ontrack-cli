@@ -10,6 +10,8 @@ export interface CliApplication {
   project(projectId: number): Promise<unknown>;
   tasks(projectId: number, options: { readonly statuses: readonly string[] }): Promise<unknown>;
   resourcesDownload(projectId: number, options: { readonly output?: string }): Promise<unknown>;
+  taskSheetDownload(projectId: number, task: string, options: { readonly output?: string }): Promise<unknown>;
+  taskResourcesDownload(projectId: number, task: string, options: { readonly output?: string }): Promise<unknown>;
   roles(options: { readonly showAll: boolean }): Promise<unknown>;
 }
 
@@ -75,6 +77,8 @@ function rootHelp(): string {
     "  project <project_id> Show one project",
     "  tasks <project_id>   List project tasks",
     "  resources download <project_id> Download project resources",
+    "  task sheet <project_id> <task> Download one task sheet",
+    "  task resources <project_id> <task> Download one task's resources",
     "  roles                List teaching roles",
     "",
     "Project arguments use the id from `ontrack projects`, not list positions.",
@@ -112,6 +116,9 @@ function helpFor(argv: readonly string[]): string | undefined {
   if (args.length === 1 && args[0] === "resources") {
     return "Usage: ontrack resources <command>\n\nCommands:\n  download <project_id> Download all task sheets and resources\n";
   }
+  if (args.length === 1 && args[0] === "task") {
+    return "Usage: ontrack task <command>\n\nCommands:\n  sheet <project_id> <task>     Download one task sheet\n  resources <project_id> <task> Download one task's resources\n";
+  }
   if (args[0] === "user") return commandHelp("ontrack user", "Show the resolved signed-in user.", []);
   if (key === "auth check") return commandHelp("ontrack auth check", "Validate current credentials.", []);
   if (key === "auth login") return commandHelp("ontrack auth login", "Reuse browser cookies or open the OnTrack SAML sign-in URL.", []);
@@ -133,6 +140,18 @@ function helpFor(argv: readonly string[]): string | undefined {
     "Download all task sheets and resources for the project's unit.",
     ["  --output <path>      Destination ZIP; defaults to ontrack-resources-<project_id>.zip"],
     "Existing files are never replaced. Project IDs are not list positions.",
+  );
+  if (key === "task sheet") return commandHelp(
+    "ontrack task sheet <project_id> <task>",
+    "Download one task sheet by the abbreviation shown in `ontrack tasks`.",
+    ["  --output <path>      Destination PDF; defaults to <unit>-<task>.pdf"],
+    "A numeric task-definition ID is accepted as a fallback. Existing files are never replaced.",
+  );
+  if (key === "task resources") return commandHelp(
+    "ontrack task resources <project_id> <task>",
+    "Download one task's linked file or resource ZIP.",
+    ["  --output <path>      Destination path; defaults to the server filename"],
+    "A numeric task-definition ID is accepted as a fallback. Existing files are never replaced.",
   );
   if (args[0] === "roles") return commandHelp("ontrack roles", "List teaching and administrative roles.", ["  --all                 Include inactive roles"]);
   return undefined;
@@ -226,12 +245,17 @@ function terminal(view: OutputView, value: unknown, emptyMessage?: string): stri
     return `${summary}\nTasks\n${tasks.length ? taskTable(tasks) : "No tasks found.\n"}`;
   }
   if (view === "download") {
-    return renderTable([{
+    const file = data.file_path;
+    const row = {
       project: data.project_id,
       unit: data.unit_id,
-      archive: data.archive_path,
+      task: data.task,
+      file: file ?? data.archive_path,
       size: formatBytes(data.bytes_written),
-    }], [["project", "Project"], ["unit", "Unit"], ["archive", "Archive"], ["size", "Size"]]);
+    };
+    return file === undefined
+      ? renderTable([{ project: row.project, unit: row.unit, archive: row.file, size: row.size }], [["project", "Project"], ["unit", "Unit"], ["archive", "Archive"], ["size", "Size"]])
+      : renderTable([row], [["project", "Project"], ["unit", "Unit"], ["task", "Task"], ["file", "File"], ["size", "Size"]]);
   }
   if (view === "user" || view === "auth-login") {
     return recordTable([
@@ -307,6 +331,27 @@ async function invoke(argv: readonly string[], dependencies: Dependencies): Prom
       view: "download",
     };
   }
+  if (command === "task" && (rest[0] === "sheet" || rest[0] === "resources")) {
+    const kind = rest[0];
+    const parsed = parseArgs({
+      args: rest.slice(1),
+      options: { ...common, output: { type: "string" } },
+      allowPositionals: true,
+      strict: true,
+    });
+    if (parsed.positionals.length !== 2) throw new CliError("usage", `task ${kind} requires a project_id and task abbreviation`);
+    const task = parsed.positionals[1]?.trim();
+    if (!task) throw new CliError("usage", "task abbreviation must not be empty");
+    if (parsed.values.output !== undefined && !parsed.values.output.trim()) throw new CliError("usage", "output path must not be empty");
+    const options = parsed.values.output === undefined ? {} : { output: parsed.values.output };
+    return {
+      value: kind === "sheet"
+        ? await app.taskSheetDownload(projectId(parsed.positionals[0]), task, options)
+        : await app.taskResourcesDownload(projectId(parsed.positionals[0]), task, options),
+      json: parsed.values.json ?? false,
+      view: "download",
+    };
+  }
   if (command === "roles") {
     const parsed = parseArgs({ args: rest, options: { ...common, all: { type: "boolean" } }, allowPositionals: false, strict: true });
     const showAll = parsed.values.all ?? false;
@@ -325,7 +370,7 @@ export async function executeCli(argv: readonly string[], dependencies: Dependen
   if (argv.length === 0) return { exitCode: 0, stdout: rootHelp(), stderr: "" };
   if (argv.length === 1 && argv[0] === "--help") return { exitCode: 0, stdout: rootHelp(), stderr: "" };
   if (argv.length === 1 && argv[0] === "--version") return { exitCode: 0, stdout: `ontrack ${dependencies.version}\n`, stderr: "" };
-  if ((argv.length === 1 && (argv[0] === "auth" || argv[0] === "resources")) || argv.includes("--help")) {
+  if ((argv.length === 1 && (argv[0] === "auth" || argv[0] === "resources" || argv[0] === "task")) || argv.includes("--help")) {
     const help = helpFor(argv);
     if (help) return { exitCode: 0, stdout: help, stderr: "" };
   }

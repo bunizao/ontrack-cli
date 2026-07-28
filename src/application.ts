@@ -3,11 +3,34 @@ import type { CliApplication } from "./cli-app.js";
 import type { OnTrackClient } from "./ontrack.js";
 import { buildProjectSnapshot } from "./project-snapshot.js";
 import { projectSummaryToJson, roleToJson, snapshotToJson, userToJson } from "./serialize.js";
-import { writeResourceArchive } from "./resources.js";
+import { assertOutputAvailable, writeDownloadedFile, writeResourceArchive } from "./resources.js";
+import { CliError } from "./errors.js";
+import type { ProjectSnapshot, TaskRow } from "./project-snapshot.js";
+import type { TaskDefinition } from "./types.js";
 import type { Clock } from "./time.js";
 
 export interface SessionState {
   current: AuthenticatedSession;
+}
+
+function selectedTask(snapshot: ProjectSnapshot, reference: string): { readonly row: TaskRow; readonly definition: TaskDefinition } {
+  const normalized = reference.trim().toLowerCase();
+  const byAbbreviation = snapshot.tasks.find((task) => task.abbreviation.toLowerCase() === normalized);
+  const numericId = /^\d+$/u.test(normalized) ? Number(normalized) : undefined;
+  const row = byAbbreviation ?? (numericId === undefined ? undefined : snapshot.tasks.find((task) => task.task_definition_id === numericId));
+  const definition = row && snapshot.unit.task_definitions.find((candidate) => candidate.id === row.task_definition_id);
+  if (!row || !definition) {
+    throw new CliError("usage", `Task ${reference} is not in project ${snapshot.project.id}. Use the abbreviation shown by \`ontrack tasks ${snapshot.project.id}\`.`);
+  }
+  return { row, definition };
+}
+
+function placeholderFile(filename: string | null): boolean {
+  return filename?.toLowerCase() === "filenotfound.pdf";
+}
+
+function isPdf(bytes: Uint8Array): boolean {
+  return bytes.length >= 5 && new TextDecoder().decode(bytes.subarray(0, 5)) === "%PDF-";
 }
 
 export class OnTrackApplication implements CliApplication {
@@ -77,9 +100,11 @@ export class OnTrackApplication implements CliApplication {
   }
 
   async resourcesDownload(projectId: number, options: { readonly output?: string }): Promise<unknown> {
+    const destination = options.output ?? `ontrack-resources-${projectId}.zip`;
+    await assertOutputAvailable(destination);
     const archive = await this.client.downloadProjectResources(projectId);
     const archivePath = await writeResourceArchive(
-      options.output ?? `ontrack-resources-${projectId}.zip`,
+      destination,
       archive.bytes,
       this.signal,
     );
@@ -88,6 +113,57 @@ export class OnTrackApplication implements CliApplication {
       unit_id: archive.unitId,
       archive_path: archivePath,
       bytes_written: archive.bytes.length,
+    };
+  }
+
+  async taskSheetDownload(projectId: number, task: string, options: { readonly output?: string }): Promise<unknown> {
+    const snapshot = await this.snapshot(projectId);
+    const selected = selectedTask(snapshot, task);
+    if (selected.definition.has_task_sheet === false) {
+      throw new CliError("upstream_api", `Task ${selected.row.abbreviation} has no task sheet.`);
+    }
+    const destination = options.output ?? `${snapshot.unit.code}-${selected.row.abbreviation}.pdf`;
+    await assertOutputAvailable(destination);
+    const download = await this.client.downloadTaskSheet(snapshot.unit.id, selected.definition.id);
+    if (placeholderFile(download.filename)) throw new CliError("upstream_api", `Task ${selected.row.abbreviation} has no task sheet.`);
+    if (download.contentType !== "application/pdf" || !isPdf(download.bytes)) {
+      throw new CliError("upstream_contract", "OnTrack returned an invalid task sheet PDF");
+    }
+    const filePath = await writeDownloadedFile(destination, download.bytes, this.signal);
+    return {
+      project_id: projectId,
+      unit_id: snapshot.unit.id,
+      task_definition_id: selected.definition.id,
+      task: selected.row.abbreviation,
+      file_path: filePath,
+      bytes_written: download.bytes.length,
+      content_type: download.contentType,
+    };
+  }
+
+  async taskResourcesDownload(projectId: number, task: string, options: { readonly output?: string }): Promise<unknown> {
+    const snapshot = await this.snapshot(projectId);
+    const selected = selectedTask(snapshot, task);
+    if (selected.definition.has_task_resources === false) {
+      throw new CliError("upstream_api", `Task ${selected.row.abbreviation} has no resources.`);
+    }
+    if (options.output) await assertOutputAvailable(options.output);
+    const download = await this.client.downloadTaskResources(snapshot.unit.id, selected.definition.id);
+    if (placeholderFile(download.filename)) throw new CliError("upstream_api", `Task ${selected.row.abbreviation} has no resources.`);
+    if (!download.filename && !options.output) {
+      throw new CliError("upstream_contract", "OnTrack returned task resources without a filename");
+    }
+    const destination = options.output ?? download.filename as string;
+    if (!options.output) await assertOutputAvailable(destination);
+    const filePath = await writeDownloadedFile(destination, download.bytes, this.signal);
+    return {
+      project_id: projectId,
+      unit_id: snapshot.unit.id,
+      task_definition_id: selected.definition.id,
+      task: selected.row.abbreviation,
+      file_path: filePath,
+      bytes_written: download.bytes.length,
+      content_type: download.contentType,
     };
   }
 

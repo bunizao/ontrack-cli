@@ -48,6 +48,12 @@ function nullableNumber(value: unknown, name: string): number | null {
   return requiredNumber(value, name);
 }
 
+function nonnegativeInteger(value: unknown, name: string): number {
+  if (value === undefined || value === null) return 0;
+  if (!Number.isSafeInteger(value) || (value as number) < 0) return contract(`${name} must be a non-negative safe integer`);
+  return value as number;
+}
+
 function nullableString(value: unknown, name: string): string | null {
   if (value === undefined || value === null) return null;
   return requiredString(value, name);
@@ -111,6 +117,7 @@ function readTask(value: unknown): Task {
     grade: nullableNumber(data.grade, "task grade"),
     quality_pts: nullableNumber(data.quality_pts, "task quality_pts"),
     include_in_portfolio: nullableBoolean(data.include_in_portfolio, "task include_in_portfolio"),
+    num_new_comments: nonnegativeInteger(data.num_new_comments, "task num_new_comments"),
   };
 }
 
@@ -137,6 +144,8 @@ function readTaskDefinition(value: unknown): TaskDefinition {
     due_date: civilDate(data.due_date, "task definition due_date"),
     is_graded: nullableBoolean(data.is_graded, "task definition is_graded"),
     max_quality_pts: nullableNumber(data.max_quality_pts, "task definition max_quality_pts"),
+    has_task_sheet: nullableBoolean(data.has_task_sheet, "task definition has_task_sheet"),
+    has_task_resources: nullableBoolean(data.has_task_resources, "task definition has_task_resources"),
     grade_due_dates: gradeDueDates,
     grade_start_dates: gradeStartDates,
   };

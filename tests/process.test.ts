@@ -269,7 +269,9 @@ export async function test_process_resource_download_preserves_an_existing_file(
   const directory = mkdtempSync(join(tmpdir(), "ontrack-resources-existing-"));
   const output = join(directory, "resources.zip");
   writeFileSync(output, "existing");
+  let requests = 0;
   const server = createServer((request, response) => {
+    requests += 1;
     if (request.url === "/api/projects/5183") {
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify({ id: 5183, unit: { id: 15, code: "FIT1061", name: "AI" }, tasks: [] }));
@@ -299,6 +301,7 @@ export async function test_process_resource_download_preserves_an_existing_file(
     assert.match(result.stderr, /Output file already exists/u);
     assert.equal(readFileSync(output, "utf8"), "existing");
     assert.deepEqual(new Set(readdirSync(directory)), new Set(["resources.zip"]));
+    assert.equal(requests, 0);
   } finally {
     rmSync(directory, { recursive: true, force: true });
     server.close();

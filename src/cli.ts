@@ -41,6 +41,8 @@ function lazyApplication(signal: AbortSignal, env: Environment, platform: NodeJS
     project: async (projectId) => (await resolve()).project(projectId),
     tasks: async (projectId, options) => (await resolve()).tasks(projectId, options),
     resourcesDownload: async (projectId, options) => (await resolve()).resourcesDownload(projectId, options),
+    taskSheetDownload: async (projectId, task, options) => (await resolve()).taskSheetDownload(projectId, task, options),
+    taskResourcesDownload: async (projectId, task, options) => (await resolve()).taskResourcesDownload(projectId, task, options),
     roles: async (options) => (await resolve()).roles(options),
   };
 }

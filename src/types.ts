@@ -23,6 +23,8 @@ export interface TaskDefinition {
   readonly due_date: CivilDate | null;
   readonly is_graded: boolean | null;
   readonly max_quality_pts: number | null;
+  readonly has_task_sheet?: boolean | null;
+  readonly has_task_resources?: boolean | null;
   readonly grade_due_dates: Readonly<Record<string, CivilDate>>;
   readonly grade_start_dates: Readonly<Record<string, CivilDate>>;
 }
@@ -43,6 +45,7 @@ export interface Task {
   readonly grade: number | null;
   readonly quality_pts: number | null;
   readonly include_in_portfolio: boolean | null;
+  readonly num_new_comments?: number;
 }
 
 export interface Project {

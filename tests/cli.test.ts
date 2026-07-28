@@ -32,6 +32,8 @@ async function fakeApplication(): Promise<{
     project: await fixture("project"),
     tasks: await fixture("tasks"),
     resourcesDownload: { project_id: 7, unit_id: 9, archive_path: "/tmp/resources.zip", bytes_written: 4 },
+    taskSheetDownload: { project_id: 7, unit_id: 9, task_definition_id: 12, task: "1.1", file_path: "/tmp/FIT9999-1.1.pdf", bytes_written: 6, content_type: "application/pdf" },
+    taskResourcesDownload: { project_id: 7, unit_id: 9, task_definition_id: 12, task: "1.1", file_path: "/tmp/1.1-resources.zip", bytes_written: 4, content_type: "application/zip" },
     roles: await fixture("roles"),
   };
   const invocations: Invocation[] = [];
@@ -49,6 +51,8 @@ async function fakeApplication(): Promise<{
       project: record("project", values.project),
       tasks: record("tasks", values.tasks),
       resourcesDownload: record("resourcesDownload", values.resourcesDownload),
+      taskSheetDownload: record("taskSheetDownload", values.taskSheetDownload),
+      taskResourcesDownload: record("taskResourcesDownload", values.taskResourcesDownload),
       roles: record("roles", values.roles),
     },
     invocations,
@@ -104,6 +108,8 @@ export async function test_command_flags_reach_the_application_seam(): Promise<v
   await executeCli(["tasks", "7", "--status", "discuss", "--status", "rediscuss", "--json"], { app, version: "0.2.0" });
   await executeCli(["resources", "download", "7", "--output", "resources.zip", "--json"], { app, version: "0.2.0" });
   await executeCli(["resources", "download", "8", "--json"], { app, version: "0.2.0" });
+  await executeCli(["task", "sheet", "7", "1.1", "--output", "sheet.pdf", "--json"], { app, version: "0.2.0" });
+  await executeCli(["task", "resources", "7", "1.1", "--json"], { app, version: "0.2.0" });
   await executeCli(["roles", "--all", "--json"], { app, version: "0.2.0" });
 
   assert.deepEqual(invocations, [
@@ -112,6 +118,8 @@ export async function test_command_flags_reach_the_application_seam(): Promise<v
     { command: "tasks", arguments: [7, { statuses: ["discuss", "rediscuss"] }] },
     { command: "resourcesDownload", arguments: [7, { output: "resources.zip" }] },
     { command: "resourcesDownload", arguments: [8, {}] },
+    { command: "taskSheetDownload", arguments: [7, "1.1", { output: "sheet.pdf" }] },
+    { command: "taskResourcesDownload", arguments: [7, "1.1", {}] },
     { command: "roles", arguments: [{ showAll: true }] },
   ]);
 }
@@ -125,6 +133,8 @@ export async function test_yaml_is_a_usage_error_for_every_command(): Promise<vo
     ["project", "7", "--yaml"],
     ["tasks", "7", "--yaml"],
     ["resources", "download", "7", "--yaml"],
+    ["task", "sheet", "7", "1.1", "--yaml"],
+    ["task", "resources", "7", "1.1", "--yaml"],
     ["roles", "--yaml"],
   ];
 
@@ -167,6 +177,8 @@ export async function test_secret_sentinel_is_removed_from_results_and_diagnosti
     project: async (projectId) => expose(app.project(projectId)),
     tasks: async (projectId, options) => expose(app.tasks(projectId, options)),
     resourcesDownload: async (projectId, options) => expose(app.resourcesDownload(projectId, options)),
+    taskSheetDownload: async (projectId, task, options) => expose(app.taskSheetDownload(projectId, task, options)),
+    taskResourcesDownload: async (projectId, task, options) => expose(app.taskResourcesDownload(projectId, task, options)),
     roles: async (options) => expose(app.roles(options)),
   };
   const commands = [
@@ -177,6 +189,8 @@ export async function test_secret_sentinel_is_removed_from_results_and_diagnosti
     ["project", "7"],
     ["tasks", "7"],
     ["resources", "download", "7"],
+    ["task", "sheet", "7", "1.1"],
+    ["task", "resources", "7", "1.1"],
     ["roles"],
   ];
   for (const command of commands) {
@@ -234,6 +248,8 @@ export async function test_command_help_does_not_resolve_the_application(): Prom
     { argv: ["project", "--help"], usage: "ontrack project <project_id>", option: "not list positions" },
     { argv: ["tasks", "--help"], usage: "ontrack tasks <project_id>", option: "--status" },
     { argv: ["resources", "download", "--help"], usage: "ontrack resources download <project_id>", option: "--output" },
+    { argv: ["task", "sheet", "--help"], usage: "ontrack task sheet <project_id> <task>", option: "--output" },
+    { argv: ["task", "resources", "--help"], usage: "ontrack task resources <project_id> <task>", option: "--output" },
     { argv: ["roles", "--help"], usage: "ontrack roles", option: "--all" },
   ];
   for (const { argv, usage, option } of cases) {
@@ -269,6 +285,8 @@ export async function test_default_output_uses_command_aware_tables(): Promise<v
     { argv: ["roles"], headers: /Unit\s+Name\s+Role\s+User/u },
     { argv: ["project", "7"], headers: /Field\s+Value[\s\S]*Project ID\s+7[\s\S]*Tasks[\s\S]*No tasks found/u },
     { argv: ["resources", "download", "7"], headers: /Project\s+Unit\s+Archive\s+Size/u },
+    { argv: ["task", "sheet", "7", "1.1"], headers: /Project\s+Unit\s+Task\s+File\s+Size/u },
+    { argv: ["task", "resources", "7", "1.1"], headers: /Project\s+Unit\s+Task\s+File\s+Size/u },
   ];
   for (const { argv, headers } of cases) {
     const { app } = await fakeApplication();
@@ -328,6 +346,21 @@ export async function test_resource_download_rejects_invalid_arguments_before_ap
     ["resources", "download", "not-an-id", "--json"],
     ["resources", "download", "7", "--output", "", "--json"],
     ["resources", "download", "7", "extra", "--json"],
+  ]) {
+    const result = await executeCli(argv, { app, version: "0.2.0" });
+    assert.equal(result.exitCode, 2, argv.join(" "));
+    assert.equal(result.stdout, "", argv.join(" "));
+  }
+  assert.deepEqual(invocations, []);
+}
+
+export async function test_task_downloads_reject_invalid_arguments_before_application_work(): Promise<void> {
+  const { app, invocations } = await fakeApplication();
+  for (const argv of [
+    ["task", "sheet", "7"],
+    ["task", "sheet", "7", "", "--json"],
+    ["task", "resources", "bad-id", "1.1", "--json"],
+    ["task", "resources", "7", "1.1", "--output", "", "--json"],
   ]) {
     const result = await executeCli(argv, { app, version: "0.2.0" });
     assert.equal(result.exitCode, 2, argv.join(" "));
