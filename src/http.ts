@@ -243,6 +243,9 @@ export class HttpClient {
       if (response.status === 401 || response.status === 419) {
         throw new CliError("auth", "OnTrack rejected the authenticated session", response.status);
       }
+      if (response.status === 404) {
+        throw new CliError("not_found", "The requested OnTrack entity does not exist", response.status);
+      }
       if (!response.ok) {
         const detail = upstreamErrorDetail(response.bytes);
         throw new CliError("upstream_api", `OnTrack returned HTTP ${response.status}${detail ? `: ${detail}` : ""}`, response.status);

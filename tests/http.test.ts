@@ -330,6 +330,19 @@ export async function test_http_401_is_an_auth_error(): Promise<void> {
   );
 }
 
+export async function test_http_404_is_a_not_found_error(): Promise<void> {
+  const client = new HttpClient({
+    baseUrl: "https://ontrack.example.edu",
+    credentials: { username: "student", accessToken: "valid" },
+    fetch: async () => Response.json({ error: "Missing" }, { status: 404 }),
+  });
+
+  await assert.rejects(
+    client.request("api/projects/999"),
+    (error) => error instanceof CliError && error.category === "not_found" && error.statusCode === 404,
+  );
+}
+
 export async function test_project_403_explains_how_to_find_an_accessible_id(): Promise<void> {
   const client = new OnTrackClient(new HttpClient({
     baseUrl: "https://ontrack.example.edu",

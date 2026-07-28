@@ -20,7 +20,7 @@ function selectedTask(snapshot: ProjectSnapshot, reference: string): { readonly 
   const row = assignedTask(snapshot, reference);
   const definition = row && snapshot.unit.task_definitions.find((candidate) => candidate.id === row.task_definition_id);
   if (!row || !definition) {
-    throw new CliError("usage", `Task ${reference} is not in project ${snapshot.project.id}. Use the abbreviation shown by \`ontrack tasks ${snapshot.project.id}\`.`);
+    throw new CliError("not_found", `Task ${reference} is not in project ${snapshot.project.id}. Use the abbreviation shown by \`ontrack tasks ${snapshot.project.id}\`.`);
   }
   return { row, definition };
 }
@@ -48,7 +48,7 @@ function selectedDownloadTask(
       ? unitDefinition
       : undefined;
   if (!definition) {
-    throw new CliError("usage", `Task ${reference} is not available in project ${snapshot.project.id}. Use an abbreviation shown by \`ontrack project ${snapshot.project.id}\`.`);
+    throw new CliError("not_found", `Task ${reference} is not available in project ${snapshot.project.id}. Use an abbreviation shown by \`ontrack units show ${snapshot.project.id}\`.`);
   }
   return { abbreviation: definition.abbreviation, definition };
 }
@@ -79,7 +79,7 @@ export class OnTrackApplication implements CliApplication {
     const all = (await this.client.getProjects(true)).filter((project) => project.unit.code.toLowerCase() === unitCode);
     if (all.length === 1) return all[0]!.id;
     if (all.length > 1) throw this.ambiguousProject(reference, all.map((project) => project.id));
-    throw new CliError("usage", `No project found for unit ${reference}. Use \`ontrack projects --include-inactive\` to find a project ID.`);
+    throw new CliError("not_found", `No project found for unit ${reference}. Use \`ontrack units list --include-inactive\` to find a project ID.`);
   }
 
   async user(): Promise<unknown> {

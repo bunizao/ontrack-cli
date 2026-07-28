@@ -147,6 +147,10 @@ export async function test_errors_use_the_shared_vocabulary_exit_codes_and_one_r
     error: { code: "auth", message: "Session expired." },
     exit_code: 3,
   });
+  const missingApp: CliApplication = { ...app, user: async () => { throw new CliError("not_found", "User not found."); } };
+  const missing = await executeCli(["user", "--json"], { app: missingApp, version: "1.0.0" });
+  assert.equal(missing.exitCode, 4);
+  assert.equal(JSON.parse(missing.stderr).error.code, "not_found");
   const usage = await executeCli(["task"], { app, version: "1.0.0" });
   assert.equal(usage.exitCode, 2);
   assert.equal(usage.stdout, "");
