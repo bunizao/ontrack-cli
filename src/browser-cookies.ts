@@ -32,6 +32,7 @@ export interface BrowserCookieOptions {
   readonly fileExists?: (path: string) => boolean;
   readonly getCookies?: CookieExtractor;
   readonly homeDir?: string;
+  readonly keychainPromptTimeoutMs?: number;
   readonly onWarning?: (warning: string) => void;
   readonly platform?: NodeJS.Platform;
 }
@@ -160,6 +161,7 @@ function cookieRequest(
     edgeProfile: browser === "edge" ? profile : ALL_PROFILES,
     firefoxProfile: ALL_PROFILES,
     mode: "merge",
+    ...(options.keychainPromptTimeoutMs === undefined ? {} : { timeoutMs: options.keychainPromptTimeoutMs }),
   };
 }
 

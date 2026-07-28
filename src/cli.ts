@@ -22,6 +22,8 @@ import { createClock } from "./time.js";
 import type { TaskSubmissionPlan } from "./submission.js";
 import { VERSION } from "./version.js";
 
+const INTERACTIVE_KEYCHAIN_PROMPT_TIMEOUT_MS = 120_000;
+
 async function promptForBrowserLogin(message: string, signal: AbortSignal): Promise<void> {
   if (!process.stdin.isTTY) throw new CliError("auth", "Interactive browser login requires a terminal.");
   const prompt = createInterface({ input: process.stdin, output: process.stderr });
@@ -132,7 +134,10 @@ async function authLogin(signal: AbortSignal, env: Environment, platform: NodeJS
     baseUrl,
     sessionFile: paths.sessionFile,
     signal,
-    browserCookieProvider: () => authenticationCookieCandidates(baseUrl, { onWarning: showWarning }),
+    browserCookieProvider: () => authenticationCookieCandidates(baseUrl, {
+      keychainPromptTimeoutMs: INTERACTIVE_KEYCHAIN_PROMPT_TIMEOUT_MS,
+      onWarning: showWarning,
+    }),
     onLoginUrl: (url) => { process.stderr.write(`Sign-in URL: ${url}\n`); },
     onBrowserWait: (timeoutMs) => {
       process.stderr.write(`Waiting up to ${Math.ceil(timeoutMs / 1_000)} seconds for a reusable browser session (Remember me must be enabled). Press Ctrl-C to cancel.\n`);

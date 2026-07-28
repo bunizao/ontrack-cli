@@ -78,6 +78,22 @@ export async function test_browser_cookie_discovery_reads_supported_browsers_and
   }
 }
 
+export async function test_interactive_cookie_discovery_forwards_the_keychain_prompt_timeout(): Promise<void> {
+  const received: GetCookiesOptions[] = [];
+  await authenticationCookieCandidates("https://ontrack.example.edu", {
+    platform: "darwin",
+    storageStateDirectory: "/missing",
+    keychainPromptTimeoutMs: 120_000,
+    getCookies: async (options) => {
+      received.push(options);
+      return { cookies: [], warnings: [] };
+    },
+  });
+
+  assert.equal(received.length, 4);
+  assert.ok(received.every((options) => options.timeoutMs === 120_000));
+}
+
 export async function test_macos_chromium_profiles_are_probed_without_reading_the_protected_root(): Promise<void> {
   const received: GetCookiesOptions[] = [];
   await browserCookieCandidates("https://ontrack.example.edu", {
