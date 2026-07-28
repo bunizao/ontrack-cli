@@ -4,7 +4,9 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, w
 import { createServer, type Server } from "node:http";
 import { once } from "node:events";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+
+import { textPdf } from "./pdf-fixture.js";
 
 interface ProcessResult {
   readonly code: number | null;
@@ -13,9 +15,10 @@ interface ProcessResult {
   readonly stderr: string;
 }
 
-async function run(executable: string, args: readonly string[], env: NodeJS.ProcessEnv = {}): Promise<ProcessResult> {
+async function run(executable: string, args: readonly string[], env: NodeJS.ProcessEnv = {}, cwd?: string): Promise<ProcessResult> {
   const child = spawn(executable, [...args], {
     env: { ...process.env, ...env },
+    ...(cwd ? { cwd } : {}),
     stdio: ["ignore", "pipe", "pipe"],
   });
   let stdout = "";
@@ -24,6 +27,59 @@ async function run(executable: string, args: readonly string[], env: NodeJS.Proc
   child.stderr.setEncoding("utf8").on("data", (chunk: string) => { stderr += chunk; });
   const [code, signal] = await once(child, "exit") as [number | null, NodeJS.Signals | null];
   return { code, signal, stdout, stderr };
+}
+
+export async function test_process_reads_a_task_sheet_as_markdown_in_node_and_bun(): Promise<void> {
+  const directory = mkdtempSync(join(tmpdir(), "ontrack-task-read-"));
+  const pdf = textPdf(["Hello agent", "Second line"]);
+  const server = createServer((request, response) => {
+    assert.equal(request.headers.username, "student");
+    assert.equal(request.headers["auth-token"], "process-secret");
+    if (request.url === "/api/projects/5183") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ id: 5183, unit: { id: 15, code: "FIT1061", name: "AI" }, tasks: [] }));
+      return;
+    }
+    if (request.url === "/api/units/15") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        id: 15,
+        code: "FIT1061",
+        name: "AI",
+        task_definitions: [{ id: 27, abbreviation: "P1", name: "Search", has_task_sheet: true }],
+      }));
+      return;
+    }
+    assert.equal(request.url, "/api/units/15/task_definitions/27/task_pdf?as_attachment=true");
+    response.writeHead(200, {
+      "content-type": "application/pdf",
+      "content-disposition": "attachment; filename=FIT1061-P1.pdf",
+    });
+    response.end(Buffer.from(pdf));
+  });
+  const port = await listen(server);
+  const entrypoint = resolve("dist/cli.js");
+  try {
+    const outputs: string[] = [];
+    for (const executable of [process.execPath, "bun"]) {
+      const result = await run(executable, [entrypoint, "task", "read", "5183", "P1"], {
+        ONTRACK_BASE_URL: `http://127.0.0.1:${port}`,
+        ONTRACK_USERNAME: "student",
+        ONTRACK_AUTH_TOKEN: "process-secret",
+        ONTRACK_CONFIG: "",
+      }, directory);
+      assert.equal(result.code, 0, executable);
+      assert.equal(result.stderr, "", executable);
+      assert.equal(result.stdout, "# FIT1061 P1 Task Sheet\n\nHello agent Second line\n", executable);
+      outputs.push(result.stdout);
+    }
+    assert.equal(outputs[0], outputs[1]);
+    assert.deepEqual(readdirSync(directory), []);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+    server.close();
+    await once(server, "close");
+  }
 }
 
 async function listen(server: Server): Promise<number> {

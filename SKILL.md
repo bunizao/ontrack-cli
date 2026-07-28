@@ -14,8 +14,9 @@ Use `ontrack` for OnTrack inspection and requested file downloads.
 3. Resolve an unfamiliar project with `ontrack projects --include-inactive --json` before requesting project or task detail. Use the returned `id` field, not the project's list position.
 4. Run the narrowest command that answers the request. Prefer `--json` for automation.
 5. Run `ontrack chats <project-id>` before opening a task chat when unread state matters. Opening one task's history marks returned non-discussion comments as read.
-6. Download files only when the user requests a local artifact. Use `--output` when they name a destination; never remove an existing file without approval.
-7. Return the requested facts instead of pasting the full response unless the user asks for raw JSON.
+6. Use `ontrack task read` when an agent needs the contents of a task sheet. Download the PDF only when the user requests a local artifact.
+7. Use `--output` when the user names a destination; never remove an existing file without approval.
+8. Return the requested facts instead of pasting the full response unless the user asks for raw JSON.
 
 ## Commands
 
@@ -32,6 +33,7 @@ ontrack chats <project-id> --json
 ontrack chats <project-id> <task> --json
 ontrack task sheet <project-id> <task> --output <sheet.pdf> --json
 ontrack task resources <project-id> <task> --output <file> --json
+ontrack task read <project-id> <task>
 ontrack resources download <project-id> --output <archive.zip> --json
 ontrack roles --json
 ontrack roles --all --json
@@ -52,6 +54,7 @@ Use `ontrack project <project-id> --json` to discover downloadable task definiti
 ## Output
 
 - Ordinary CLI use prints tables by default; agents should prefer `--json` for reliable parsing.
+- `task read` is a content command: it prints Markdown directly so an agent can read or pipe it without parsing a table.
 - Keep `--json` output on stdout and diagnostics on stderr.
 - Preserve raw status values when reporting tasks. The API may add statuses that the CLI does not yet label.
 - Commands do not submit work. Task chat history has an upstream read-state side effect. Downloads create local files atomically and refuse to replace existing files.

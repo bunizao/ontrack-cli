@@ -12,6 +12,7 @@ export interface CliApplication {
   resourcesDownload(projectId: number, options: { readonly output?: string }): Promise<unknown>;
   taskSheetDownload(projectId: number, task: string, options: { readonly output?: string }): Promise<unknown>;
   taskResourcesDownload(projectId: number, task: string, options: { readonly output?: string }): Promise<unknown>;
+  taskRead(projectId: number, task: string): Promise<unknown>;
   chats(projectId: number, options: { readonly task?: string }): Promise<unknown>;
   roles(options: { readonly showAll: boolean }): Promise<unknown>;
 }
@@ -30,7 +31,7 @@ interface Dependencies {
   readonly onDiagnostic?: (message: string) => void;
 }
 
-type OutputView = "auth-check" | "auth-login" | "chats-history" | "chats-summary" | "download" | "project" | "projects" | "roles" | "tasks" | "user";
+type OutputView = "auth-check" | "auth-login" | "chats-history" | "chats-summary" | "download" | "markdown" | "project" | "projects" | "roles" | "tasks" | "user";
 
 interface InvocationResult {
   readonly value: unknown;
@@ -82,6 +83,7 @@ function rootHelp(): string {
     "  resources download <project_id> Download project resources",
     "  task sheet <project_id> <task> Download one task sheet",
     "  task resources <project_id> <task> Download one task's resources",
+    "  task read <project_id> <task> Print one task sheet as Markdown",
     "  chats <project_id> [task] Show unread chat counts or one task's history",
     "  roles                List teaching roles",
     "",
@@ -121,7 +123,7 @@ function helpFor(argv: readonly string[]): string | undefined {
     return "Usage: ontrack resources <command>\n\nCommands:\n  download <project_id> Download all task sheets and resources\n";
   }
   if (args.length === 1 && args[0] === "task") {
-    return "Usage: ontrack task <command>\n\nCommands:\n  sheet <project_id> <task>     Download one task sheet\n  resources <project_id> <task> Download one task's resources\n";
+    return "Usage: ontrack task <command>\n\nCommands:\n  sheet <project_id> <task>     Download one task sheet\n  resources <project_id> <task> Download one task's resources\n  read <project_id> <task>      Print one task sheet as Markdown\n";
   }
   if (args[0] === "user") return commandHelp("ontrack user", "Show the resolved signed-in user.", []);
   if (key === "auth check") return commandHelp("ontrack auth check", "Validate current credentials.", []);
@@ -156,6 +158,12 @@ function helpFor(argv: readonly string[]): string | undefined {
     "Download one task's linked file or resource ZIP using an abbreviation shown in `ontrack project`.",
     ["  --output <path>      Destination path; defaults to the server filename"],
     "A numeric task-definition ID is accepted as a fallback. Existing files are never replaced.",
+  );
+  if (key === "task read") return commandHelp(
+    "ontrack task read <project_id> <task>",
+    "Download a task sheet in memory and print built-in PDF-to-Markdown output.",
+    [],
+    "No PDF file or external pdftotext command is required.",
   );
   if (args[0] === "chats") return commandHelp(
     "ontrack chats <project_id> [task]",
@@ -269,6 +277,7 @@ function terminal(view: OutputView, value: unknown, emptyMessage?: string): stri
     return renderTable(rows, [["unit", "Unit"], ["name", "Name"], ["role", "Role"], ["user", "User"]]);
   }
   const data = record(value);
+  if (view === "markdown") return typeof data.markdown === "string" ? data.markdown : "";
   if (view === "project") {
     const project = nested(data, "project");
     const unit = nested(data, "unit");
@@ -391,6 +400,17 @@ async function invoke(argv: readonly string[], dependencies: Dependencies): Prom
         : await app.taskResourcesDownload(projectId(parsed.positionals[0]), task, options),
       json: parsed.values.json ?? false,
       view: "download",
+    };
+  }
+  if (command === "task" && rest[0] === "read") {
+    const parsed = parseArgs({ args: rest.slice(1), options: common, allowPositionals: true, strict: true });
+    if (parsed.positionals.length !== 2) throw new CliError("usage", "task read requires a project_id and task abbreviation");
+    const task = parsed.positionals[1]?.trim();
+    if (!task) throw new CliError("usage", "task abbreviation must not be empty");
+    return {
+      value: await app.taskRead(projectId(parsed.positionals[0]), task),
+      json: parsed.values.json ?? false,
+      view: "markdown",
     };
   }
   if (command === "chats") {

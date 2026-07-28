@@ -9,6 +9,7 @@ import { CliError } from "../src/errors.js";
 import { HttpClient, type HttpRequestOptions } from "../src/http.js";
 import { OnTrackClient } from "../src/ontrack.js";
 import { createClock } from "../src/time.js";
+import { textPdf } from "./pdf-fixture.js";
 
 function session(username: string): AuthenticatedSession {
   return {
@@ -142,6 +143,40 @@ export async function test_application_downloads_from_unit_definitions_when_proj
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+}
+
+export async function test_application_reads_a_task_sheet_as_markdown_without_writing_a_file(): Promise<void> {
+  const pdf = textPdf(["Hello agent", "Second line"]);
+  const http = new HttpClient({
+    baseUrl: "https://school.example.edu",
+    credentials: { username: "student", accessToken: "secret" },
+    fetch: async (input) => {
+      const url = new URL(input instanceof Request ? input.url : input);
+      if (url.pathname === "/api/projects/5183") return Response.json({
+        id: 5183,
+        unit: { id: 15, code: "FIT1061", name: "AI" },
+        tasks: [],
+      });
+      if (url.pathname === "/api/units/15") return Response.json({
+        id: 15,
+        code: "FIT1061",
+        name: "AI",
+        task_definitions: [{ id: 27, abbreviation: "P1", name: "Search", has_task_sheet: true }],
+      });
+      return new Response(Buffer.from(pdf), {
+        headers: { "Content-Type": "application/pdf", "Content-Disposition": "attachment; filename=FIT1061-P1.pdf" },
+      });
+    },
+  });
+  const app = new OnTrackApplication({ current: session("student") }, new OnTrackClient(http), createClock("2026-07-26T12:00:00Z"));
+  assert.deepEqual(await app.taskRead(5183, "P1"), {
+    project_id: 5183,
+    unit_id: 15,
+    task_definition_id: 27,
+    task: "P1",
+    pages: 1,
+    markdown: "# FIT1061 P1 Task Sheet\n\nHello agent Second line\n",
+  });
 }
 
 export async function test_application_refuses_a_missing_task_resource_before_download(): Promise<void> {

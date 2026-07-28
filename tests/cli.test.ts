@@ -34,6 +34,7 @@ async function fakeApplication(): Promise<{
     resourcesDownload: { project_id: 7, unit_id: 9, archive_path: "/tmp/resources.zip", bytes_written: 4 },
     taskSheetDownload: { project_id: 7, unit_id: 9, task_definition_id: 12, task: "1.1", file_path: "/tmp/FIT9999-1.1.pdf", bytes_written: 6, content_type: "application/pdf" },
     taskResourcesDownload: { project_id: 7, unit_id: 9, task_definition_id: 12, task: "1.1", file_path: "/tmp/1.1-resources.zip", bytes_written: 4, content_type: "application/zip" },
+    taskRead: { project_id: 7, unit_id: 9, task_definition_id: 12, task: "1.1", pages: 1, markdown: "# FIT9999 1.1 Task Sheet\n\nRead me.\n" },
     chatsSummary: [{ task_definition_id: 12, task: "1.1", name: "Example task", status: "rediscuss", unread_comments: 2 }],
     chatsHistory: await fixture("chats"),
     roles: await fixture("roles"),
@@ -55,6 +56,7 @@ async function fakeApplication(): Promise<{
       resourcesDownload: record("resourcesDownload", values.resourcesDownload),
       taskSheetDownload: record("taskSheetDownload", values.taskSheetDownload),
       taskResourcesDownload: record("taskResourcesDownload", values.taskResourcesDownload),
+      taskRead: record("taskRead", values.taskRead),
       chats: async (projectId, options) => record("chats", options.task ? values.chatsHistory : values.chatsSummary)(projectId, options),
       roles: record("roles", values.roles),
     },
@@ -113,6 +115,7 @@ export async function test_command_flags_reach_the_application_seam(): Promise<v
   await executeCli(["resources", "download", "8", "--json"], { app, version: "0.2.0" });
   await executeCli(["task", "sheet", "7", "1.1", "--output", "sheet.pdf", "--json"], { app, version: "0.2.0" });
   await executeCli(["task", "resources", "7", "1.1", "--json"], { app, version: "0.2.0" });
+  await executeCli(["task", "read", "7", "1.1"], { app, version: "0.2.0" });
   await executeCli(["chats", "7", "--json"], { app, version: "0.2.0" });
   await executeCli(["chats", "7", "1.1", "--json"], { app, version: "0.2.0" });
   await executeCli(["roles", "--all", "--json"], { app, version: "0.2.0" });
@@ -125,6 +128,7 @@ export async function test_command_flags_reach_the_application_seam(): Promise<v
     { command: "resourcesDownload", arguments: [8, {}] },
     { command: "taskSheetDownload", arguments: [7, "1.1", { output: "sheet.pdf" }] },
     { command: "taskResourcesDownload", arguments: [7, "1.1", {}] },
+    { command: "taskRead", arguments: [7, "1.1"] },
     { command: "chats", arguments: [7, {}] },
     { command: "chats", arguments: [7, { task: "1.1" }] },
     { command: "roles", arguments: [{ showAll: true }] },
@@ -142,6 +146,7 @@ export async function test_yaml_is_a_usage_error_for_every_command(): Promise<vo
     ["resources", "download", "7", "--yaml"],
     ["task", "sheet", "7", "1.1", "--yaml"],
     ["task", "resources", "7", "1.1", "--yaml"],
+    ["task", "read", "7", "1.1", "--yaml"],
     ["chats", "7", "--yaml"],
     ["roles", "--yaml"],
   ];
@@ -187,6 +192,7 @@ export async function test_secret_sentinel_is_removed_from_results_and_diagnosti
     resourcesDownload: async (projectId, options) => expose(app.resourcesDownload(projectId, options)),
     taskSheetDownload: async (projectId, task, options) => expose(app.taskSheetDownload(projectId, task, options)),
     taskResourcesDownload: async (projectId, task, options) => expose(app.taskResourcesDownload(projectId, task, options)),
+    taskRead: async (projectId, task) => expose(app.taskRead(projectId, task)),
     chats: async (projectId, options) => expose(app.chats(projectId, options)),
     roles: async (options) => expose(app.roles(options)),
   };
@@ -200,6 +206,7 @@ export async function test_secret_sentinel_is_removed_from_results_and_diagnosti
     ["resources", "download", "7"],
     ["task", "sheet", "7", "1.1"],
     ["task", "resources", "7", "1.1"],
+    ["task", "read", "7", "1.1"],
     ["chats", "7"],
     ["roles"],
   ];
@@ -260,6 +267,7 @@ export async function test_command_help_does_not_resolve_the_application(): Prom
     { argv: ["resources", "download", "--help"], usage: "ontrack resources download <project_id>", option: "--output" },
     { argv: ["task", "sheet", "--help"], usage: "ontrack task sheet <project_id> <task>", option: "--output" },
     { argv: ["task", "resources", "--help"], usage: "ontrack task resources <project_id> <task>", option: "--output" },
+    { argv: ["task", "read", "--help"], usage: "ontrack task read <project_id> <task>", option: "Markdown" },
     { argv: ["chats", "--help"], usage: "ontrack chats <project_id> [task]", option: "marks" },
     { argv: ["roles", "--help"], usage: "ontrack roles", option: "--all" },
   ];
@@ -326,6 +334,16 @@ export async function test_project_table_lists_downloadable_unit_tasks_when_no_p
   const result = await executeCli(["project", "7"], { app: projectApp, version: "0.2.0" });
   assert.match(result.stdout, /No project tasks found/u);
   assert.match(result.stdout, /Available unit tasks[\s\S]*Task\s+Name[\s\S]*P1\s+Search task/u);
+}
+
+export async function test_task_read_prints_markdown_directly_for_agents(): Promise<void> {
+  const { app } = await fakeApplication();
+  const result = await executeCli(["task", "read", "7", "1.1"], { app, version: "0.2.0" });
+  assert.deepEqual(result, {
+    exitCode: 0,
+    stdout: "# FIT9999 1.1 Task Sheet\n\nRead me.\n",
+    stderr: "",
+  });
 }
 
 export async function test_chat_history_is_a_table_with_an_explicit_read_side_effect_note(): Promise<void> {
@@ -449,6 +467,9 @@ export async function test_task_downloads_reject_invalid_arguments_before_applic
     ["task", "sheet", "7", "", "--json"],
     ["task", "resources", "bad-id", "1.1", "--json"],
     ["task", "resources", "7", "1.1", "--output", "", "--json"],
+    ["task", "read", "7"],
+    ["task", "read", "7", ""],
+    ["task", "read", "7", "1.1", "extra"],
   ]) {
     const result = await executeCli(argv, { app, version: "0.2.0" });
     assert.equal(result.exitCode, 2, argv.join(" "));

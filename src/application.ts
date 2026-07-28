@@ -8,6 +8,7 @@ import { CliError } from "./errors.js";
 import type { ProjectSnapshot, TaskRow } from "./project-snapshot.js";
 import type { TaskDefinition } from "./types.js";
 import type { Clock } from "./time.js";
+import { pdfToMarkdown } from "./pdf.js";
 
 export interface SessionState {
   current: AuthenticatedSession;
@@ -205,6 +206,28 @@ export class OnTrackApplication implements CliApplication {
       file_path: filePath,
       bytes_written: download.bytes.length,
       content_type: download.contentType,
+    };
+  }
+
+  async taskRead(projectId: number, task: string): Promise<unknown> {
+    const snapshot = await this.snapshot(projectId);
+    const selected = selectedDownloadTask(snapshot, task);
+    if (selected.definition.has_task_sheet === false) {
+      throw new CliError("upstream_api", `Task ${selected.abbreviation} has no task sheet.`);
+    }
+    const download = await this.client.downloadTaskSheet(snapshot.unit.id, selected.definition.id);
+    if (placeholderFile(download.filename)) throw new CliError("upstream_api", `Task ${selected.abbreviation} has no task sheet.`);
+    if (download.contentType !== "application/pdf" || !isPdf(download.bytes)) {
+      throw new CliError("upstream_contract", "OnTrack returned an invalid task sheet PDF");
+    }
+    const document = await pdfToMarkdown(download.bytes, `${snapshot.unit.code} ${selected.abbreviation} Task Sheet`);
+    return {
+      project_id: projectId,
+      unit_id: snapshot.unit.id,
+      task_definition_id: selected.definition.id,
+      task: selected.abbreviation,
+      pages: document.pages,
+      markdown: document.markdown,
     };
   }
 

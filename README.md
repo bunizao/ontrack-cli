@@ -13,6 +13,7 @@ Inspect projects, tasks, grades, chats, and teaching roles from a terminal or sc
 
 - Read projects, task schedules, grades, and teaching roles.
 - Download one task sheet, one task's resources, or the unit-wide resource archive.
+- Convert a task-sheet PDF to Markdown in memory for agents and shell pipelines.
 - Review unread chat counts and task comment history.
 - Sign in through your existing browser session.
 - Show readable tables by default and stable JSON with `--json`.
@@ -74,6 +75,7 @@ Browser security rules still apply. On macOS, grant Full Disk Access to the appl
 | `ontrack resources download <project_id>` | Download the project's unit-wide resource ZIP. |
 | `ontrack task sheet <project_id> <task>` | Download one task sheet. |
 | `ontrack task resources <project_id> <task>` | Download one task's linked file or resource ZIP. |
+| `ontrack task read <project_id> <task>` | Print a task sheet as Markdown without creating a PDF file. |
 | `ontrack chats <project_id>` | List tasks and unread comment counts without opening chat streams. |
 | `ontrack chats <project_id> <task>` | Show one task's chronological comment history. |
 | `ontrack roles` | List teaching and administrative roles. |
@@ -87,6 +89,7 @@ ontrack chats 12345 --json
 ontrack chats 12345 1.1 --json
 ontrack task sheet 12345 1.1 --output FIT1061-1.1.pdf --json
 ontrack task resources 12345 1.1 --output 1.1-resources.zip --json
+ontrack task read 12345 1.1 > FIT1061-1.1.md
 ontrack resources download 5183 --output FIT1061-resources.zip --json
 ontrack roles --all --json
 ```
@@ -94,6 +97,8 @@ ontrack roles --all --json
 Use the `id` field from `ontrack projects --include-inactive`; project IDs are not list positions.
 
 The task selector accepts an abbreviation shown by `ontrack project`; a task-definition ID is also accepted. When OnTrack has not generated project task instances, the project table lists the authorized unit definitions that remain available for download. Server filenames are used when possible. Existing files are never replaced, downloads are written atomically, and large ranged responses are assembled before the file is committed.
+
+`task read` downloads the task sheet into memory and converts it with the bundled PDF parser. The Markdown keeps inferred headings, lists, code blocks, links, and page-break markers where the source exposes enough layout information. It requires no `pdftotext` executable and writes no local file unless stdout is redirected. Image-only PDFs require OCR and return an explicit error.
 
 `resources download` retrieves the complete unit archive exposed by OnTrack. It is not filtered to the student's current task rows. The archive does not include general unit website content.
 

@@ -25,6 +25,7 @@ Each boundary has one job:
 | OnTrack API | `ontrack.ts`, `readers.ts` | Call API routes and validate unknown response payloads. |
 | Domain | `project-snapshot.ts`, `time.ts`, `status.ts`, `grades.ts` | Build task schedules and interpret statuses and grades. |
 | Output | `serialize.ts`, `render.ts` | Produce stable JSON and readable terminal tables. |
+| PDF conversion | `pdf.ts` | Convert validated task sheets to bounded, terminal-safe Markdown. |
 
 ## Authentication boundary
 
@@ -47,6 +48,8 @@ The CLI distinguishes calendar dates from timestamps. Task schedules combine uni
 Terminal commands render command-specific tables by default. Successful `--json` commands write one JSON value to stdout. Prompts and diagnostics stay on stderr, including the warning emitted before reading task chat history. Failures leave stdout empty. Usage errors exit with code `2`, cancellation exits with `130`, and other failures exit with `1`.
 
 Resource downloads resolve the unit through the selected project. The aggregate route returns a unit-wide ZIP; individual routes return a PDF, ZIP, or linked resource. Task selection normally follows generated project tasks. If the API returns no project tasks, selection falls back to definitions from that project's authorized unit, which remain visible in the project output. The transport follows validated HTTP 206 ranges, including credential refresh between chunks. Responses are limited to 256 MiB. ZIP and PDF signatures are validated where applicable, upstream placeholder files are rejected, and filenames are reduced to safe basenames. An atomic no-overwrite commit prevents replacing an existing destination.
+
+Task-sheet reading reuses the same authenticated, range-aware PDF download without creating a temporary file. The converter infers Markdown structure from PDF text coordinates and fonts, strips terminal controls, limits documents to 200 pages and Markdown to 4 MiB, and reports image-only documents as unsupported because the CLI does not bundle OCR.
 
 Chat summaries use unread counts already present in the project snapshot and do not fetch comment streams. History requests are restricted to one selected task to avoid an implicit N+1 request and unexpected read-state changes. The upstream history route returns group-task comments chronologically and marks non-discussion comments as read; the CLI reports that side effect on stderr. Terminal rendering omits email addresses and strips control sequences while JSON preserves the validated API payload.
 
