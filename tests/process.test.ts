@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { once } from "node:events";
 import { tmpdir } from "node:os";
@@ -199,6 +199,108 @@ export async function test_process_project_403_explains_how_to_find_an_accessibl
     });
     assert.doesNotMatch(`${result.stdout}${result.stderr}`, /process-secret|auth login/);
   } finally {
+    server.close();
+    await once(server, "close");
+  }
+}
+
+export async function test_process_downloads_project_resources_as_an_atomic_zip(): Promise<void> {
+  const directory = mkdtempSync(join(tmpdir(), "ontrack-resources-"));
+  const output = join(directory, "FIT1061-resources.zip");
+  const urls: string[] = [];
+  const server = createServer((request, response) => {
+    urls.push(request.url ?? "");
+    assert.equal(request.headers.username, "student");
+    assert.equal(request.headers["auth-token"], "process-secret");
+    if (request.url === "/api/projects/5183") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        id: 5183,
+        unit: { id: 15, code: "FIT1061", name: "Introduction to artificial intelligence" },
+        tasks: [],
+      }));
+      return;
+    }
+    assert.equal(request.url, "/api/units/15/all_resources");
+    response.writeHead(200, {
+      "content-type": "application/octet-stream",
+      "content-disposition": 'attachment; filename="FIT1061-resources.zip"',
+    });
+    response.end(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
+  });
+  const port = await listen(server);
+  try {
+    const result = await run(process.execPath, [
+      "dist/cli.js",
+      "resources",
+      "download",
+      "5183",
+      "--output",
+      output,
+      "--json",
+    ], {
+      ONTRACK_BASE_URL: `http://127.0.0.1:${port}`,
+      ONTRACK_USERNAME: "student",
+      ONTRACK_AUTH_TOKEN: "process-secret",
+      ONTRACK_CONFIG: "",
+    });
+    assert.deepEqual(urls, ["/api/projects/5183", "/api/units/15/all_resources"]);
+    assert.deepEqual([...readFileSync(output)], [0x50, 0x4b, 0x03, 0x04]);
+    assert.deepEqual(readdirSync(directory), ["FIT1061-resources.zip"]);
+    assert.deepEqual(result, {
+      code: 0,
+      signal: null,
+      stdout: `${JSON.stringify({
+        project_id: 5183,
+        unit_id: 15,
+        archive_path: output,
+        bytes_written: 4,
+      }, null, 2)}\n`,
+      stderr: "",
+    });
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+    server.close();
+    await once(server, "close");
+  }
+}
+
+export async function test_process_resource_download_preserves_an_existing_file(): Promise<void> {
+  const directory = mkdtempSync(join(tmpdir(), "ontrack-resources-existing-"));
+  const output = join(directory, "resources.zip");
+  writeFileSync(output, "existing");
+  const server = createServer((request, response) => {
+    if (request.url === "/api/projects/5183") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ id: 5183, unit: { id: 15, code: "FIT1061", name: "AI" }, tasks: [] }));
+      return;
+    }
+    response.writeHead(200, { "content-type": "application/octet-stream" });
+    response.end(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
+  });
+  const port = await listen(server);
+  try {
+    const result = await run(process.execPath, [
+      "dist/cli.js",
+      "resources",
+      "download",
+      "5183",
+      "--output",
+      output,
+      "--json",
+    ], {
+      ONTRACK_BASE_URL: `http://127.0.0.1:${port}`,
+      ONTRACK_USERNAME: "student",
+      ONTRACK_AUTH_TOKEN: "process-secret",
+      ONTRACK_CONFIG: "",
+    });
+    assert.equal(result.code, 2);
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, /Output file already exists/u);
+    assert.equal(readFileSync(output, "utf8"), "existing");
+    assert.deepEqual(new Set(readdirSync(directory)), new Set(["resources.zip"]));
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
     server.close();
     await once(server, "close");
   }

@@ -19,7 +19,7 @@ Each boundary has one job:
 | Area | Modules | Responsibility |
 | --- | --- | --- |
 | CLI | `cli.ts`, `cli-app.ts` | Parse commands, select output mode, and map failures to exit codes. |
-| Application | `application.ts` | Coordinate authenticated reads and command use cases. |
+| Application | `application.ts`, `resources.ts` | Coordinate authenticated reads, downloads, and atomic local file writes. |
 | Authentication | `auth.ts`, `browser-cookies.ts`, `config.ts` | Resolve credentials, exchange application cookies, and maintain the local access-token cache. |
 | Transport | `http.ts` | Apply timeouts, cancellation, authentication headers, and the safe retry policy. |
 | OnTrack API | `ontrack.ts`, `readers.ts` | Call API routes and validate unknown response payloads. |
@@ -45,6 +45,8 @@ OnTrack API readers receive upstream responses as `unknown` and validate them be
 The CLI distinguishes calendar dates from timestamps. Task schedules combine unit defaults, target-grade dates, project overrides, extensions, and special consideration without converting civil dates into artificial instants.
 
 Successful non-interactive `--json` commands write one JSON value to stdout and leave stderr empty. Interactive authentication may write prompts to stderr while keeping stdout machine-readable. Failures leave stdout empty. Usage errors exit with code `2`, cancellation exits with `130`, and other failures exit with `1`.
+
+Resource downloads resolve the unit through the selected project, fetch the aggregate archive through the same authenticated transport, and validate the ZIP signature. The complete response is received before a sibling temporary file is created. A hard-link commit prevents overwriting an existing destination, and the temporary file is removed after success or failure.
 
 ## Verification
 

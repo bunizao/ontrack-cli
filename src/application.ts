@@ -3,6 +3,7 @@ import type { CliApplication } from "./cli-app.js";
 import type { OnTrackClient } from "./ontrack.js";
 import { buildProjectSnapshot } from "./project-snapshot.js";
 import { projectSummaryToJson, roleToJson, snapshotToJson, userToJson } from "./serialize.js";
+import { writeResourceArchive } from "./resources.js";
 import type { Clock } from "./time.js";
 
 export interface SessionState {
@@ -72,6 +73,20 @@ export class OnTrackApplication implements CliApplication {
 
   async roles(options: { readonly showAll: boolean }): Promise<unknown> {
     return (await this.client.getRoles(!options.showAll)).map(roleToJson);
+  }
+
+  async resourcesDownload(projectId: number, options: { readonly output?: string }): Promise<unknown> {
+    const archive = await this.client.downloadProjectResources(projectId);
+    const archivePath = await writeResourceArchive(
+      options.output ?? `ontrack-resources-${projectId}.zip`,
+      archive.bytes,
+    );
+    return {
+      project_id: archive.projectId,
+      unit_id: archive.unitId,
+      archive_path: archivePath,
+      bytes_written: archive.bytes.length,
+    };
   }
 
   private async snapshot(projectId: number) {

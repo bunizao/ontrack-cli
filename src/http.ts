@@ -25,7 +25,7 @@ export interface HttpRequestOptions {
 interface HttpResponse {
   readonly status: number;
   readonly ok: boolean;
-  readonly text: string;
+  readonly bytes: Uint8Array;
 }
 
 export class HttpClient {
@@ -48,6 +48,22 @@ export class HttpClient {
   }
 
   async request(path: string, options: HttpRequestOptions = {}): Promise<unknown> {
+    const response = await this.#response(path, options);
+    try {
+      return JSON.parse(new TextDecoder().decode(response.bytes)) as unknown;
+    } catch {
+      throw new CliError("upstream_contract", "OnTrack returned invalid JSON");
+    }
+  }
+
+  async download(path: string, options: HttpRequestOptions = {}): Promise<Uint8Array> {
+    const headers = new Headers(options.headers);
+    if (!headers.has("Accept")) headers.set("Accept", "application/octet-stream");
+    const response = await this.#response(path, { ...options, headers });
+    return response.bytes;
+  }
+
+  async #response(path: string, options: HttpRequestOptions): Promise<HttpResponse> {
     const url = new URL(path.replace(/^\//, ""), this.#baseUrl);
     for (const [key, value] of Object.entries(options.query ?? {})) {
       if (value !== undefined && value !== null) url.searchParams.set(key, String(value));
@@ -66,11 +82,7 @@ export class HttpClient {
         throw new CliError("auth", "OnTrack rejected the authenticated session", response.status);
       }
       if (!response.ok) throw new CliError("upstream_api", `OnTrack returned HTTP ${response.status}`, response.status);
-      try {
-        return JSON.parse(response.text) as unknown;
-      } catch {
-        throw new CliError("upstream_contract", "OnTrack returned invalid JSON");
-      }
+      return response;
     }
     throw new CliError("auth", "OnTrack rejected the refreshed session", 419);
   }
@@ -88,7 +100,7 @@ export class HttpClient {
 
   async #send(url: URL, method: string, options: HttpRequestOptions): Promise<HttpResponse> {
     const headers = new Headers(options.headers);
-    headers.set("Accept", "application/json");
+    if (!headers.has("Accept")) headers.set("Accept", "application/json");
     headers.set("Username", this.#credentials.username);
     headers.set("Auth-Token", this.#credentials.accessToken);
     const timeoutController = new AbortController();
@@ -101,7 +113,11 @@ export class HttpClient {
       const init: RequestInit = { method, headers, signal };
       if (options.body !== undefined) init.body = options.body;
       const response = await this.#fetch(url, init);
-      return { status: response.status, ok: response.ok, text: await response.text() };
+      return {
+        status: response.status,
+        ok: response.ok,
+        bytes: new Uint8Array(await response.arrayBuffer()),
+      };
     } catch (error) {
       if (externalSignal?.aborted) {
         throw new CliError("cancellation", "Request cancelled");

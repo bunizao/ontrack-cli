@@ -3,6 +3,19 @@ import { HttpClient } from "./http.js";
 import { readProject, readProjects, readRoles, readUnit } from "./readers.js";
 import type { Project, ProjectSummary, Unit, UnitRole } from "./types.js";
 
+export interface ProjectResourcesArchive {
+  readonly projectId: number;
+  readonly unitId: number;
+  readonly bytes: Uint8Array;
+}
+
+function isZip(bytes: Uint8Array): boolean {
+  if (bytes.length < 4 || bytes[0] !== 0x50 || bytes[1] !== 0x4b) return false;
+  return (bytes[2] === 0x03 && bytes[3] === 0x04)
+    || (bytes[2] === 0x05 && bytes[3] === 0x06)
+    || (bytes[2] === 0x07 && bytes[3] === 0x08);
+}
+
 export interface AuthMethod {
   readonly method: string;
   readonly redirect_to?: string | null;
@@ -34,6 +47,15 @@ export class OnTrackClient {
 
   async getUnit(id: number): Promise<Unit> {
     return readUnit(await this.http.request(`api/units/${id}`));
+  }
+
+  async downloadProjectResources(projectId: number): Promise<ProjectResourcesArchive> {
+    const project = await this.getProject(projectId);
+    const bytes = await this.http.download(`api/units/${project.unit.id}/all_resources`);
+    if (!isZip(bytes)) {
+      throw new CliError("upstream_contract", "OnTrack returned an invalid resource archive");
+    }
+    return { projectId, unitId: project.unit.id, bytes };
   }
 
   async getRoles(activeOnly = true): Promise<UnitRole[]> {

@@ -177,6 +177,16 @@ async function main() {
       if (request.url === "/api/projects?include_inactive=false") {
         response.writeHead(200, { "content-type": "application/json" });
         response.end("[]");
+        return;
+      }
+      if (request.url === "/api/projects/5183") {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ id: 5183, unit: { id: 15, code: "FIT1061", name: "AI" }, tasks: [] }));
+        return;
+      }
+      if (request.url === "/api/units/15/all_resources") {
+        response.writeHead(200, { "content-type": "application/octet-stream" });
+        response.end(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
       }
     });
     server.listen(0, "127.0.0.1");
@@ -190,10 +200,16 @@ async function main() {
       ONTRACK_USERNAME: "student",
       ONTRACK_AUTH_TOKEN: "access-token",
     };
-    for (const runtime of runtimes) {
+    for (const [index, runtime] of runtimes.entries()) {
       rmSync(join(temporary, "session.json"), { force: true });
       const projects = await run(runtime, [cli, "projects", "--json"], authenticatedEnv);
       assert(projects.code === 0 && projects.stdout === "[]\n" && projects.stderr === "", `${runtime} projects failed: ${projects.stderr}`);
+      const archive = join(temporary, `resources-${index}.zip`);
+      const resources = await run(runtime, [cli, "resources", "download", "5183", "--output", archive, "--json"], authenticatedEnv);
+      const receipt = JSON.parse(resources.stdout || "null");
+      assert(resources.code === 0 && resources.stderr === "", `${runtime} resource download failed: ${resources.stderr}`);
+      assert(receipt?.archive_path === archive && receipt?.bytes_written === 4, `${runtime} resource receipt is invalid`);
+      assert(readFileSync(archive).equals(Buffer.from([0x50, 0x4b, 0x03, 0x04])), `${runtime} resource archive is invalid`);
     }
     rmSync(join(temporary, "session.json"), { force: true });
     const shimProjects = await run(shim, ["projects", "--json"], authenticatedEnv);

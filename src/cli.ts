@@ -40,6 +40,7 @@ function lazyApplication(signal: AbortSignal, env: Environment, platform: NodeJS
     projects: async (options) => (await resolve()).projects(options),
     project: async (projectId) => (await resolve()).project(projectId),
     tasks: async (projectId, options) => (await resolve()).tasks(projectId, options),
+    resourcesDownload: async (projectId, options) => (await resolve()).resourcesDownload(projectId, options),
     roles: async (options) => (await resolve()).roles(options),
   };
 }

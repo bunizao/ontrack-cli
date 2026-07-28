@@ -1,6 +1,6 @@
 ---
 name: ontrack-cli
-description: Inspect Doubtfire or OnTrack from the terminal with the `ontrack` CLI. Use for authenticated user details, projects, project snapshots, tasks, task status filters, teaching roles, authentication checks, or browser-backed OnTrack login.
+description: Inspect Doubtfire or OnTrack from the terminal with the `ontrack` CLI. Use for authenticated user details, projects, project snapshots, tasks, task resources, teaching roles, authentication checks, or browser-backed OnTrack login.
 ---
 
 # OnTrack CLI
@@ -13,7 +13,8 @@ Use `ontrack` for read-only OnTrack inspection.
 2. If authentication fails, run `ontrack auth login --json`. Let the command search supported browser profiles or open the SAML sign-in URL in the default browser.
 3. Resolve an unfamiliar project with `ontrack projects --include-inactive --json` before requesting project or task detail. Use the returned `id` field, not the project's list position.
 4. Run the narrowest command that answers the request. Prefer `--json` for automation.
-5. Return the requested facts instead of pasting the full response unless the user asks for raw JSON.
+5. Download resources only when the user requests a local artifact. Use `--output` when they name a destination; never remove an existing archive without approval.
+6. Return the requested facts instead of pasting the full response unless the user asks for raw JSON.
 
 ## Commands
 
@@ -26,6 +27,7 @@ ontrack projects --include-inactive --json
 ontrack project <project-id> --json
 ontrack tasks <project-id> --json
 ontrack tasks <project-id> --status <status> --json
+ontrack resources download <project-id> --output <archive.zip> --json
 ontrack roles --json
 ontrack roles --all --json
 ```
@@ -45,4 +47,4 @@ Repeat `--status` to match more than one raw task status.
 - Use terminal tables only when the user requests terminal presentation.
 - Keep `--json` output on stdout and diagnostics on stderr.
 - Preserve raw status values when reporting tasks. The API may add statuses that the CLI does not yet label.
-- Treat every command as read-only. This CLI does not submit work or modify OnTrack records.
+- Commands do not submit work or modify OnTrack records. Resource download creates a local ZIP archive and refuses to replace an existing file.

@@ -12,6 +12,7 @@ Use it to inspect projects, tasks, grades, and teaching roles from a terminal or
 ## Features
 
 - Read projects, task schedules, grades, and teaching roles.
+- Download all task sheets and task resources for a project as one ZIP archive.
 - Sign in through your existing browser session.
 - Return stable JSON for scripts or readable tables for terminals.
 - Run the same package with Node.js or Bun.
@@ -69,6 +70,7 @@ Browser security rules still apply. On macOS, grant Full Disk Access to the appl
 | `ontrack projects` | List current projects. |
 | `ontrack project <project_id>` | Show a project and its task snapshot. |
 | `ontrack tasks <project_id>` | List tasks for a project. |
+| `ontrack resources download <project_id>` | Download task sheets and resources as a ZIP archive. |
 | `ontrack roles` | List teaching and administrative roles. |
 
 Every command supports `--json`:
@@ -76,10 +78,13 @@ Every command supports `--json`:
 ```bash
 ontrack projects --include-inactive --json
 ontrack tasks 12345 --status rediscuss --json
+ontrack resources download 5183 --output FIT1061-resources.zip --json
 ontrack roles --all --json
 ```
 
 Use the `id` field from `ontrack projects --include-inactive`; project IDs are not list positions.
+
+Without `--output`, resource downloads use `ontrack-resources-<project_id>.zip` in the current directory. Existing files are never replaced. The archive contains task sheets and task resources exposed by OnTrack; it does not include general unit website content.
 
 Successful JSON commands write only the result to stdout. Diagnostics and interactive prompts go to stderr.
 

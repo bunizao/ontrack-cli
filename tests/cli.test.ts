@@ -31,6 +31,7 @@ async function fakeApplication(): Promise<{
     projects: await fixture("projects"),
     project: await fixture("project"),
     tasks: await fixture("tasks"),
+    resourcesDownload: { project_id: 7, unit_id: 9, archive_path: "/tmp/resources.zip", bytes_written: 4 },
     roles: await fixture("roles"),
   };
   const invocations: Invocation[] = [];
@@ -47,6 +48,7 @@ async function fakeApplication(): Promise<{
       projects: record("projects", values.projects),
       project: record("project", values.project),
       tasks: record("tasks", values.tasks),
+      resourcesDownload: record("resourcesDownload", values.resourcesDownload),
       roles: record("roles", values.roles),
     },
     invocations,
@@ -100,12 +102,16 @@ export async function test_command_flags_reach_the_application_seam(): Promise<v
   await executeCli(["projects", "--include-inactive", "--json"], { app, version: "0.2.0" });
   await executeCli(["project", "7", "--json"], { app, version: "0.2.0" });
   await executeCli(["tasks", "7", "--status", "discuss", "--status", "rediscuss", "--json"], { app, version: "0.2.0" });
+  await executeCli(["resources", "download", "7", "--output", "resources.zip", "--json"], { app, version: "0.2.0" });
+  await executeCli(["resources", "download", "8", "--json"], { app, version: "0.2.0" });
   await executeCli(["roles", "--all", "--json"], { app, version: "0.2.0" });
 
   assert.deepEqual(invocations, [
     { command: "projects", arguments: [{ includeInactive: true }] },
     { command: "project", arguments: [7] },
     { command: "tasks", arguments: [7, { statuses: ["discuss", "rediscuss"] }] },
+    { command: "resourcesDownload", arguments: [7, { output: "resources.zip" }] },
+    { command: "resourcesDownload", arguments: [8, {}] },
     { command: "roles", arguments: [{ showAll: true }] },
   ]);
 }
@@ -118,6 +124,7 @@ export async function test_yaml_is_a_usage_error_for_every_command(): Promise<vo
     ["projects", "--yaml"],
     ["project", "7", "--yaml"],
     ["tasks", "7", "--yaml"],
+    ["resources", "download", "7", "--yaml"],
     ["roles", "--yaml"],
   ];
 
@@ -159,6 +166,7 @@ export async function test_secret_sentinel_is_removed_from_results_and_diagnosti
     projects: async (options) => expose(app.projects(options)),
     project: async (projectId) => expose(app.project(projectId)),
     tasks: async (projectId, options) => expose(app.tasks(projectId, options)),
+    resourcesDownload: async (projectId, options) => expose(app.resourcesDownload(projectId, options)),
     roles: async (options) => expose(app.roles(options)),
   };
   const commands = [
@@ -168,6 +176,7 @@ export async function test_secret_sentinel_is_removed_from_results_and_diagnosti
     ["projects"],
     ["project", "7"],
     ["tasks", "7"],
+    ["resources", "download", "7"],
     ["roles"],
   ];
   for (const command of commands) {
@@ -206,7 +215,7 @@ export async function test_help_and_version_succeed_without_resolving_the_applic
   assert.equal(help.exitCode, 0);
   assert.equal(help.stderr, "");
   assert.match(help.stdout, /^Usage: ontrack /);
-  for (const command of ["user", "auth", "projects", "project", "tasks", "roles"]) {
+  for (const command of ["user", "auth", "projects", "project", "tasks", "resources", "roles"]) {
     assert.match(help.stdout, new RegExp(`\\b${command}\\b`));
   }
 
@@ -216,7 +225,7 @@ export async function test_help_and_version_succeed_without_resolving_the_applic
 }
 
 export async function test_command_help_does_not_resolve_the_application(): Promise<void> {
-  for (const argv of [["user", "--help"], ["auth", "check", "--help"], ["auth", "login", "--help"], ["projects", "--help"], ["project", "--help"], ["tasks", "--help"], ["roles", "--help"]]) {
+  for (const argv of [["user", "--help"], ["auth", "check", "--help"], ["auth", "login", "--help"], ["projects", "--help"], ["project", "--help"], ["tasks", "--help"], ["resources", "download", "--help"], ["roles", "--help"]]) {
     const { app, invocations } = await fakeApplication();
     const result = await executeCli(argv, { app, version: "0.2.0" });
     assert.equal(result.exitCode, 0, argv.join(" "));
@@ -242,6 +251,20 @@ export async function test_invalid_project_id_is_a_usage_error_before_applicatio
     assert.equal(result.exitCode, 2);
     assert.equal(result.stdout, "");
     assert.match(result.stderr, /project_id|integer/i);
+  }
+  assert.deepEqual(invocations, []);
+}
+
+export async function test_resource_download_rejects_invalid_arguments_before_application_work(): Promise<void> {
+  const { app, invocations } = await fakeApplication();
+  for (const argv of [
+    ["resources", "download", "not-an-id", "--json"],
+    ["resources", "download", "7", "--output", "", "--json"],
+    ["resources", "download", "7", "extra", "--json"],
+  ]) {
+    const result = await executeCli(argv, { app, version: "0.2.0" });
+    assert.equal(result.exitCode, 2, argv.join(" "));
+    assert.equal(result.stdout, "", argv.join(" "));
   }
   assert.deepEqual(invocations, []);
 }

@@ -25,6 +25,74 @@ export async function test_ontrack_projects_sends_auth_headers_and_validates_the
   assert.equal(request?.headers.get("Accept"), "application/json");
 }
 
+export async function test_http_download_returns_binary_response(): Promise<void> {
+  let request: Request | undefined;
+  const client = new HttpClient({
+    baseUrl: "https://ontrack.example.edu",
+    credentials: { username: "student", accessToken: "secret-token" },
+    fetch: async (input, init) => {
+      request = new Request(input, init);
+      return new Response(new Uint8Array([0x50, 0x4b, 0x03, 0x04]), {
+        headers: {
+          "Content-Type": "application/zip",
+          "Content-Disposition": 'attachment; filename="resources.zip"',
+        },
+      });
+    },
+  });
+
+  const result = await client.download("api/units/15/all_resources");
+
+  assert.deepEqual([...result], [0x50, 0x4b, 0x03, 0x04]);
+  assert.equal(request?.headers.get("Username"), "student");
+  assert.equal(request?.headers.get("Auth-Token"), "secret-token");
+  assert.equal(request?.headers.get("Accept"), "application/octet-stream");
+}
+
+export async function test_http_download_refreshes_once_after_419(): Promise<void> {
+  const tokens: string[] = [];
+  const client = new HttpClient({
+    baseUrl: "https://ontrack.example.edu",
+    credentials: { username: "student", accessToken: "expired" },
+    refresh: async () => ({ username: "student", accessToken: "renewed" }),
+    fetch: async (input, init) => {
+      tokens.push(new Request(input, init).headers.get("Auth-Token") ?? "");
+      return tokens.length === 1
+        ? Response.json({ error: "expired" }, { status: 419 })
+        : new Response(new Uint8Array([0x50, 0x4b]));
+    },
+  });
+
+  const result = await client.download("api/units/15/all_resources");
+
+  assert.deepEqual(tokens, ["expired", "renewed"]);
+  assert.deepEqual([...result], [0x50, 0x4b]);
+}
+
+export async function test_project_resources_resolve_the_unit_and_require_a_zip(): Promise<void> {
+  const urls: string[] = [];
+  const client = new OnTrackClient(new HttpClient({
+    baseUrl: "https://ontrack.example.edu",
+    credentials: { username: "student", accessToken: "valid" },
+    fetch: async (input) => {
+      const url = new URL(input instanceof Request ? input.url : input);
+      urls.push(url.pathname);
+      if (url.pathname === "/api/projects/5183") {
+        return Response.json({ id: 5183, unit: { id: 15, code: "FIT1061", name: "AI" }, tasks: [] });
+      }
+      return new Response("not a zip", { headers: { "Content-Type": "text/html" } });
+    },
+  }));
+
+  await assert.rejects(
+    client.downloadProjectResources(5183),
+    (error) => error instanceof CliError
+      && error.category === "upstream_contract"
+      && error.message === "OnTrack returned an invalid resource archive",
+  );
+  assert.deepEqual(urls, ["/api/projects/5183", "/api/units/15/all_resources"]);
+}
+
 export async function test_http_401_is_an_auth_error(): Promise<void> {
   const client = new HttpClient({
     baseUrl: "https://ontrack.example.edu",

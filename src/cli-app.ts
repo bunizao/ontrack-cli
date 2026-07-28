@@ -9,6 +9,7 @@ export interface CliApplication {
   projects(options: { readonly includeInactive: boolean }): Promise<unknown>;
   project(projectId: number): Promise<unknown>;
   tasks(projectId: number, options: { readonly statuses: readonly string[] }): Promise<unknown>;
+  resourcesDownload(projectId: number, options: { readonly output?: string }): Promise<unknown>;
   roles(options: { readonly showAll: boolean }): Promise<unknown>;
 }
 
@@ -64,6 +65,7 @@ function help(): string {
     "  projects             List current projects",
     "  project <project_id> Show one project",
     "  tasks <project_id>   List project tasks",
+    "  resources download <project_id> Download project resources",
     "  roles                List teaching roles",
     "",
     "Options:",
@@ -124,6 +126,23 @@ async function invoke(argv: readonly string[], dependencies: Dependencies): Prom
     if (parsed.positionals.length !== 1) throw new CliError("usage", "tasks requires one project_id integer");
     return { value: await app.tasks(projectId(parsed.positionals[0]), { statuses: parsed.values.status ?? [] }), json: parsed.values.json ?? false };
   }
+  if (command === "resources" && rest[0] === "download") {
+    const parsed = parseArgs({
+      args: rest.slice(1),
+      options: { ...common, output: { type: "string" } },
+      allowPositionals: true,
+      strict: true,
+    });
+    if (parsed.positionals.length !== 1) throw new CliError("usage", "resources download requires one project_id integer");
+    if (parsed.values.output !== undefined && !parsed.values.output.trim()) throw new CliError("usage", "output path must not be empty");
+    return {
+      value: await app.resourcesDownload(
+        projectId(parsed.positionals[0]),
+        parsed.values.output === undefined ? {} : { output: parsed.values.output },
+      ),
+      json: parsed.values.json ?? false,
+    };
+  }
   if (command === "roles") {
     const parsed = parseArgs({ args: rest, options: { ...common, all: { type: "boolean" } }, allowPositionals: false, strict: true });
     return { value: await app.roles({ showAll: parsed.values.all ?? false }), json: parsed.values.json ?? false };
@@ -136,7 +155,7 @@ export async function executeCli(argv: readonly string[], dependencies: Dependen
   if (argv.length === 1 && argv[0] === "--help") return { exitCode: 0, stdout: help(), stderr: "" };
   if (argv.length === 1 && argv[0] === "--version") return { exitCode: 0, stdout: `ontrack ${dependencies.version}\n`, stderr: "" };
   const command = argv[0];
-  const knownHelpTarget = ["user", "projects", "project", "tasks", "roles"].includes(command ?? "")
+  const knownHelpTarget = ["user", "projects", "project", "tasks", "resources", "roles"].includes(command ?? "")
     || (command === "auth" && (["check", "login", "--help"].includes(argv[1] ?? "")));
   if (argv.includes("--help") && knownHelpTarget) return { exitCode: 0, stdout: help(), stderr: "" };
   try {
