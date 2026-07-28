@@ -150,6 +150,20 @@ export class OnTrackApplication implements CliApplication {
     });
   }
 
+  async chatSend(projectId: number, task: string, message: string): Promise<unknown> {
+    const snapshot = await this.snapshot(projectId);
+    const selected = selectedTask(snapshot, task);
+    const comment = await this.client.addTaskComment(projectId, selected.definition.id, message);
+    return {
+      project_id: projectId,
+      task_definition_id: selected.definition.id,
+      task: selected.row.abbreviation,
+      comment_id: comment.id,
+      message: comment.comment,
+      created_at: comment.created_at,
+    };
+  }
+
   async roles(options: { readonly showAll: boolean }): Promise<unknown> {
     return (await this.client.getRoles(!options.showAll)).map(roleToJson);
   }

@@ -185,14 +185,15 @@ export async function test_every_parser_command_has_a_golden_case(): Promise<voi
     app: await applicationFor(cases[0]!),
     version: "0.2.0",
   });
-  const parserCommands = [...help.stdout.matchAll(/^  (auth (?:check|login)|[a-z][a-z-]*)(?:\s+<[^>]+>)?\s+/gmu)]
+  const parserCommands = [...new Set([...help.stdout.matchAll(/^  (auth (?:check|login)|[a-z][a-z-]*)(?:\s+<[^>]+>)?\s+/gmu)]
     .map((match) => match[1]!)
-    .filter((command) => command !== "auth login" && command !== "resources" && command !== "task")
+    .filter((command) => command !== "auth login" && command !== "resources" && command !== "task"))]
     .sort();
   assert.match(help.stdout, /^  auth login\s+/mu, "interactive login is covered by subprocess tests instead of deterministic goldens");
   assert.match(help.stdout, /^  resources download\s+/mu, "resource downloads are covered by subprocess tests instead of read-only goldens");
   assert.match(help.stdout, /^  task sheet\s+/mu, "task sheet downloads are covered by application and subprocess tests");
   assert.match(help.stdout, /^  task resources\s+/mu, "task resource downloads are covered by application and subprocess tests");
+  assert.match(help.stdout, /^  chats send\s+/mu, "chat sending is covered by confirmation and subprocess tests");
   const covered = new Set(cases.map((testCase) => commandName(testCase.argv)));
   assert.deepEqual(parserCommands, [...covered].sort());
 }

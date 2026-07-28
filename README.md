@@ -78,6 +78,7 @@ Browser security rules still apply. On macOS, grant Full Disk Access to the appl
 | `ontrack task read <project_id> <task>` | Print a task sheet as Markdown without creating a PDF file. |
 | `ontrack chats <project_id>` | List tasks and unread comment counts without opening chat streams. |
 | `ontrack chats <project_id> <task>` | Show one task's chronological comment history. |
+| `ontrack chats send <project_id> <task> --message <text>` | Send one text message after confirmation. |
 | `ontrack roles` | List teaching and administrative roles. |
 
 Commands print tables by default. Use `--json` for automation:
@@ -87,6 +88,7 @@ ontrack projects --include-inactive --json
 ontrack tasks 12345 --status rediscuss --json
 ontrack chats 12345 --json
 ontrack chats 12345 1.1 --json
+ontrack chats send 12345 1.1 --message "Please review this"
 ontrack task sheet 12345 1.1 --output FIT1061-1.1.pdf --json
 ontrack task resources 12345 1.1 --output 1.1-resources.zip --json
 ontrack task read 12345 1.1 > FIT1061-1.1.md
@@ -103,6 +105,8 @@ The task selector accepts an abbreviation shown by `ontrack project`; a task-def
 `resources download` retrieves the complete unit archive exposed by OnTrack. It is not filtered to the student's current task rows. The archive does not include general unit website content.
 
 `chats <project_id>` reads unread counts from the project snapshot and does not open comment streams. Reading one task's history causes OnTrack to mark returned non-discussion comments as read; the CLI prints this side effect to stderr before presenting the result.
+
+`chats send` is a remote mutation. It shows the exact destination and message in an interactive terminal and requires typing `send`. Non-interactive use must pass `--yes` only after the user has explicitly approved that project, task, and message. Text messages are limited to 4,095 characters; attachments and replies are not supported by this command.
 
 Successful JSON commands write only the result to stdout. Diagnostics and interactive prompts go to stderr.
 

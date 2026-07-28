@@ -53,6 +53,8 @@ Task-sheet reading reuses the same authenticated, range-aware PDF download witho
 
 Chat summaries use unread counts already present in the project snapshot and do not fetch comment streams. History requests are restricted to one selected task to avoid an implicit N+1 request and unexpected read-state changes. The upstream history route returns group-task comments chronologically and marks non-discussion comments as read; the CLI reports that side effect on stderr. Terminal rendering omits email addresses and strips control sequences while JSON preserves the validated API payload.
 
+Text chat sending is a separate POST path and never reuses the read command. The CLI validates the 4,095-character upstream limit and requires either typed terminal confirmation or `--yes` before resolving credentials or issuing the mutation. POST requests are not automatically retried after authentication rejection.
+
 ## Verification
 
 Tests use dependency injection at the HTTP, clock, browser-cookie, prompt, and browser-opening boundaries. The suite includes:

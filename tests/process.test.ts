@@ -29,6 +29,96 @@ async function run(executable: string, args: readonly string[], env: NodeJS.Proc
   return { code, signal, stdout, stderr };
 }
 
+export async function test_process_chat_send_requires_yes_when_stdin_is_not_a_terminal(): Promise<void> {
+  const entrypoint = resolve("dist/cli.js");
+  for (const executable of [process.execPath, "bun"]) {
+    const result = await run(executable, [entrypoint, "chats", "send", "5183", "P1", "--message", "Please review this."], {
+      ONTRACK_USERNAME: "student",
+      ONTRACK_AUTH_TOKEN: "must-not-be-used",
+      ONTRACK_CONFIG: "",
+    });
+    assert.equal(result.code, 2, executable);
+    assert.equal(result.stdout, "", executable);
+    assert.match(result.stderr, /interactive terminal or --yes/i, executable);
+    assert.doesNotMatch(result.stderr, /must-not-be-used/u, executable);
+  }
+}
+
+export async function test_process_chat_send_posts_exact_message_in_node_and_bun_with_yes(): Promise<void> {
+  const posts: Array<{ readonly method: string; readonly url: string; readonly body: string }> = [];
+  const server = createServer((request, response) => {
+    assert.equal(request.headers.username, "student");
+    assert.equal(request.headers["auth-token"], "process-secret");
+    if (request.url === "/api/projects/5183") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        id: 5183,
+        unit: { id: 15, code: "FIT1045", name: "Algorithms" },
+        tasks: [{ id: 21, task_definition_id: 27, status: "working_on_it" }],
+      }));
+      return;
+    }
+    if (request.url === "/api/units/15") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        id: 15,
+        code: "FIT1045",
+        name: "Algorithms",
+        task_definitions: [{ id: 27, abbreviation: "P1", name: "Search" }],
+      }));
+      return;
+    }
+    let body = "";
+    request.setEncoding("utf8");
+    request.on("data", (chunk: string) => { body += chunk; });
+    request.on("end", () => {
+      posts.push({ method: request.method ?? "", url: request.url ?? "", body });
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        id: 51,
+        comment: "Please review this.",
+        has_attachment: false,
+        type: "text",
+        is_new: false,
+        reply_to_id: null,
+        author: { id: 1, first_name: "Example", last_name: "Student", email: "student@example.invalid" },
+        recipient: { id: 2, first_name: "Example", last_name: "Tutor", email: "tutor@example.invalid" },
+        created_at: "2026-07-28T03:04:05Z",
+        recipient_read_time: null,
+      }));
+    });
+  });
+  const port = await listen(server);
+  const entrypoint = resolve("dist/cli.js");
+  try {
+    for (const executable of [process.execPath, "bun"]) {
+      const result = await run(executable, [entrypoint, "chats", "send", "5183", "P1", "--message", "Please review this.", "--yes", "--json"], {
+        ONTRACK_BASE_URL: `http://127.0.0.1:${port}`,
+        ONTRACK_USERNAME: "student",
+        ONTRACK_AUTH_TOKEN: "process-secret",
+        ONTRACK_CONFIG: "",
+      });
+      assert.equal(result.code, 0, executable);
+      assert.equal(result.stderr, "", executable);
+      assert.deepEqual(JSON.parse(result.stdout), {
+        project_id: 5183,
+        task_definition_id: 27,
+        task: "P1",
+        comment_id: 51,
+        message: "Please review this.",
+        created_at: "2026-07-28T03:04:05.000Z",
+      });
+    }
+    assert.deepEqual(posts, [
+      { method: "POST", url: "/api/projects/5183/task_def_id/27/comments", body: "comment=Please+review+this." },
+      { method: "POST", url: "/api/projects/5183/task_def_id/27/comments", body: "comment=Please+review+this." },
+    ]);
+  } finally {
+    server.close();
+    await once(server, "close");
+  }
+}
+
 export async function test_process_reads_a_task_sheet_as_markdown_in_node_and_bun(): Promise<void> {
   const directory = mkdtempSync(join(tmpdir(), "ontrack-task-read-"));
   const pdf = textPdf(["Hello agent", "Second line"]);

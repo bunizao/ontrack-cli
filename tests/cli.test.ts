@@ -39,6 +39,7 @@ async function fakeApplication(): Promise<{
     taskState: { project_id: 7, task_definition_id: 12, task: "1.1", previous_status: "not_started", status: "working_on_it" },
     chatsSummary: [{ task_definition_id: 12, task: "1.1", name: "Example task", status: "rediscuss", unread_comments: 2 }],
     chatsHistory: await fixture("chats"),
+    chatSend: { project_id: 7, task_definition_id: 12, task: "1.1", comment_id: 51, message: "Please review this.", created_at: "2026-07-28T03:04:05.000Z" },
     roles: await fixture("roles"),
   };
   const invocations: Invocation[] = [];
@@ -62,10 +63,84 @@ async function fakeApplication(): Promise<{
       taskRead: record("taskRead", values.taskRead),
       taskState: record("taskState", values.taskState),
       chats: async (projectId, options) => record("chats", options.task ? values.chatsHistory : values.chatsSummary)(projectId, options),
+      chatSend: record("chatSend", values.chatSend),
       roles: record("roles", values.roles),
     },
     invocations,
   };
+}
+
+export async function test_chat_send_requires_confirmation_before_application_work(): Promise<void> {
+  const { app, invocations } = await fakeApplication();
+  const refused = await executeCli(["chats", "send", "7", "1.1", "--message", "Please review this."], {
+    app,
+    version: "0.2.0",
+  });
+  assert.equal(refused.exitCode, 2);
+  assert.match(refused.stderr, /confirmation.*--yes/i);
+  assert.deepEqual(invocations, []);
+
+  const confirmations: unknown[] = [];
+  const confirmed = await executeCli(["chats", "send", "7", "1.1", "--message", "Please review this."], {
+    app,
+    version: "0.2.0",
+    confirmChatSend: async (details) => {
+      confirmations.push(details);
+      return true;
+    },
+  });
+  assert.deepEqual(confirmations, [{ projectId: 7, task: "1.1", message: "Please review this." }]);
+  assert.deepEqual(invocations, [{ command: "chatSend", arguments: [7, "1.1", "Please review this."] }]);
+  assert.equal(confirmed.exitCode, 0);
+  assert.match(confirmed.stdout, /Project\s+Task\s+Comment ID\s+Time\s+Message/u);
+}
+
+export async function test_chat_send_yes_is_explicit_noninteractive_confirmation(): Promise<void> {
+  const { app, invocations } = await fakeApplication();
+  const result = await executeCli(["chats", "send", "7", "1.1", "--message", "Please review this.", "-y", "--json"], {
+    app,
+    version: "0.2.0",
+  });
+  assert.equal(result.exitCode, 0);
+  assert.deepEqual(JSON.parse(result.stdout), {
+    project_id: 7,
+    task_definition_id: 12,
+    task: "1.1",
+    comment_id: 51,
+    message: "Please review this.",
+    created_at: "2026-07-28T03:04:05.000Z",
+  });
+  assert.deepEqual(invocations, [{ command: "chatSend", arguments: [7, "1.1", "Please review this."] }]);
+}
+
+export async function test_chat_send_does_not_mutate_when_typed_confirmation_is_declined(): Promise<void> {
+  const { app, invocations } = await fakeApplication();
+  const result = await executeCli(["chats", "send", "7", "1.1", "--message", "Please review this."], {
+    app,
+    version: "0.2.0",
+    confirmChatSend: async () => false,
+  });
+  assert.equal(result.exitCode, 2);
+  assert.match(result.stderr, /not confirmed/i);
+  assert.deepEqual(invocations, []);
+}
+
+export async function test_chat_send_rejects_invalid_messages_before_confirmation(): Promise<void> {
+  const { app, invocations } = await fakeApplication();
+  let confirmations = 0;
+  for (const message of ["", " ", "x".repeat(4096)]) {
+    const result = await executeCli(["chats", "send", "7", "1.1", "--message", message], {
+      app,
+      version: "0.2.0",
+      confirmChatSend: async () => {
+        confirmations += 1;
+        return true;
+      },
+    });
+    assert.equal(result.exitCode, 2, String(message.length));
+  }
+  assert.equal(confirmations, 0);
+  assert.deepEqual(invocations, []);
 }
 
 export async function test_six_existing_commands_emit_stable_json(): Promise<void> {
@@ -172,6 +247,7 @@ export async function test_yaml_is_a_usage_error_for_every_command(): Promise<vo
     ["task", "resources", "7", "1.1", "--yaml"],
     ["task", "read", "7", "1.1", "--yaml"],
     ["chats", "7", "--yaml"],
+    ["chats", "send", "7", "1.1", "--message", "Hello", "--yaml"],
     ["roles", "--yaml"],
   ];
 
@@ -220,6 +296,7 @@ export async function test_secret_sentinel_is_removed_from_results_and_diagnosti
     taskRead: async (projectId, task) => expose(app.taskRead(projectId, task)),
     taskState: async (projectId, task, state) => expose(app.taskState(projectId, task, state)),
     chats: async (projectId, options) => expose(app.chats(projectId, options)),
+    chatSend: async (projectId, task, message) => expose(app.chatSend(projectId, task, message)),
     roles: async (options) => expose(app.roles(options)),
   };
   const commands = [
@@ -296,6 +373,7 @@ export async function test_command_help_does_not_resolve_the_application(): Prom
     { argv: ["task", "read", "--help"], usage: "ontrack task read <project> <task>", option: "Markdown" },
     { argv: ["task", "state", "--help"], usage: "ontrack task state <project> <task> <state>", option: "working_on_it" },
     { argv: ["chats", "--help"], usage: "ontrack chats <project> [task]", option: "marks" },
+    { argv: ["chats", "send", "--help"], usage: "ontrack chats send <project> <task>", option: "--message" },
     { argv: ["roles", "--help"], usage: "ontrack roles", option: "--all" },
   ];
   for (const { argv, usage, option } of cases) {

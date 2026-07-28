@@ -9,7 +9,7 @@ import { OnTrackApplication } from "./application.js";
 import { loginAuthenticatedSession, resolveAuthenticatedSession } from "./auth.js";
 import { openSystemBrowser } from "./browser.js";
 import { authenticationCookieCandidates } from "./browser-cookies.js";
-import { executeCli, type CliApplication } from "./cli-app.js";
+import { executeCli, type ChatSendConfirmation, type CliApplication } from "./cli-app.js";
 import { loadConfig, resolveBaseUrl, resolveConfigPaths, type Environment } from "./config.js";
 import { CliError } from "./errors.js";
 import { HttpClient } from "./http.js";
@@ -23,6 +23,23 @@ async function promptForBrowserLogin(message: string, signal: AbortSignal): Prom
   const prompt = createInterface({ input: process.stdin, output: process.stderr });
   try {
     await prompt.question(`${message} `, { signal });
+  } finally {
+    prompt.close();
+  }
+}
+
+async function confirmChatSend(details: ChatSendConfirmation, signal: AbortSignal): Promise<boolean> {
+  if (!process.stdin.isTTY) {
+    throw new CliError("usage", "Chat sending requires an interactive terminal or --yes after explicit user confirmation.");
+  }
+  const prompt = createInterface({ input: process.stdin, output: process.stderr });
+  const message = JSON.stringify(details.message);
+  try {
+    const answer = await prompt.question(
+      `Send this OnTrack chat message to project ${details.projectId}, task ${details.task}?\n${message}\nType "send" to confirm: `,
+      { signal },
+    );
+    return answer.trim() === "send";
   } finally {
     prompt.close();
   }
@@ -47,6 +64,7 @@ function lazyApplication(signal: AbortSignal, env: Environment, platform: NodeJS
     taskRead: async (projectId, task) => (await resolve()).taskRead(projectId, task),
     taskState: async (projectId, task, state) => (await resolve()).taskState(projectId, task, state),
     chats: async (projectId, options) => (await resolve()).chats(projectId, options),
+    chatSend: async (projectId, task, message) => (await resolve()).chatSend(projectId, task, message),
     roles: async (options) => (await resolve()).roles(options),
   };
 }
@@ -138,6 +156,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     const result = await executeCli(argv, {
       app: lazyApplication(controller.signal, env, platform),
       authLogin: () => authLogin(controller.signal, env, platform),
+      confirmChatSend: (details) => confirmChatSend(details, controller.signal),
       onDiagnostic: (message) => { process.stderr.write(message); },
       version: VERSION,
     });

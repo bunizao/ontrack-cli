@@ -1,6 +1,6 @@
 import { CliError } from "./errors.js";
 import { HttpClient, type DownloadResponse } from "./http.js";
-import { readProject, readProjects, readRoles, readTaskComments, readTaskUpdate, readUnit } from "./readers.js";
+import { readProject, readProjects, readRoles, readTaskComment, readTaskComments, readTaskUpdate, readUnit } from "./readers.js";
 import type { Project, ProjectSummary, TaskComment, TaskUpdate, Unit, UnitRole } from "./types.js";
 
 export interface ProjectResourcesArchive {
@@ -115,6 +115,28 @@ export class OnTrackClient {
         body: JSON.stringify({ trigger: state }),
       },
     ));
+  }
+
+  async addTaskComment(projectId: number, taskDefinitionId: number, message: string): Promise<TaskComment> {
+    try {
+      return readTaskComment(await this.http.request(
+        `api/projects/${projectId}/task_def_id/${taskDefinitionId}/comments`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+          body: new URLSearchParams({ comment: message }),
+        },
+      ));
+    } catch (error) {
+      if (error instanceof CliError && error.category === "upstream_api") {
+        throw new CliError(
+          "upstream_api",
+          `Chat message was rejected by OnTrack${error.statusCode ? ` (HTTP ${error.statusCode})` : ""}`,
+          error.statusCode,
+        );
+      }
+      throw error;
+    }
   }
 
   async getRoles(activeOnly = true): Promise<UnitRole[]> {

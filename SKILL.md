@@ -31,6 +31,7 @@ ontrack tasks <project-id> --json
 ontrack tasks <project-id> --status <status> --json
 ontrack chats <project-id> --json
 ontrack chats <project-id> <task> --json
+ontrack chats send <project-id> <task> --message <text>
 ontrack task sheet <project-id> <task> --output <sheet.pdf> --json
 ontrack task resources <project-id> <task> --output <file> --json
 ontrack task read <project-id> <task>
@@ -51,10 +52,16 @@ Use `ontrack project <project-id> --json` to discover downloadable task definiti
 - Browser discovery is the default. Compatible storage-state files under `~/.okta-auth/sessions` are an optional fallback; `okta-auth` is not required.
 - After terminal confirmation, the CLI opens the SAML sign-in URL returned by the API.
 
+## Remote mutations
+
+- Never run `ontrack chats send` unless the user explicitly confirms the exact project, task, and message in the current conversation.
+- Never infer permission to send from a request to inspect, summarize, draft, or read chats.
+- Use the interactive typed confirmation when possible. Pass `--yes` only after the same explicit user confirmation; it is not permission by itself.
+
 ## Output
 
 - Ordinary CLI use prints tables by default; agents should prefer `--json` for reliable parsing.
 - `task read` is a content command: it prints Markdown directly so an agent can read or pipe it without parsing a table.
 - Keep `--json` output on stdout and diagnostics on stderr.
 - Preserve raw status values when reporting tasks. The API may add statuses that the CLI does not yet label.
-- Commands do not submit work. Task chat history has an upstream read-state side effect. Downloads create local files atomically and refuse to replace existing files.
+- Commands do not submit work. Task chat history has an upstream read-state side effect, and `chats send` creates a remote comment only after confirmation. Downloads create local files atomically and refuse to replace existing files.

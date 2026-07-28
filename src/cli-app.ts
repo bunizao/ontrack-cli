@@ -16,6 +16,7 @@ export interface CliApplication {
   taskRead(projectId: number, task: string): Promise<unknown>;
   taskState(projectId: number, task: string, state: string): Promise<unknown>;
   chats(projectId: number, options: { readonly task?: string }): Promise<unknown>;
+  chatSend(projectId: number, task: string, message: string): Promise<unknown>;
   roles(options: { readonly showAll: boolean }): Promise<unknown>;
 }
 
@@ -31,9 +32,16 @@ interface Dependencies {
   readonly version: string;
   readonly sensitiveValues?: readonly string[];
   readonly onDiagnostic?: (message: string) => void;
+  readonly confirmChatSend?: (details: ChatSendConfirmation) => Promise<boolean>;
 }
 
-type OutputView = "auth-check" | "auth-login" | "chats-history" | "chats-summary" | "download" | "markdown" | "project" | "projects" | "roles" | "task-state" | "tasks" | "user";
+export interface ChatSendConfirmation {
+  readonly projectId: number;
+  readonly task: string;
+  readonly message: string;
+}
+
+type OutputView = "auth-check" | "auth-login" | "chat-send" | "chats-history" | "chats-summary" | "download" | "markdown" | "project" | "projects" | "roles" | "task-state" | "tasks" | "user";
 
 interface InvocationResult {
   readonly value: unknown;
@@ -88,6 +96,7 @@ function rootHelp(): string {
     "  task read <project> <task> Print one task sheet as Markdown",
     "  task state <project> <task> <state> Change one task's workflow state",
     "  chats <project> [task] Show unread chat counts or one task's history",
+    "  chats send <project> <task> Send one text chat message",
     "  roles                List teaching roles",
     "",
     "Project arguments accept a unique unit code such as FIT1045 or the ID from `ontrack projects`.",
@@ -173,6 +182,12 @@ function helpFor(argv: readonly string[]): string | undefined {
     "Change one assigned task's workflow state.",
     [],
     "Student states are not_started, working_on_it, and need_help. This does not submit files.",
+  );
+  if (key === "chats send") return commandHelp(
+    "ontrack chats send <project> <task>",
+    "Send one text message to a task chat.",
+    ["  --message <text>     Exact message to send", "  -y, --yes            Confirm without an interactive prompt"],
+    "This changes OnTrack. Agents must use it only after the user confirms the exact project, task, and message.",
   );
   if (args[0] === "chats") return commandHelp(
     "ontrack chats <project> [task]",
@@ -285,6 +300,16 @@ function terminal(view: OutputView, value: unknown, emptyMessage?: string): stri
       reply: chat.reply_to_id,
     }));
     return renderTable(rows, [["time", "Time"], ["author", "Author"], ["type", "Type"], ["message", "Message"], ["attachment", "Attachment"], ["reply", "Reply To"]]);
+  }
+  if (view === "chat-send") {
+    const data = record(value);
+    return renderTable([{
+      project: data.project_id,
+      task: data.task,
+      comment: data.comment_id,
+      time: data.created_at,
+      message: terminalText(data.message),
+    }], [["project", "Project"], ["task", "Task"], ["comment", "Comment ID"], ["time", "Time"], ["message", "Message"]]);
   }
   if (view === "roles") {
     const rows = records(value).map((role) => {
@@ -441,6 +466,39 @@ async function invoke(argv: readonly string[], dependencies: Dependencies): Prom
       value: await app.taskState(await resolvedProjectId(parsed.positionals[0], app), task, state),
       json: parsed.values.json ?? false,
       view: "task-state",
+    };
+  }
+  if (command === "chats" && rest[0] === "send") {
+    const parsed = parseArgs({
+      args: rest.slice(1),
+      options: {
+        ...common,
+        message: { type: "string" },
+        yes: { type: "boolean", short: "y" },
+      },
+      allowPositionals: true,
+      strict: true,
+    });
+    if (parsed.positionals.length !== 2) throw new CliError("usage", "chats send requires a project and task abbreviation");
+    const task = parsed.positionals[1]?.trim();
+    if (!task) throw new CliError("usage", "task abbreviation must not be empty");
+    const message = parsed.values.message;
+    if (message === undefined) throw new CliError("usage", "chats send requires --message <text>");
+    if (!message.trim()) throw new CliError("usage", "chat message must not be empty");
+    if (Array.from(message).length > 4_095) throw new CliError("usage", "chat message must not exceed 4095 characters");
+    const confirmChatSend = dependencies.confirmChatSend;
+    if (!parsed.values.yes && !confirmChatSend) {
+      throw new CliError("usage", "Chat sending requires confirmation. Use --yes only after the user confirms the exact project, task, and message.");
+    }
+    const id = await resolvedProjectId(parsed.positionals[0], app);
+    if (!parsed.values.yes && confirmChatSend) {
+      const confirmed = await confirmChatSend({ projectId: id, task, message });
+      if (!confirmed) throw new CliError("usage", "Chat message was not confirmed.");
+    }
+    return {
+      value: await app.chatSend(id, task, message),
+      json: parsed.values.json ?? false,
+      view: "chat-send",
     };
   }
   if (command === "chats") {

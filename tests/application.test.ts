@@ -397,3 +397,94 @@ export async function test_application_fetches_one_task_chat_by_abbreviation(): 
   assert.deepEqual(await app.chats(5183, { task: "1.1" }), []);
   assert.deepEqual(urls, ["/api/projects/5183", "/api/units/15", "/api/projects/5183/task_def_id/27/comments"]);
 }
+
+export async function test_application_sends_one_validated_text_comment_to_the_selected_task(): Promise<void> {
+  const requests: Array<{ readonly method: string; readonly path: string; readonly body: string }> = [];
+  const http = new HttpClient({
+    baseUrl: "https://school.example.edu",
+    credentials: { username: "student", accessToken: "secret" },
+    fetch: async (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : input);
+      if (url.pathname === "/api/projects/5183") return Response.json({
+        id: 5183,
+        unit: { id: 15, code: "FIT1045", name: "Algorithms" },
+        tasks: [{ id: 21, task_definition_id: 27, status: "working_on_it" }],
+      });
+      if (url.pathname === "/api/units/15") return Response.json({
+        id: 15,
+        code: "FIT1045",
+        name: "Algorithms",
+        task_definitions: [{ id: 27, abbreviation: "P1", name: "Search" }],
+      });
+      requests.push({
+        method: init?.method ?? "GET",
+        path: url.pathname,
+        body: typeof init?.body === "string" ? init.body : String(init?.body ?? ""),
+      });
+      return Response.json({
+        id: 51,
+        comment: "Please review this.",
+        has_attachment: false,
+        type: "text",
+        is_new: false,
+        reply_to_id: null,
+        author: { id: 1, first_name: "Example", last_name: "Student", email: "student@example.invalid" },
+        recipient: { id: 2, first_name: "Example", last_name: "Tutor", email: "tutor@example.invalid" },
+        created_at: "2026-07-28T03:04:05Z",
+        recipient_read_time: null,
+      });
+    },
+  });
+  const app = new OnTrackApplication({ current: session("student") }, new OnTrackClient(http), createClock("2026-07-28T04:00:00Z"));
+
+  assert.deepEqual(await app.chatSend(5183, "P1", "Please review this."), {
+    project_id: 5183,
+    task_definition_id: 27,
+    task: "P1",
+    comment_id: 51,
+    message: "Please review this.",
+    created_at: "2026-07-28T03:04:05.000Z",
+  });
+  assert.deepEqual(requests, [{
+    method: "POST",
+    path: "/api/projects/5183/task_def_id/27/comments",
+    body: "comment=Please+review+this.",
+  }]);
+}
+
+export async function test_application_reports_upstream_chat_send_rejection_without_retrying_the_post(): Promise<void> {
+  let posts = 0;
+  const http = new HttpClient({
+    baseUrl: "https://school.example.edu",
+    credentials: { username: "student", accessToken: "secret" },
+    fetch: async (input) => {
+      const url = new URL(input instanceof Request ? input.url : input);
+      if (url.pathname === "/api/projects/5183") return Response.json({
+        id: 5183,
+        unit: { id: 15, code: "FIT1045", name: "Algorithms" },
+        tasks: [{ id: 21, task_definition_id: 27, status: "working_on_it" }],
+      });
+      if (url.pathname === "/api/units/15") return Response.json({
+        id: 15,
+        code: "FIT1045",
+        name: "Algorithms",
+        task_definitions: [{ id: 27, abbreviation: "P1", name: "Search" }],
+      });
+      posts += 1;
+      return Response.json({ error: "No comment added" }, { status: 403 });
+    },
+    refresh: async () => {
+      throw new Error("POST requests must not refresh and retry");
+    },
+  });
+  const app = new OnTrackApplication({ current: session("student") }, new OnTrackClient(http), createClock("2026-07-28T04:00:00Z"));
+
+  await assert.rejects(
+    app.chatSend(5183, "P1", "Duplicate message"),
+    (error) => error instanceof CliError
+      && error.category === "upstream_api"
+      && error.statusCode === 403
+      && /chat message.*rejected/i.test(error.message),
+  );
+  assert.equal(posts, 1);
+}
