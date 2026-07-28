@@ -18,7 +18,18 @@ export class OnTrackClient {
   }
 
   async getProject(id: number): Promise<Project> {
-    return readProject(await this.http.request(`api/projects/${id}`));
+    try {
+      return readProject(await this.http.request(`api/projects/${id}`));
+    } catch (error) {
+      if (error instanceof CliError && error.statusCode === 403) {
+        throw new CliError(
+          "upstream_api",
+          `Project ${id} is not accessible. Run \`ontrack projects --include-inactive\` to find your project IDs.`,
+          403,
+        );
+      }
+      throw error;
+    }
   }
 
   async getUnit(id: number): Promise<Unit> {

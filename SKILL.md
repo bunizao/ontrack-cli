@@ -11,7 +11,7 @@ Use `ontrack` for read-only OnTrack inspection.
 
 1. Run `ontrack auth check --json` before a protected query when authentication state is unknown.
 2. If authentication fails, run `ontrack auth login --json`. Let the command search supported browser profiles or open the SAML sign-in URL in the default browser.
-3. Resolve an unfamiliar project with `ontrack projects --json` before requesting project or task detail.
+3. Resolve an unfamiliar project with `ontrack projects --include-inactive --json` before requesting project or task detail. Use the returned `id` field, not the project's list position.
 4. Run the narrowest command that answers the request. Prefer `--json` for automation.
 5. Return the requested facts instead of pasting the full response unless the user asks for raw JSON.
 

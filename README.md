@@ -67,8 +67,8 @@ Browser security rules still apply. On macOS, grant Full Disk Access to the appl
 | `ontrack auth login` | Sign in through OnTrack and cache an access token. |
 | `ontrack auth check` | Check authentication and show project and role counts. |
 | `ontrack projects` | List current projects. |
-| `ontrack project <id>` | Show a project and its task snapshot. |
-| `ontrack tasks <id>` | List tasks for a project. |
+| `ontrack project <project_id>` | Show a project and its task snapshot. |
+| `ontrack tasks <project_id>` | List tasks for a project. |
 | `ontrack roles` | List teaching and administrative roles. |
 
 Every command supports `--json`:
@@ -78,6 +78,8 @@ ontrack projects --include-inactive --json
 ontrack tasks 12345 --status rediscuss --json
 ontrack roles --all --json
 ```
+
+Use the `id` field from `ontrack projects --include-inactive`; project IDs are not list positions.
 
 Successful JSON commands write only the result to stdout. Diagnostics and interactive prompts go to stderr.
 

@@ -172,6 +172,38 @@ export async function test_process_projects_json_keeps_stdout_machine_clean(): P
   }
 }
 
+export async function test_process_project_403_explains_how_to_find_an_accessible_id(): Promise<void> {
+  let requests = 0;
+  const server = createServer((request, response) => {
+    requests += 1;
+    assert.equal(request.url, "/api/projects/1");
+    assert.equal(request.headers.username, "student");
+    assert.equal(request.headers["auth-token"], "process-secret");
+    response.writeHead(403, { "content-type": "application/json" });
+    response.end('{"error":"Forbidden"}');
+  });
+  const port = await listen(server);
+  try {
+    const result = await run(process.execPath, ["dist/cli.js", "project", "1", "--json"], {
+      ONTRACK_BASE_URL: `http://127.0.0.1:${port}`,
+      ONTRACK_USERNAME: "student",
+      ONTRACK_AUTH_TOKEN: "process-secret",
+      ONTRACK_CONFIG: "",
+    });
+    assert.equal(requests, 1);
+    assert.deepEqual(result, {
+      code: 1,
+      signal: null,
+      stdout: "",
+      stderr: "upstream api error: Project 1 is not accessible. Run `ontrack projects --include-inactive` to find your project IDs.\n",
+    });
+    assert.doesNotMatch(`${result.stdout}${result.stderr}`, /process-secret|auth login/);
+  } finally {
+    server.close();
+    await once(server, "close");
+  }
+}
+
 export async function test_terminal_output_preserves_unicode_and_never_emits_ansi(): Promise<void> {
   const server = createServer((request, response) => {
     assert.equal(request.url, "/api/projects?include_inactive=false");

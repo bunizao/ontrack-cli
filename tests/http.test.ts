@@ -38,6 +38,46 @@ export async function test_http_401_is_an_auth_error(): Promise<void> {
   );
 }
 
+export async function test_project_403_explains_how_to_find_an_accessible_id(): Promise<void> {
+  const client = new OnTrackClient(new HttpClient({
+    baseUrl: "https://ontrack.example.edu",
+    credentials: { username: "student", accessToken: "valid" },
+    fetch: async () => Response.json({ error: "Forbidden" }, { status: 403 }),
+  }));
+
+  await assert.rejects(
+    client.getProject(1),
+    (error) => error instanceof CliError
+      && error.category === "upstream_api"
+      && error.statusCode === 403
+      && error.message === "Project 1 is not accessible. Run `ontrack projects --include-inactive` to find your project IDs.",
+  );
+}
+
+export async function test_http_403_does_not_refresh_an_authorized_session(): Promise<void> {
+  let requests = 0;
+  let refreshes = 0;
+  const client = new HttpClient({
+    baseUrl: "https://ontrack.example.edu",
+    credentials: { username: "student", accessToken: "valid" },
+    refresh: async () => {
+      refreshes += 1;
+      return { username: "student", accessToken: "unexpected" };
+    },
+    fetch: async () => {
+      requests += 1;
+      return Response.json({ error: "Forbidden" }, { status: 403 });
+    },
+  });
+
+  await assert.rejects(
+    client.request("api/projects/1"),
+    (error) => error instanceof CliError && error.category === "upstream_api" && error.statusCode === 403,
+  );
+  assert.equal(requests, 1);
+  assert.equal(refreshes, 0);
+}
+
 export async function test_get_refreshes_after_419_and_retries_once(): Promise<void> {
   const tokens: string[] = [];
   let refreshes = 0;
