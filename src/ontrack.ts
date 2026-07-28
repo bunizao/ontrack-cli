@@ -10,10 +10,26 @@ export interface ProjectResourcesArchive {
 }
 
 function isZip(bytes: Uint8Array): boolean {
-  if (bytes.length < 4 || bytes[0] !== 0x50 || bytes[1] !== 0x4b) return false;
-  return (bytes[2] === 0x03 && bytes[3] === 0x04)
-    || (bytes[2] === 0x05 && bytes[3] === 0x06)
-    || (bytes[2] === 0x07 && bytes[3] === 0x08);
+  if (bytes.length < 22) return false;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const firstPossibleOffset = Math.max(0, bytes.length - 22 - 0xffff);
+  for (let offset = bytes.length - 22; offset >= firstPossibleOffset; offset -= 1) {
+    if (view.getUint32(offset, true) !== 0x06054b50) continue;
+    const commentLength = view.getUint16(offset + 20, true);
+    if (offset + 22 + commentLength !== bytes.length) continue;
+    const disk = view.getUint16(offset + 4, true);
+    const centralDisk = view.getUint16(offset + 6, true);
+    const diskEntries = view.getUint16(offset + 8, true);
+    const entries = view.getUint16(offset + 10, true);
+    const centralSize = view.getUint32(offset + 12, true);
+    const centralOffset = view.getUint32(offset + 16, true);
+    if (disk !== 0 || centralDisk !== 0 || diskEntries !== entries || centralOffset + centralSize > offset) return false;
+    if (entries === 0) return centralSize === 0;
+    return centralSize >= 46
+      && centralOffset + 4 <= offset
+      && view.getUint32(centralOffset, true) === 0x02014b50;
+  }
+  return false;
 }
 
 export interface AuthMethod {
@@ -51,7 +67,15 @@ export class OnTrackClient {
 
   async downloadProjectResources(projectId: number): Promise<ProjectResourcesArchive> {
     const project = await this.getProject(projectId);
-    const bytes = await this.http.download(`api/units/${project.unit.id}/all_resources`);
+    let bytes: Uint8Array;
+    try {
+      bytes = await this.http.download(`api/units/${project.unit.id}/all_resources`);
+    } catch (error) {
+      if (error instanceof CliError && error.statusCode === 401) {
+        throw new CliError("upstream_api", `Resources for project ${projectId} are not accessible`, 401);
+      }
+      throw error;
+    }
     if (!isZip(bytes)) {
       throw new CliError("upstream_contract", "OnTrack returned an invalid resource archive");
     }

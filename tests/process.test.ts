@@ -226,7 +226,7 @@ export async function test_process_downloads_project_resources_as_an_atomic_zip(
       "content-type": "application/octet-stream",
       "content-disposition": 'attachment; filename="FIT1061-resources.zip"',
     });
-    response.end(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
+    response.end(Buffer.from("UEsFBgAAAAAAAAAAAAAAAAAAAAAAAA==", "base64"));
   });
   const port = await listen(server);
   try {
@@ -245,7 +245,7 @@ export async function test_process_downloads_project_resources_as_an_atomic_zip(
       ONTRACK_CONFIG: "",
     });
     assert.deepEqual(urls, ["/api/projects/5183", "/api/units/15/all_resources"]);
-    assert.deepEqual([...readFileSync(output)], [0x50, 0x4b, 0x03, 0x04]);
+    assert.equal(readFileSync(output).toString("base64"), "UEsFBgAAAAAAAAAAAAAAAAAAAAAAAA==");
     assert.deepEqual(readdirSync(directory), ["FIT1061-resources.zip"]);
     assert.deepEqual(result, {
       code: 0,
@@ -254,7 +254,7 @@ export async function test_process_downloads_project_resources_as_an_atomic_zip(
         project_id: 5183,
         unit_id: 15,
         archive_path: output,
-        bytes_written: 4,
+        bytes_written: 22,
       }, null, 2)}\n`,
       stderr: "",
     });
@@ -276,7 +276,7 @@ export async function test_process_resource_download_preserves_an_existing_file(
       return;
     }
     response.writeHead(200, { "content-type": "application/octet-stream" });
-    response.end(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
+    response.end(Buffer.from("UEsFBgAAAAAAAAAAAAAAAAAAAAAAAA==", "base64"));
   });
   const port = await listen(server);
   try {

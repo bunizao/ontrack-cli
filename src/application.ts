@@ -15,6 +15,7 @@ export class OnTrackApplication implements CliApplication {
     private readonly sessionState: SessionState,
     private readonly client: OnTrackClient,
     private readonly clock: Clock,
+    private readonly signal?: AbortSignal,
   ) {}
 
   async user(): Promise<unknown> {
@@ -80,6 +81,7 @@ export class OnTrackApplication implements CliApplication {
     const archivePath = await writeResourceArchive(
       options.output ?? `ontrack-resources-${projectId}.zip`,
       archive.bytes,
+      this.signal,
     );
     return {
       project_id: archive.projectId,

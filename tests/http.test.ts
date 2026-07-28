@@ -69,6 +69,23 @@ export async function test_http_download_refreshes_once_after_419(): Promise<voi
   assert.deepEqual([...result], [0x50, 0x4b]);
 }
 
+export async function test_http_download_rejects_an_archive_over_512_mib_before_reading_it(): Promise<void> {
+  const client = new HttpClient({
+    baseUrl: "https://ontrack.example.edu",
+    credentials: { username: "student", accessToken: "valid" },
+    fetch: async () => new Response(new Uint8Array([0x50, 0x4b]), {
+      headers: { "Content-Length": String(512 * 1024 * 1024 + 1) },
+    }),
+  });
+
+  await assert.rejects(
+    client.download("api/units/15/all_resources"),
+    (error) => error instanceof CliError
+      && error.category === "upstream_api"
+      && /512 MiB/u.test(error.message),
+  );
+}
+
 export async function test_project_resources_resolve_the_unit_and_require_a_zip(): Promise<void> {
   const urls: string[] = [];
   const client = new OnTrackClient(new HttpClient({
@@ -80,7 +97,7 @@ export async function test_project_resources_resolve_the_unit_and_require_a_zip(
       if (url.pathname === "/api/projects/5183") {
         return Response.json({ id: 5183, unit: { id: 15, code: "FIT1061", name: "AI" }, tasks: [] });
       }
-      return new Response("not a zip", { headers: { "Content-Type": "text/html" } });
+      return new Response(new Uint8Array([0x50, 0x4b, 0x03, 0x04]));
     },
   }));
 
@@ -91,6 +108,27 @@ export async function test_project_resources_resolve_the_unit_and_require_a_zip(
       && error.message === "OnTrack returned an invalid resource archive",
   );
   assert.deepEqual(urls, ["/api/projects/5183", "/api/units/15/all_resources"]);
+}
+
+export async function test_project_resource_401_is_an_authorization_error_after_project_access(): Promise<void> {
+  const client = new OnTrackClient(new HttpClient({
+    baseUrl: "https://ontrack.example.edu",
+    credentials: { username: "student", accessToken: "valid" },
+    fetch: async (input) => {
+      const url = new URL(input instanceof Request ? input.url : input);
+      return url.pathname === "/api/projects/5183"
+        ? Response.json({ id: 5183, unit: { id: 15, code: "FIT1061", name: "AI" }, tasks: [] })
+        : Response.json({ error: "Not authorised" }, { status: 401 });
+    },
+  }));
+
+  await assert.rejects(
+    client.downloadProjectResources(5183),
+    (error) => error instanceof CliError
+      && error.category === "upstream_api"
+      && error.statusCode === 401
+      && error.message === "Resources for project 5183 are not accessible",
+  );
 }
 
 export async function test_http_401_is_an_auth_error(): Promise<void> {

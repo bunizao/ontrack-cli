@@ -118,7 +118,7 @@ async function createApplication(signal: AbortSignal, env: Environment, platform
       return { username: session.username, accessToken: session.accessToken };
     },
   });
-  return new OnTrackApplication(sessionState, new OnTrackClient(http), createClock(env.ONTRACK_NOW));
+  return new OnTrackApplication(sessionState, new OnTrackClient(http), createClock(env.ONTRACK_NOW), signal);
 }
 
 export async function main(argv = process.argv.slice(2)): Promise<number> {

@@ -28,6 +28,43 @@ interface HttpResponse {
   readonly bytes: Uint8Array;
 }
 
+const maxDownloadBytes = 512 * 1024 * 1024;
+
+async function responseBytes(response: Response, limit?: number): Promise<Uint8Array> {
+  if (limit === undefined) return new Uint8Array(await response.arrayBuffer());
+  const lengthHeader = response.headers.get("Content-Length");
+  const contentLength = lengthHeader && /^\d+$/u.test(lengthHeader) ? Number(lengthHeader) : undefined;
+  if (contentLength !== undefined && contentLength > limit) {
+    throw new CliError("upstream_api", "OnTrack resource archive exceeds the 512 MiB download limit");
+  }
+  if (contentLength !== undefined) {
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (bytes.length > limit) throw new CliError("upstream_api", "OnTrack resource archive exceeds the 512 MiB download limit");
+    return bytes;
+  }
+  if (!response.body) return new Uint8Array();
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.length;
+    if (total > limit) {
+      await reader.cancel();
+      throw new CliError("upstream_api", "OnTrack resource archive exceeds the 512 MiB download limit");
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return bytes;
+}
+
 export class HttpClient {
   readonly #baseUrl: URL;
   readonly #fetch: typeof globalThis.fetch;
@@ -59,11 +96,11 @@ export class HttpClient {
   async download(path: string, options: HttpRequestOptions = {}): Promise<Uint8Array> {
     const headers = new Headers(options.headers);
     if (!headers.has("Accept")) headers.set("Accept", "application/octet-stream");
-    const response = await this.#response(path, { ...options, headers });
+    const response = await this.#response(path, { ...options, headers }, maxDownloadBytes);
     return response.bytes;
   }
 
-  async #response(path: string, options: HttpRequestOptions): Promise<HttpResponse> {
+  async #response(path: string, options: HttpRequestOptions, responseLimit?: number): Promise<HttpResponse> {
     const url = new URL(path.replace(/^\//, ""), this.#baseUrl);
     for (const [key, value] of Object.entries(options.query ?? {})) {
       if (value !== undefined && value !== null) url.searchParams.set(key, String(value));
@@ -71,7 +108,7 @@ export class HttpClient {
     const method = (options.method ?? "GET").toUpperCase();
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const sessionVersion = this.#sessionVersion;
-      const response = await this.#send(url, method, options);
+      const response = await this.#send(url, method, options, responseLimit);
       if (response.status === 419 && method === "GET" && attempt === 0 && this.#refresh) {
         if (sessionVersion === this.#sessionVersion) {
           await this.#refreshOnce(options.signal ?? this.#signal ?? new AbortController().signal);
@@ -98,7 +135,7 @@ export class HttpClient {
     await this.#refreshing;
   }
 
-  async #send(url: URL, method: string, options: HttpRequestOptions): Promise<HttpResponse> {
+  async #send(url: URL, method: string, options: HttpRequestOptions, responseLimit?: number): Promise<HttpResponse> {
     const headers = new Headers(options.headers);
     if (!headers.has("Accept")) headers.set("Accept", "application/json");
     headers.set("Username", this.#credentials.username);
@@ -113,12 +150,17 @@ export class HttpClient {
       const init: RequestInit = { method, headers, signal };
       if (options.body !== undefined) init.body = options.body;
       const response = await this.#fetch(url, init);
+      if (!response.ok) {
+        await response.body?.cancel().catch(() => undefined);
+        return { status: response.status, ok: false, bytes: new Uint8Array() };
+      }
       return {
         status: response.status,
         ok: response.ok,
-        bytes: new Uint8Array(await response.arrayBuffer()),
+        bytes: await responseBytes(response, responseLimit),
       };
     } catch (error) {
+      if (error instanceof CliError) throw error;
       if (externalSignal?.aborted) {
         throw new CliError("cancellation", "Request cancelled");
       }

@@ -186,7 +186,7 @@ async function main() {
       }
       if (request.url === "/api/units/15/all_resources") {
         response.writeHead(200, { "content-type": "application/octet-stream" });
-        response.end(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
+        response.end(Buffer.from("UEsFBgAAAAAAAAAAAAAAAAAAAAAAAA==", "base64"));
       }
     });
     server.listen(0, "127.0.0.1");
@@ -208,8 +208,8 @@ async function main() {
       const resources = await run(runtime, [cli, "resources", "download", "5183", "--output", archive, "--json"], authenticatedEnv);
       const receipt = JSON.parse(resources.stdout || "null");
       assert(resources.code === 0 && resources.stderr === "", `${runtime} resource download failed: ${resources.stderr}`);
-      assert(receipt?.archive_path === archive && receipt?.bytes_written === 4, `${runtime} resource receipt is invalid`);
-      assert(readFileSync(archive).equals(Buffer.from([0x50, 0x4b, 0x03, 0x04])), `${runtime} resource archive is invalid`);
+      assert(receipt?.archive_path === archive && receipt?.bytes_written === 22, `${runtime} resource receipt is invalid`);
+      assert(readFileSync(archive).toString("base64") === "UEsFBgAAAAAAAAAAAAAAAAAAAAAAAA==", `${runtime} resource archive is invalid`);
     }
     rmSync(join(temporary, "session.json"), { force: true });
     const shimProjects = await run(shim, ["projects", "--json"], authenticatedEnv);

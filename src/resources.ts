@@ -10,14 +10,19 @@ function errorCode(error: unknown): unknown {
     : undefined;
 }
 
-export async function writeResourceArchive(destination: string, bytes: Uint8Array): Promise<string> {
+export async function writeResourceArchive(destination: string, bytes: Uint8Array, signal?: AbortSignal): Promise<string> {
   const archivePath = resolve(destination);
   const temporaryPath = join(dirname(archivePath), `.${basename(archivePath)}.${process.pid}.${randomUUID()}.tmp`);
   try {
-    await writeFile(temporaryPath, bytes, { flag: "wx" });
+    if (signal?.aborted) throw new CliError("cancellation", "Resource download cancelled");
+    await writeFile(temporaryPath, bytes, signal ? { flag: "wx", signal } : { flag: "wx" });
+    if (signal?.aborted) throw new CliError("cancellation", "Resource download cancelled");
     await link(temporaryPath, archivePath);
     return archivePath;
   } catch (error) {
+    if (signal?.aborted || (error instanceof Error && error.name === "AbortError")) {
+      throw new CliError("cancellation", "Resource download cancelled");
+    }
     if (errorCode(error) === "EEXIST") {
       throw new CliError("usage", `Output file already exists: ${archivePath}`);
     }
