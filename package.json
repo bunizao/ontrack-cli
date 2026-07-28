@@ -48,7 +48,6 @@
   "dependencies": {
     "@bunizao/cli-kit": "^0.1.0",
     "@opendocsg/pdf2md": "0.2.7",
-    "@steipete/sweet-cookie": "0.4.0",
-    "playwright-core": "^1.62.0"
+    "@steipete/sweet-cookie": "0.4.0"
   }
 }

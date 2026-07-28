@@ -154,9 +154,21 @@ async function main() {
       "chromeSqlite",
       "shared.js",
     );
+    const bundledCookieReaderSource = readFileSync(bundledCookieReader, "utf8");
     assert(
-      readFileSync(bundledCookieReader, "utf8").includes("statement.setReadBigInts(true)"),
+      bundledCookieReaderSource.includes("statement.setReadBigInts(true)"),
       "packed browser cookie reader is missing the Node 22 bigint fix",
+    );
+    const directReadMarkers = [
+      'import { pathToFileURL } from "node:url";',
+      "const directResult = await readChromeDatabase(options.dbPath, where);",
+      "function readOnlyDatabasePaths(dbPath)",
+      "async function readChromeDatabase(dbPath, where)",
+    ];
+    assert(
+      directReadMarkers.every((marker) => bundledCookieReaderSource.includes(marker))
+        && bundledCookieReaderSource.indexOf(directReadMarkers[1]) < bundledCookieReaderSource.indexOf("mkdtempSync("),
+      "packed browser cookie reader is missing the direct Chrome database read",
     );
 
     const shimHelp = await run(shim, ["--help"]);

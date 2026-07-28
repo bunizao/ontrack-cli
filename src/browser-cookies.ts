@@ -8,9 +8,8 @@ import {
   type ProfileType,
 } from "@steipete/sweet-cookie";
 import { existsSync } from "node:fs";
-import { readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, join, posix } from "node:path";
+import { posix } from "node:path";
 
 export interface BrowserCookie {
   readonly name: string;
@@ -37,68 +36,13 @@ export interface BrowserCookieOptions {
   readonly platform?: NodeJS.Platform;
 }
 
-export interface AuthenticationCookieOptions extends BrowserCookieOptions {
-  readonly includeBrowsers?: boolean;
-  readonly storageStateDirectory?: string;
-}
-
 const COOKIE_NAMES = ["username", "refresh_token"] as const;
 
 export async function authenticationCookieCandidates(
   baseUrl: string,
-  options: AuthenticationCookieOptions = {},
+  options: BrowserCookieOptions = {},
 ): Promise<BrowserCookieCandidate[]> {
-  const browser = options.includeBrowsers === false ? [] : await browserCookieCandidates(baseUrl, options);
-  const directory = options.storageStateDirectory ?? join(options.homeDir ?? homedir(), ".okta-auth", "sessions");
-  const stored = await storageStateCookieCandidates(directory);
-  return [...browser, ...stored];
-}
-
-export async function storageStateCookieCandidates(directory: string): Promise<BrowserCookieCandidate[]> {
-  let files: string[];
-  try {
-    files = (await readdir(directory)).filter((file) => file.endsWith(".json") && !file.endsWith(".meta.json")).sort();
-  } catch {
-    return [];
-  }
-  const candidates: BrowserCookieCandidate[] = [];
-  for (const file of files) {
-    let value: unknown;
-    try {
-      value = JSON.parse(await readFile(join(directory, file), "utf8"));
-    } catch {
-      continue;
-    }
-    if (typeof value !== "object" || value === null || Array.isArray(value)) continue;
-    const rawCookies = Reflect.get(value, "cookies");
-    if (!Array.isArray(rawCookies)) continue;
-    const cookies = rawCookies.flatMap((item): BrowserCookie[] => {
-      if (typeof item !== "object" || item === null || Array.isArray(item)) return [];
-      const data = item as Record<string, unknown>;
-      if (
-        !COOKIE_NAMES.includes(data.name as (typeof COOKIE_NAMES)[number])
-        || typeof data.value !== "string"
-        || !data.value
-        || typeof data.domain !== "string"
-        || !data.domain
-      ) return [];
-      return [{
-        name: data.name as string,
-        value: data.value,
-        domain: data.domain,
-        ...(typeof data.path === "string" ? { path: data.path } : {}),
-        ...(typeof data.secure === "boolean" ? { secure: data.secure } : {}),
-        ...(typeof data.expires === "string" || typeof data.expires === "number" ? { expires: data.expires } : {}),
-      }];
-    });
-    const pair = COOKIE_NAMES.map((name) => cookies.find((cookie) => cookie.name === name));
-    if (pair.some((cookie) => !cookie)) continue;
-    candidates.push({
-      source: `browser-session:${basename(file, ".json")}`,
-      cookies: pair as BrowserCookie[],
-    });
-  }
-  return candidates;
+  return browserCookieCandidates(baseUrl, options);
 }
 
 export async function browserCookieCandidates(

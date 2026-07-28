@@ -50,3 +50,80 @@ export function test_chromium_expiry_larger_than_number_is_read_on_supported_nod
     rmSync(directory, { recursive: true, force: true });
   }
 }
+
+export function test_chromium_database_is_read_directly_before_creating_a_snapshot(): void {
+  const directory = mkdtempSync(join(tmpdir(), "ontrack-cookie-direct-"));
+  const database = join(directory, "Cookies");
+  const unusableTemporaryDirectory = join(directory, "not-a-directory");
+  const script = `
+    import { DatabaseSync } from "node:sqlite";
+    import { writeFileSync } from "node:fs";
+    import { resolve } from "node:path";
+    import { pathToFileURL } from "node:url";
+    const [database, unusableTemporaryDirectory] = process.argv.slice(1);
+    const db = new DatabaseSync(database);
+    db.exec("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT); CREATE TABLE cookies (name TEXT, value TEXT, host_key TEXT, path TEXT, expires_utc INTEGER, samesite INTEGER, encrypted_value BLOB, is_secure INTEGER, is_httponly INTEGER);");
+    db.prepare("INSERT INTO meta VALUES (?, ?)").run("version", "23");
+    db.prepare("INSERT INTO cookies VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").run("refresh_token", "fixture", ".example.edu", "/api/auth", 0, 1, new Uint8Array(), 1, 1);
+    db.close();
+    writeFileSync(unusableTemporaryDirectory, "blocks mkdtemp");
+    process.env.TMPDIR = unusableTemporaryDirectory;
+    const shared = resolve("node_modules/@steipete/sweet-cookie/dist/providers/chromeSqlite/shared.js");
+    const { getCookiesFromChromeSqliteDb } = await import(pathToFileURL(shared));
+    const result = await getCookiesFromChromeSqliteDb({ dbPath: database }, ["https://ontrack.example.edu"], new Set(["refresh_token"]), () => null);
+    if (result.warnings.length || result.cookies.length !== 1) process.exit(1);
+  `;
+  const executable = Reflect.get(process.versions, "bun") ? "node" : process.execPath;
+  try {
+    const result = spawnSync(executable, [
+      "--experimental-sqlite",
+      "--disable-warning=ExperimentalWarning",
+      "--input-type=module",
+      "--eval",
+      script,
+      database,
+      unusableTemporaryDirectory,
+    ], { encoding: "utf8" });
+
+    assert.equal(result.status, 0, result.stderr);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+export function test_chromium_database_snapshot_remains_a_fallback_for_a_locked_database(): void {
+  const directory = mkdtempSync(join(tmpdir(), "ontrack-cookie-fallback-"));
+  const database = join(directory, "Cookies");
+  const script = `
+    import { DatabaseSync } from "node:sqlite";
+    import { resolve } from "node:path";
+    import { pathToFileURL } from "node:url";
+    const database = process.argv[1];
+    const db = new DatabaseSync(database);
+    db.exec("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT); CREATE TABLE cookies (name TEXT, value TEXT, host_key TEXT, path TEXT, expires_utc INTEGER, samesite INTEGER, encrypted_value BLOB, is_secure INTEGER, is_httponly INTEGER);");
+    db.prepare("INSERT INTO meta VALUES (?, ?)").run("version", "23");
+    db.prepare("INSERT INTO cookies VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").run("refresh_token", "fixture", ".example.edu", "/api/auth", 0, 1, new Uint8Array(), 1, 1);
+    db.exec("BEGIN EXCLUSIVE");
+    const shared = resolve("node_modules/@steipete/sweet-cookie/dist/providers/chromeSqlite/shared.js");
+    const { getCookiesFromChromeSqliteDb } = await import(pathToFileURL(shared));
+    const result = await getCookiesFromChromeSqliteDb({ dbPath: database }, ["https://ontrack.example.edu"], new Set(["refresh_token"]), () => null);
+    db.exec("ROLLBACK");
+    db.close();
+    if (result.warnings.length || result.cookies.length !== 1) process.exit(1);
+  `;
+  const executable = Reflect.get(process.versions, "bun") ? "node" : process.execPath;
+  try {
+    const result = spawnSync(executable, [
+      "--experimental-sqlite",
+      "--disable-warning=ExperimentalWarning",
+      "--input-type=module",
+      "--eval",
+      script,
+      database,
+    ], { encoding: "utf8" });
+
+    assert.equal(result.status, 0, result.stderr);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
