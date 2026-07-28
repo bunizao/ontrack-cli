@@ -38,7 +38,10 @@ async function responseBytes(response: Response, limit?: number): Promise<Uint8A
   if (limit === undefined) return new Uint8Array(await response.arrayBuffer());
   const lengthHeader = response.headers.get("Content-Length");
   const contentLength = lengthHeader && /^\d+$/u.test(lengthHeader) ? Number(lengthHeader) : undefined;
-  if (contentLength !== undefined && contentLength > limit) throw archiveTooLarge();
+  if (contentLength !== undefined && contentLength > limit) {
+    await response.body?.cancel().catch(() => undefined);
+    throw archiveTooLarge();
+  }
   if (!response.body) return new Uint8Array();
   const reader = response.body.getReader();
   let bytes = new Uint8Array(Math.min(64 * 1024, limit));

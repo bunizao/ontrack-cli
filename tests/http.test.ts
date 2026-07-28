@@ -70,10 +70,13 @@ export async function test_http_download_refreshes_once_after_419(): Promise<voi
 }
 
 export async function test_http_download_rejects_an_archive_over_256_mib_before_reading_it(): Promise<void> {
+  let cancelled = false;
   const client = new HttpClient({
     baseUrl: "https://ontrack.example.edu",
     credentials: { username: "student", accessToken: "valid" },
-    fetch: async () => new Response(new Uint8Array([0x50, 0x4b]), {
+    fetch: async () => new Response(new ReadableStream({
+      cancel: () => { cancelled = true; },
+    }), {
       headers: { "Content-Length": String(256 * 1024 * 1024 + 1) },
     }),
   });
@@ -84,6 +87,7 @@ export async function test_http_download_rejects_an_archive_over_256_mib_before_
       && error.category === "upstream_api"
       && /256 MiB/u.test(error.message),
   );
+  assert.equal(cancelled, true);
 }
 
 export async function test_project_resources_resolve_the_unit_and_require_a_zip(): Promise<void> {
