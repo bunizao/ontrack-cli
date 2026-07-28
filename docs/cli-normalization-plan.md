@@ -224,6 +224,47 @@ Config directory stays `~/.config/<tool>-cli/`.
 New package. Keep it small — it exists to delete duplication, not to add a layer. Target under
 600 lines of source. If a helper is used by only one tool, it does not belong here.
 
+### 3.0 Where it lives
+
+**Its own repository and its own npm package**: `bunizao/cli-kit` → `@bunizao/cli-kit`.
+
+The reason is release cadence, not code size. The three CLIs ship independently, and the contract
+in §2 has to hold across all three. A versioned dependency is the only mechanism that enforces
+that. Hosting the kit inside one CLI's repo would subordinate the other two to an unrelated
+release cycle; vendoring a copy into each repo reintroduces exactly the drift this plan exists to
+remove.
+
+Rules:
+
+- **The contract is the API.** The exit-code table (§2.2), the error vocabulary (§2.3), and the
+  closed verb set (§2.1) are exported values. Changing any of them is a **major** version bump.
+  Consumers depend with `^`, so a contract change forces a deliberate, visible upgrade in each
+  repo. That friction is the point.
+- **The cross-tool conformance suite (P4) lives in the kit's repo**, not in the three CLIs. Its CI
+  installs the three published packages and asserts §6. One contract, one home, one gate. Each CLI
+  repo keeps only its own verb-set assertion (§3.3), which is cheap and local.
+- During P1, before the first publish, consumers use `npm link` or a `file:../cli-kit` dependency.
+- The kit must not raise any consumer's Node floor — see §7.7.
+
+### 3.0.1 Package naming (do this at the same time)
+
+The three CLIs are inconsistently named on npm today: `@bunizao/ontrack` is scoped, `moodle-cli`
+and `edstem-cli` are not. Normalize to `@bunizao/ontrack`, `@bunizao/moodle`, `@bunizao/edstem`.
+Publish a final unscoped release of each old name carrying a `deprecate` notice pointing at the
+scoped one. Unscoped generic names also carry a long-term squatting and confusion risk.
+
+### 3.0.2 Monorepo — deferred, with a trigger
+
+A single repository holding all three CLIs plus the kit is technically stronger: the conformance
+suite would run against source instead of published artifacts, and a contract change would be one
+pull request instead of four. It is deferred because three git histories would have to be merged
+or discarded, edstem-cli additionally ships a Bun remote server and an MCP server, and each tool
+loses its own issue tracker and discoverability.
+
+**Revisit when** lockstep releases — a kit change that forces bumping all three consumers — happen
+more than about once a month. At that point the cost of separate repos exceeds the cost of the
+migration.
+
 ### 3.1 Exports
 
 ```ts
