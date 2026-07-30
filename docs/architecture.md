@@ -35,7 +35,7 @@ The cache stores the deployment URL, username, access token, expiry, and credent
 
 Browser discovery is delegated to `@steipete/sweet-cookie`, then normalized behind the local browser-cookie boundary. Each browser is queried separately so credentials from different profiles are never combined. Non-fatal provider warnings are shown during `auth login` without exposing cookie values.
 
-When no usable browser cookies exist, `auth login` requests a dynamic SAML URL from `/api/auth/method`, waits for terminal confirmation, opens the system browser, and polls supported browser profiles for the completed OnTrack session. Other commands never start interactive authentication.
+When no usable browser cookies exist, `auth login` requests a dynamic SAML URL from `/api/auth/method` and starts a temporary `127.0.0.1` listener. After signing in, the user runs the printed one-time snippet in the OnTrack tab. The browser exchanges its HttpOnly session cookie for an access token and returns it through a top-level navigation to the listener; the CLI validates the random state and expiry before caching the session. Other commands never start interactive authentication.
 
 Authentication cannot extend a server-side session beyond the deployment or identity provider policy. When the browser session expires, interactive sign-in is required.
 

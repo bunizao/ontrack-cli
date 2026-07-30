@@ -103,13 +103,6 @@ async function authLogin(signal: AbortSignal, env: Environment, platform: NodeJS
   });
   const config = loadConfig(paths);
   const baseUrl = resolveBaseUrl(env, config);
-  const shownWarnings = new Set<string>();
-  const showWarning = (warning: string): void => {
-    if (warning.endsWith("cookies database not found.")) return;
-    if (shownWarnings.has(warning)) return;
-    shownWarnings.add(warning);
-    process.stderr.write(`Browser cookie warning: ${warning}\n`);
-  };
   const browserCookieProvider = async () => {
     const warnings: string[] = [];
     const candidates = await authenticationCookieCandidates(baseUrl, {
@@ -119,7 +112,9 @@ async function authLogin(signal: AbortSignal, env: Environment, platform: NodeJS
     if (candidates.length > 0) return candidates;
     // No readable browser session (locked cookies, no Keychain/FDA, or not signed in yet).
     // Fall through to the loopback sign-in below instead of forcing a Files & Folders grant.
-    for (const warning of warnings) showWarning(warning);
+    if (warnings.some((warning) => !warning.endsWith("cookies database not found."))) {
+      process.stderr.write("Browser cookie warning: Direct browser-cookie reuse is unavailable. Continuing with loopback sign-in.\n");
+    }
     return candidates;
   };
   const session = await loginAuthenticatedSession({

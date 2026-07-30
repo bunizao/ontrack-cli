@@ -76,7 +76,7 @@ A signed, notarized app with a stable bundle identity can make the one-time File
 
 ## Recommendation for `ontrack-cli`
 
-Keep raw Chrome database extraction as a zero-install fast path for users who already granted Files & Folders access. For the no-FDA/no-Files-and-Folders path, build the narrow extension plus Native Messaging flow. Fail immediately on `EPERM`; do not open the SAML URL and poll a database that the process is unable to read. Do not add `sudo`, `authopen`, a privileged helper, or AppleScript elevation.
+Keep raw Chrome database extraction as a zero-install fast path for users who already granted Files & Folders access. When direct cookie reuse fails, warn once and continue through the loopback sign-in instead of polling an unreadable database or requiring a privacy grant. Do not add `sudo`, `authopen`, a privileged helper, or AppleScript elevation. A narrow extension plus Native Messaging can later replace the manual DevTools paste without changing the browser-side exchange.
 
 ## Shipped design (2026-07-30)
 

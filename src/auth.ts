@@ -62,6 +62,7 @@ export interface LoopbackLoginRequest {
   readonly state: string;
   readonly timeoutMs: number;
   readonly signal: AbortSignal | undefined;
+  readonly now?: () => Date;
   readonly onListening: (port: number) => Promise<void>;
 }
 
@@ -377,11 +378,12 @@ function buildLoginSnippet(port: number, state: string): string {
 }
 
 function loopbackResultPage(message: string): string {
-  return `<!doctype html><meta charset="utf-8"><title>OnTrack CLI</title>`
+  return `<!doctype html><meta charset="utf-8"><meta name="referrer" content="no-referrer"><title>OnTrack CLI</title>`
+    + `<script>history.replaceState(null,"",location.pathname);</script>`
     + `<body style="font:16px system-ui,sans-serif;margin:3rem;color:#222"><p>${message}</p></body>`;
 }
 
-export const nodeLoopbackListener: LoopbackLoginListener = ({ state, timeoutMs, signal, onListening }) =>
+export const nodeLoopbackListener: LoopbackLoginListener = ({ state, timeoutMs, signal, now = () => new Date(), onListening }) =>
   new Promise<LoopbackCallbackResult>((resolve, reject) => {
     if (signal?.aborted) {
       reject(new CliError("cancellation", "Authentication cancelled."));
@@ -409,6 +411,9 @@ export const nodeLoopbackListener: LoopbackLoginListener = ({ state, timeoutMs, 
     server.on("error", (error) => finish(() => reject(authError(`Could not start the local sign-in listener: ${error.message}`))));
     server.on("request", (request, response) => {
       response.setHeader("Connection", "close");
+      response.setHeader("Cache-Control", "no-store");
+      response.setHeader("Referrer-Policy", "no-referrer");
+      response.setHeader("X-Content-Type-Options", "nosniff");
       const url = new URL(request.url ?? "/", "http://127.0.0.1");
       if (url.pathname !== "/cb") {
         response.statusCode = 404;
@@ -424,7 +429,7 @@ export const nodeLoopbackListener: LoopbackLoginListener = ({ state, timeoutMs, 
       const expiry = url.searchParams.get("expiry") ?? "";
       const username = url.searchParams.get("username") ?? "";
       response.setHeader("Content-Type", "text/html; charset=utf-8");
-      if (!token || !expiry || !username) {
+      if (!token || !expiry || !username || !isFuture(expiry, now())) {
         response.statusCode = 400;
         response.end(loopbackResultPage("Sign-in could not be completed. Return to the terminal and try again."));
         return;
@@ -499,7 +504,7 @@ export async function loginAuthenticatedSession(
   const openBrowser = options.openBrowser;
   const loginTimeoutMs = options.loginTimeoutMs ?? 300_000;
   const state = (options.createState ?? randomUUID)();
-  const listen = options.loopbackLoginListener ?? nodeLoopbackListener;
+  const runLoopbackLogin = options.loopbackLoginListener ?? nodeLoopbackListener;
 
   const onListening = async (port: number): Promise<void> => {
     options.onLoginUrl?.(loginUrl);
@@ -521,15 +526,21 @@ export async function loginAuthenticatedSession(
     options.onBrowserWait?.(loginTimeoutMs);
   };
 
-  const callback = await listen({ state, timeoutMs: loginTimeoutMs, signal: options.signal, onListening });
-  if (!callback.token || !callback.username || !isFuture(callback.expiry, now)) {
+  const result = await runLoopbackLogin({
+    state,
+    timeoutMs: loginTimeoutMs,
+    signal: options.signal,
+    now: () => currentTime(options),
+    onListening,
+  });
+  if (!result.token || !result.username || !isFuture(result.expiry, currentTime(options))) {
     throw authError("The browser sign-in returned an invalid or expired session.");
   }
   const session: AuthenticatedSession = {
     baseUrl: options.baseUrl,
-    username: callback.username,
-    accessToken: callback.token,
-    authTokenExpiry: new Date(callback.expiry).toISOString(),
+    username: result.username,
+    accessToken: result.token,
+    authTokenExpiry: new Date(result.expiry).toISOString(),
     provenance: "browser",
     user: null,
   };

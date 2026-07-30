@@ -325,15 +325,40 @@ export async function test_loopback_listener_resolves_on_matching_state(): Promi
     state: "s-1",
     timeoutMs: 5_000,
     signal: undefined,
+    now: () => new Date("2029-01-01T00:00:00Z"),
     onListening: async (port) => {
       const bad = await fetch(`http://127.0.0.1:${port}/cb?state=wrong&token=t&expiry=2030-01-01T00:00:00Z&username=a`);
       assert.equal(bad.status, 204);
       const response = await fetch(`http://127.0.0.1:${port}/cb?state=s-1&token=tok&expiry=2030-01-01T00:00:00Z&username=alice`);
       assert.equal(response.status, 200);
-      assert.match(await response.text(), /Signed in/u);
+      assert.equal(response.headers.get("cache-control"), "no-store");
+      assert.equal(response.headers.get("referrer-policy"), "no-referrer");
+      const body = await response.text();
+      assert.match(body, /history\.replaceState/u);
+      assert.match(body, /Signed in/u);
     },
   });
   assert.deepEqual(result, { token: "tok", expiry: "2030-01-01T00:00:00Z", username: "alice" });
+}
+
+export async function test_loopback_listener_rejects_expired_callback_before_success(): Promise<void> {
+  const result = await nodeLoopbackListener({
+    state: "s-expired",
+    timeoutMs: 5_000,
+    signal: undefined,
+    now: () => new Date("2029-01-01T00:00:00Z"),
+    onListening: async (port) => {
+      const expired = await fetch(`http://127.0.0.1:${port}/cb?state=s-expired&token=old&expiry=2028-01-01T00:00:00Z&username=alice`);
+      assert.equal(expired.status, 400);
+      const expiredBody = await expired.text();
+      assert.match(expiredBody, /history\.replaceState/u);
+      assert.doesNotMatch(expiredBody, /Signed in/u);
+
+      const valid = await fetch(`http://127.0.0.1:${port}/cb?state=s-expired&token=fresh&expiry=2030-01-01T00:00:00Z&username=alice`);
+      assert.equal(valid.status, 200);
+    },
+  });
+  assert.equal(result.token, "fresh");
 }
 
 export async function test_loopback_listener_rejects_incomplete_callback(): Promise<void> {
@@ -451,6 +476,34 @@ export async function test_interactive_browser_login_rejects_expired_callback_to
     promptEnter: async () => {},
     openBrowser: async () => {},
     now: () => new Date("2029-01-01T00:00:00Z"),
+    fetch: async () => Response.json({
+      method: "saml",
+      redirect_to: "https://identity.example.edu/ontrack/saml",
+    }),
+  }), (error) => error instanceof CliError
+    && error.category === "auth"
+    && /invalid or expired/u.test(error.message));
+
+  await assert.rejects(stat(sessionFile), (error) => (error as NodeJS.ErrnoException).code === "ENOENT");
+}
+
+export async function test_interactive_browser_login_rechecks_callback_expiry_after_wait(): Promise<void> {
+  const directory = await temporaryDirectory();
+  const sessionFile = join(directory, "session.json");
+  let now = new Date("2029-01-01T00:00:00Z");
+
+  await assert.rejects(loginAuthenticatedSession({
+    baseUrl: "https://school.example.edu",
+    sessionFile,
+    browserCookieProvider: async () => [],
+    loopbackLoginListener: async ({ onListening }) => {
+      await onListening(1);
+      now = new Date("2029-01-01T00:02:00Z");
+      return { token: "stale", expiry: "2029-01-01T00:01:00Z", username: "alice" };
+    },
+    promptEnter: async () => {},
+    openBrowser: async () => {},
+    now: () => now,
     fetch: async () => Response.json({
       method: "saml",
       redirect_to: "https://identity.example.edu/ontrack/saml",
