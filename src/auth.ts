@@ -1,4 +1,6 @@
+import { randomUUID } from "node:crypto";
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import { dirname } from "node:path";
 
 import type { BrowserCookie, BrowserCookieCandidate } from "./browser-cookies.js";
@@ -50,13 +52,30 @@ export interface ResolveAuthenticatedSessionOptions extends BrowserSessionOption
   readonly skipCache?: boolean;
 }
 
+export interface LoopbackCallbackResult {
+  readonly token: string;
+  readonly expiry: string;
+  readonly username: string;
+}
+
+export interface LoopbackLoginRequest {
+  readonly state: string;
+  readonly timeoutMs: number;
+  readonly signal: AbortSignal | undefined;
+  readonly onListening: (port: number) => Promise<void>;
+}
+
+export type LoopbackLoginListener = (request: LoopbackLoginRequest) => Promise<LoopbackCallbackResult>;
+
 export interface LoginAuthenticatedSessionOptions extends BrowserSessionOptions {
   readonly loginTimeoutMs?: number;
-  readonly loginPollIntervalMs?: number;
   readonly onLoginUrl?: (url: string) => void;
+  readonly onConsoleSnippet?: (snippet: string) => void;
   readonly onBrowserWait?: (timeoutMs: number) => void;
   readonly promptEnter?: (message: string) => Promise<void>;
   readonly openBrowser?: (url: string) => Promise<void>;
+  readonly createState?: () => string;
+  readonly loopbackLoginListener?: LoopbackLoginListener;
 }
 
 function authError(message: string): CliError {
@@ -343,21 +362,83 @@ async function exchangeBrowserCookieCandidates(
   return undefined;
 }
 
-function waitForBrowserCookies(delayMs: number, signal?: AbortSignal): Promise<void> {
-  if (signal?.aborted) return Promise.reject(new CliError("cancellation", "Authentication cancelled."));
-  return new Promise((resolve, reject) => {
-    const cancel = (): void => {
-      clearTimeout(timeout);
-      reject(new CliError("cancellation", "Authentication cancelled."));
-    };
-    const timeout = setTimeout(() => {
-      signal?.removeEventListener("abort", cancel);
-      resolve();
-    }, delayMs);
-    signal?.addEventListener("abort", cancel, { once: true });
-    if (signal?.aborted) cancel();
-  });
+function buildLoginSnippet(port: number, state: string): string {
+  const callback = `http://127.0.0.1:${port}/cb`;
+  return (
+    `fetch('/api/auth/access-token',{method:'POST',credentials:'include',`
+    + `headers:{'Content-Type':'application/json'},body:'{"delete_auth_token":false}'})`
+    + `.then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json();})`
+    + `.then(function(d){var u=new URL(${JSON.stringify(callback)});`
+    + `u.search=new URLSearchParams({state:${JSON.stringify(state)},token:d.auth_token,`
+    + `expiry:d.auth_token_expiry,username:(d.user||{}).username||''}).toString();`
+    + `location.href=u.toString();})`
+    + `.catch(function(e){alert('OnTrack CLI sign-in failed: '+e.message);});`
+  );
 }
+
+function loopbackResultPage(message: string): string {
+  return `<!doctype html><meta charset="utf-8"><title>OnTrack CLI</title>`
+    + `<body style="font:16px system-ui,sans-serif;margin:3rem;color:#222"><p>${message}</p></body>`;
+}
+
+export const nodeLoopbackListener: LoopbackLoginListener = ({ state, timeoutMs, signal, onListening }) =>
+  new Promise<LoopbackCallbackResult>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new CliError("cancellation", "Authentication cancelled."));
+      return;
+    }
+    const server = createServer();
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    function finish(run: () => void): void {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      server.close();
+      run();
+    }
+    function onAbort(): void {
+      finish(() => reject(new CliError("cancellation", "Authentication cancelled.")));
+    }
+    timer = setTimeout(() => finish(() => reject(authError(
+      "Timed out waiting for the browser sign-in. Rerun `ontrack auth login` and paste the snippet after signing in.",
+    ))), timeoutMs);
+    signal?.addEventListener("abort", onAbort, { once: true });
+
+    server.on("error", (error) => finish(() => reject(authError(`Could not start the local sign-in listener: ${error.message}`))));
+    server.on("request", (request, response) => {
+      response.setHeader("Connection", "close");
+      const url = new URL(request.url ?? "/", "http://127.0.0.1");
+      if (url.pathname !== "/cb") {
+        response.statusCode = 404;
+        response.end();
+        return;
+      }
+      if (url.searchParams.get("state") !== state) {
+        response.statusCode = 204;
+        response.end();
+        return;
+      }
+      const token = url.searchParams.get("token") ?? "";
+      const expiry = url.searchParams.get("expiry") ?? "";
+      const username = url.searchParams.get("username") ?? "";
+      response.setHeader("Content-Type", "text/html; charset=utf-8");
+      if (!token || !expiry || !username) {
+        response.statusCode = 400;
+        response.end(loopbackResultPage("Sign-in could not be completed. Return to the terminal and try again."));
+        return;
+      }
+      response.statusCode = 200;
+      response.end(loopbackResultPage("Signed in. You can close this tab and return to the terminal."));
+      finish(() => resolve({ token, expiry, username }));
+    });
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      const port = address && typeof address === "object" ? address.port : 0;
+      Promise.resolve(onListening(port)).catch((error: unknown) => finish(() => reject(error)));
+    });
+  });
 
 export async function resolveAuthenticatedSession(
   options: ResolveAuthenticatedSessionOptions,
@@ -414,35 +495,44 @@ export async function loginAuthenticatedSession(
   if (!options.promptEnter || !options.openBrowser) {
     throw authError("Interactive browser login is unavailable in this environment.");
   }
-  options.onLoginUrl?.(loginUrl);
-  try {
-    await options.promptEnter("No active OnTrack browser session was found. Press Enter to open the sign-in URL in your default browser.");
-  } catch (error) {
-    if (options.signal?.aborted) throw new CliError("cancellation", "Authentication cancelled.");
-    if (error instanceof CliError) throw error;
-    throw authError("Could not read confirmation for browser sign-in.");
-  }
-  if (options.signal?.aborted) throw new CliError("cancellation", "Authentication cancelled.");
-  try {
-    await options.openBrowser(loginUrl);
-  } catch {
-    if (options.signal?.aborted) throw new CliError("cancellation", "Authentication cancelled.");
-    throw authError("Could not open the OnTrack sign-in page in your browser.");
-  }
-
+  const promptEnter = options.promptEnter;
+  const openBrowser = options.openBrowser;
   const loginTimeoutMs = options.loginTimeoutMs ?? 300_000;
-  options.onBrowserWait?.(loginTimeoutMs);
-  const pollIntervalMs = options.loginPollIntervalMs ?? 1_000;
-  const deadline = Date.now() + loginTimeoutMs;
-  while (true) {
-    const pollNow = currentTime(options);
-    const session = await exchangeBrowserCookieCandidates(options, pollNow, fetchImplementation, exchangeTimeoutMs);
-    if (session) return session;
-    const remainingMs = deadline - Date.now();
-    if (remainingMs <= 0) {
-      const signInPage = new URL("/sign_in", options.baseUrl).href;
-      throw authError(`No reusable browser session was detected. Open ${signInPage}, enable Remember me, then run \`ontrack auth login\` again.`);
+  const state = (options.createState ?? randomUUID)();
+  const listen = options.loopbackLoginListener ?? nodeLoopbackListener;
+
+  const onListening = async (port: number): Promise<void> => {
+    options.onLoginUrl?.(loginUrl);
+    options.onConsoleSnippet?.(buildLoginSnippet(port, state));
+    try {
+      await promptEnter("Sign in through the browser, then paste the snippet above into the OnTrack tab's DevTools console. Press Enter to open the sign-in page.");
+    } catch (error) {
+      if (options.signal?.aborted) throw new CliError("cancellation", "Authentication cancelled.");
+      if (error instanceof CliError) throw error;
+      throw authError("Could not read confirmation for browser sign-in.");
     }
-    await waitForBrowserCookies(Math.min(pollIntervalMs, remainingMs), options.signal);
+    if (options.signal?.aborted) throw new CliError("cancellation", "Authentication cancelled.");
+    try {
+      await openBrowser(loginUrl);
+    } catch {
+      if (options.signal?.aborted) throw new CliError("cancellation", "Authentication cancelled.");
+      throw authError("Could not open the OnTrack sign-in page in your browser.");
+    }
+    options.onBrowserWait?.(loginTimeoutMs);
+  };
+
+  const callback = await listen({ state, timeoutMs: loginTimeoutMs, signal: options.signal, onListening });
+  if (!callback.token || !callback.username || !isFuture(callback.expiry, now)) {
+    throw authError("The browser sign-in returned an invalid or expired session.");
   }
+  const session: AuthenticatedSession = {
+    baseUrl: options.baseUrl,
+    username: callback.username,
+    accessToken: callback.token,
+    authTokenExpiry: new Date(callback.expiry).toISOString(),
+    provenance: "browser",
+    user: null,
+  };
+  await saveStoredSession(options.sessionFile, session);
+  return session;
 }

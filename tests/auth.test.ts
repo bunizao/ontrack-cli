@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import {
   loginAuthenticatedSession,
+  nodeLoopbackListener,
   resolveAuthenticatedSession as resolveAuthenticatedSessionWithRuntime,
   type ResolveAuthenticatedSessionOptions,
 } from "../src/auth.js";
@@ -266,21 +267,25 @@ export async function test_auth_login_reuses_browser_cookies_without_prompting()
   assert.equal(opened, false);
 }
 
-export async function test_interactive_browser_login_discovers_redirect_and_retries_browser_cookies(): Promise<void> {
+export async function test_interactive_browser_login_completes_via_loopback_callback(): Promise<void> {
   const directory = await temporaryDirectory();
+  const sessionFile = join(directory, "session.json");
   const events: string[] = [];
-  let cookieReads = 0;
+  let snippet = "";
   const session = await loginAuthenticatedSession({
     baseUrl: "https://school.example.edu",
-    sessionFile: join(directory, "session.json"),
-    browserCookieProvider: async () => {
-      cookieReads += 1;
-      events.push(`cookies:${cookieReads}`);
-      return cookieReads === 1 ? [] : browserCandidate(validCookies());
+    sessionFile,
+    browserCookieProvider: async () => [],
+    createState: () => "state-123",
+    loopbackLoginListener: async ({ state, onListening }) => {
+      events.push(`listen:${state}`);
+      await onListening(45678);
+      return { token: "access-secret", expiry: "2030-01-01T00:00:00Z", username: "alice" };
     },
     onLoginUrl: (url) => { events.push(`url:${url}`); },
+    onConsoleSnippet: (value) => { snippet = value; events.push("snippet"); },
     onBrowserWait: (timeoutMs) => { events.push(`wait:${timeoutMs}`); },
-    promptEnter: async (message) => { events.push(`prompt:${message}`); },
+    promptEnter: async () => { events.push("prompt"); },
     openBrowser: async (url) => { events.push(`open:${url}`); },
     loginTimeoutMs: 45_000,
     now: () => new Date("2029-01-01T00:00:00Z"),
@@ -290,24 +295,78 @@ export async function test_interactive_browser_login_discovers_redirect_and_retr
       if (request.url.endsWith("/api/auth/method")) {
         return Response.json({ method: "saml", redirect_to: "https://identity.example.edu/ontrack/saml" });
       }
-      return exchangeResponse({
-        auth_token: "access-secret",
-        auth_token_expiry: "2030-01-01T00:00:00Z",
-        user: { username: "alice" },
-      })(input, init);
+      throw new Error("no cookie exchange expected in loopback flow");
     },
   });
+
   assert.equal(session.provenance, "browser");
+  assert.equal(session.username, "alice");
+  assert.equal(session.accessToken, "access-secret");
+  assert.match(snippet, /127\.0\.0\.1:45678\/cb/u);
+  assert.match(snippet, /state-123/u);
+  assert.match(snippet, /\/api\/auth\/access-token/u);
   assert.deepEqual(events, [
-    "cookies:1",
     "GET:https://school.example.edu/api/auth/method",
+    "listen:state-123",
     "url:https://identity.example.edu/ontrack/saml",
-    "prompt:No active OnTrack browser session was found. Press Enter to open the sign-in URL in your default browser.",
+    "snippet",
+    "prompt",
     "open:https://identity.example.edu/ontrack/saml",
     "wait:45000",
-    "cookies:2",
-    "POST:https://school.example.edu/api/auth/access-token",
   ]);
+
+  const persisted = JSON.parse(await readFile(sessionFile, "utf8")) as Record<string, unknown>;
+  assert.equal(persisted.access_token, "access-secret");
+  assert.equal(persisted.provenance, "browser");
+}
+
+export async function test_loopback_listener_resolves_on_matching_state(): Promise<void> {
+  const result = await nodeLoopbackListener({
+    state: "s-1",
+    timeoutMs: 5_000,
+    signal: undefined,
+    onListening: async (port) => {
+      const bad = await fetch(`http://127.0.0.1:${port}/cb?state=wrong&token=t&expiry=2030-01-01T00:00:00Z&username=a`);
+      assert.equal(bad.status, 204);
+      const response = await fetch(`http://127.0.0.1:${port}/cb?state=s-1&token=tok&expiry=2030-01-01T00:00:00Z&username=alice`);
+      assert.equal(response.status, 200);
+      assert.match(await response.text(), /Signed in/u);
+    },
+  });
+  assert.deepEqual(result, { token: "tok", expiry: "2030-01-01T00:00:00Z", username: "alice" });
+}
+
+export async function test_loopback_listener_rejects_incomplete_callback(): Promise<void> {
+  const result = await nodeLoopbackListener({
+    state: "s-2",
+    timeoutMs: 5_000,
+    signal: undefined,
+    onListening: async (port) => {
+      const incomplete = await fetch(`http://127.0.0.1:${port}/cb?state=s-2&token=&expiry=&username=`);
+      assert.equal(incomplete.status, 400);
+      await fetch(`http://127.0.0.1:${port}/cb?state=s-2&token=tok&expiry=2030-01-01T00:00:00Z&username=alice`);
+    },
+  });
+  assert.equal(result.token, "tok");
+}
+
+export async function test_loopback_listener_times_out(): Promise<void> {
+  await assert.rejects(nodeLoopbackListener({
+    state: "s-3",
+    timeoutMs: 10,
+    signal: undefined,
+    onListening: async () => {},
+  }), (error) => error instanceof CliError && error.category === "auth" && /Timed out/u.test(error.message));
+}
+
+export async function test_loopback_listener_cancels_on_abort(): Promise<void> {
+  const controller = new AbortController();
+  await assert.rejects(nodeLoopbackListener({
+    state: "s-4",
+    timeoutMs: 5_000,
+    signal: controller.signal,
+    onListening: async () => { controller.abort(); },
+  }), (error) => error instanceof CliError && error.category === "cancellation");
 }
 
 export async function test_browser_cookie_permission_error_stops_before_interactive_login(): Promise<void> {
@@ -362,6 +421,10 @@ export async function test_interactive_browser_login_reports_opener_failure_with
     baseUrl: "https://school.example.edu",
     sessionFile: join(directory, "session.json"),
     browserCookieProvider: async () => [],
+    loopbackLoginListener: async ({ onListening }) => {
+      await onListening(0);
+      return { token: "unused", expiry: "2030-01-01T00:00:00Z", username: "alice" };
+    },
     promptEnter: async () => {},
     openBrowser: async () => { throw new Error("https://identity.example.edu/?SAMLRequest=secret"); },
     fetch: async () => Response.json({
@@ -374,54 +437,32 @@ export async function test_interactive_browser_login_reports_opener_failure_with
     && !error.message.includes("SAMLRequest"));
 }
 
-export async function test_interactive_browser_login_times_out_when_no_cookie_appears(): Promise<void> {
+export async function test_interactive_browser_login_rejects_expired_callback_token(): Promise<void> {
   const directory = await temporaryDirectory();
+  const sessionFile = join(directory, "session.json");
   await assert.rejects(loginAuthenticatedSession({
     baseUrl: "https://school.example.edu",
-    sessionFile: join(directory, "session.json"),
+    sessionFile,
     browserCookieProvider: async () => [],
+    loopbackLoginListener: async ({ onListening }) => {
+      await onListening(1);
+      return { token: "stale", expiry: "2020-01-01T00:00:00Z", username: "alice" };
+    },
     promptEnter: async () => {},
     openBrowser: async () => {},
-    loginTimeoutMs: 0,
+    now: () => new Date("2029-01-01T00:00:00Z"),
     fetch: async () => Response.json({
       method: "saml",
       redirect_to: "https://identity.example.edu/ontrack/saml",
     }),
   }), (error) => error instanceof CliError
     && error.category === "auth"
-    && /No reusable browser session/u.test(error.message)
-    && /https:\/\/school\.example\.edu\/sign_in/u.test(error.message)
-    && /Remember me/u.test(error.message));
+    && /invalid or expired/u.test(error.message));
+
+  await assert.rejects(stat(sessionFile), (error) => (error as NodeJS.ErrnoException).code === "ENOENT");
 }
 
-export async function test_interactive_browser_login_rechecks_cookie_expiry_after_waiting(): Promise<void> {
-  const directory = await temporaryDirectory();
-  let cookieReads = 0;
-  let exchanges = 0;
-  await assert.rejects(loginAuthenticatedSession({
-    baseUrl: "https://school.example.edu",
-    sessionFile: join(directory, "session.json"),
-    now: () => new Date(cookieReads === 0 ? "2029-01-01T00:00:00Z" : "2031-01-01T00:00:00Z"),
-    browserCookieProvider: async () => {
-      cookieReads += 1;
-      if (cookieReads === 1) return [];
-      return browserCandidate(validCookies().map((cookie) => ({ ...cookie, expires: "2030-01-01T00:00:00Z" })));
-    },
-    promptEnter: async () => {},
-    openBrowser: async () => {},
-    loginTimeoutMs: 0,
-    fetch: async (input) => {
-      if (new URL(input.toString()).pathname === "/api/auth/method") {
-        return Response.json({ method: "saml", redirect_to: "https://identity.example.edu/ontrack/saml" });
-      }
-      exchanges += 1;
-      return exchangeResponse(null)(input);
-    },
-  }), (error) => error instanceof CliError && /No reusable browser session/u.test(error.message));
-  assert.equal(exchanges, 0);
-}
-
-export async function test_interactive_browser_login_can_be_cancelled_while_waiting_for_cookies(): Promise<void> {
+export async function test_interactive_browser_login_can_be_cancelled_before_callback(): Promise<void> {
   const directory = await temporaryDirectory();
   const controller = new AbortController();
   await assert.rejects(loginAuthenticatedSession({
@@ -429,6 +470,7 @@ export async function test_interactive_browser_login_can_be_cancelled_while_wait
     sessionFile: join(directory, "session.json"),
     signal: controller.signal,
     browserCookieProvider: async () => [],
+    loopbackLoginListener: (request) => nodeLoopbackListener(request),
     promptEnter: async () => {},
     openBrowser: async () => { controller.abort(); },
     fetch: async () => Response.json({

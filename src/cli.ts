@@ -10,7 +10,7 @@ import { writeOutput } from "@bunizao/cli-kit";
 
 import { OnTrackApplication } from "./application.js";
 import { loginAuthenticatedSession, resolveAuthenticatedSession } from "./auth.js";
-import { openMacosFilesAndFoldersSettings, openSystemBrowser } from "./browser.js";
+import { openSystemBrowser } from "./browser.js";
 import { authenticationCookieCandidates } from "./browser-cookies.js";
 import { executeCli, type ChatSendConfirmation } from "./cli-app.js";
 import { loadConfig, resolveBaseUrl, resolveConfigPaths, type Environment } from "./config.js";
@@ -117,16 +117,10 @@ async function authLogin(signal: AbortSignal, env: Environment, platform: NodeJS
       onWarning: (warning) => warnings.push(warning),
     });
     if (candidates.length > 0) return candidates;
+    // No readable browser session (locked cookies, no Keychain/FDA, or not signed in yet).
+    // Fall through to the loopback sign-in below instead of forcing a Files & Folders grant.
     for (const warning of warnings) showWarning(warning);
-    const chromePermissionDenied = warnings.some((warning) => warning.startsWith("Permission denied while reading Chrome cookies ("));
-    if (platform !== "darwin" || !chromePermissionDenied) return candidates;
-    const settingsOpened = await openMacosFilesAndFoldersSettings().then(() => true, () => false);
-    throw new CliError(
-      "auth",
-      "Chrome cookie access is disabled for the terminal or app that launched ontrack.",
-      undefined,
-      `${settingsOpened ? "System Settings was opened. " : ""}In Privacy & Security > Files & Folders, expand your terminal app, enable Chrome, then rerun \`ontrack auth login\`.`,
-    );
+    return candidates;
   };
   const session = await loginAuthenticatedSession({
     baseUrl,
@@ -134,8 +128,16 @@ async function authLogin(signal: AbortSignal, env: Environment, platform: NodeJS
     signal,
     browserCookieProvider,
     onLoginUrl: (url) => { process.stderr.write(`Sign-in URL: ${url}\n`); },
+    onConsoleSnippet: (snippet) => {
+      process.stderr.write(
+        `\nAfter signing in, open the OnTrack tab (${baseUrl}), launch DevTools`
+        + " (Cmd+Opt+J on macOS, Ctrl+Shift+J elsewhere), and paste this once"
+        + " (Chrome may ask you to type \"allow pasting\" first):\n\n"
+        + `${snippet}\n\n`,
+      );
+    },
     onBrowserWait: (timeoutMs) => {
-      process.stderr.write(`Waiting up to ${Math.ceil(timeoutMs / 1_000)} seconds for a reusable browser session (Remember me must be enabled). Press Ctrl-C to cancel.\n`);
+      process.stderr.write(`Waiting up to ${Math.ceil(timeoutMs / 1_000)} seconds for the browser to hand back your session. Press Ctrl-C to cancel.\n`);
     },
     promptEnter: (message) => promptForBrowserLogin(message, signal),
     openBrowser: (url) => openSystemBrowser(url, { platform }),

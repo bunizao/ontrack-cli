@@ -66,7 +66,9 @@ The DevTools Protocol exposes `Storage.getCookies`, but it needs a debugger conn
 
 ### 3. Browser callback — best UX, but not cookie extraction
 
-If the OnTrack server can add a loopback/custom-scheme callback that returns a one-time authorization code, the CLI can open the normal browser, receive the code, and exchange it without reading browser storage. This is the cleanest end-user login, but it requires a server protocol change and does not satisfy a strict requirement to extract the existing Chrome cookie.
+If the OnTrack server can add a loopback/custom-scheme callback that returns a one-time authorization code, the CLI can open the normal browser, receive the code, and exchange it without reading browser storage. This is the cleanest end-user login, but the classic form requires a server protocol change and does not satisfy a strict requirement to extract the existing Chrome cookie.
+
+A variant needs **no server change**: because `/api/auth/access-token` is a same-origin credentialed endpoint, a small JavaScript snippet run on the OnTrack tab (DevTools console today, an MV3 extension later) does `fetch('/api/auth/access-token', {credentials:'include'})` — the browser attaches the `HttpOnly` cookies automatically — and hands the resulting `auth_token` to a CLI loopback server via a top-level navigation to `http://127.0.0.1:<port>/cb`. Top-level navigations are exempt from mixed-content blocking and Private Network Access preflights, so no CORS setup is required. This is the shipped design; see below.
 
 ### 4. Signed native app/helper — improves attribution, not consent
 
@@ -75,3 +77,14 @@ A signed, notarized app with a stable bundle identity can make the one-time File
 ## Recommendation for `ontrack-cli`
 
 Keep raw Chrome database extraction as a zero-install fast path for users who already granted Files & Folders access. For the no-FDA/no-Files-and-Folders path, build the narrow extension plus Native Messaging flow. Fail immediately on `EPERM`; do not open the SAML URL and poll a database that the process is unable to read. Do not add `sudo`, `authopen`, a privileged helper, or AppleScript elevation.
+
+## Shipped design (2026-07-30)
+
+`loginAuthenticatedSession` in [`src/auth.ts`](../../src/auth.ts) now uses the option-3 no-server-change variant instead of polling the cookie database:
+
+1. **Fast path unchanged.** It still tries `exchangeBrowserCookieCandidates` first, so Firefox (plaintext `cookies.sqlite`, no Keychain/FDA) and already-granted Chrome log in with zero interaction.
+2. **Loopback sign-in.** On no readable session it discovers the SAML URL, starts a `127.0.0.1` HTTP server on an ephemeral port (`nodeLoopbackListener`), and prints a one-time snippet with the port and a random `state` baked in.
+3. **Browser does the credentialed call.** The user signs in, then pastes the snippet into the OnTrack tab's DevTools console. It runs the same `POST /api/auth/access-token` the CLI used to run server-side, then navigates to `http://127.0.0.1:<port>/cb?state=…&token=…`.
+4. **CLI receives the token.** The listener resolves only on a matching `state`, validates a non-expired expiry, and persists the session. No Chrome cookie read, no Keychain, no Files & Folders.
+
+`src/cli.ts` no longer hard-fails on a Chrome `EPERM`; it warns and falls through to the loopback flow. The next step, when the console paste becomes a friction point, is to replace the manual snippet with the narrow MV3 extension from option 1 — the in-browser logic is identical.
