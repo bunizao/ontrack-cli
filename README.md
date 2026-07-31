@@ -1,112 +1,129 @@
 # ontrack
 
-[![CI](https://github.com/bunizao/ontrack-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/bunizao/ontrack-cli/actions/workflows/ci.yml)
+CLI access to OnTrack and Doubtfire for students, teaching staff, scripts, and agents. Runs on Node.js 22.5+ and Bun.
 
-Terminal-first CLI for OnTrack and Doubtfire. The same emitted JavaScript runs on Node.js and Bun.
+[![npm version](https://img.shields.io/npm/v/ontrack?logo=npm)](https://www.npmjs.com/package/ontrack)
+[![CI](https://github.com/bunizao/ontrack-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/bunizao/ontrack-cli/actions/workflows/ci.yml)
+[![Node.js 22.5+](https://img.shields.io/badge/Node.js-22.5%2B-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
+[![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 ## Install
 
-Requires Node.js 22.5 or newer, or Bun.
+With npm:
 
 ```bash
-npm install --global ontrack
+npm install -g ontrack
 ```
 
-## Command model
-
-Commands follow one grammar:
-
-```text
-ontrack <noun> [verb] [scope] [id] [flags]
-```
-
-`units`, `courses`, and `projects` are interchangeable. The verb is inferred when its positional arity is unambiguous:
+With Bun:
 
 ```bash
-ontrack units                         # units list
-ontrack courses FIT1045               # units show FIT1045
-ontrack tasks FIT1045                 # tasks list FIT1045
-ontrack tasks FIT1045 1.1             # tasks show FIT1045 1.1
-ontrack chats FIT1045 1.1 --yes       # chats read FIT1045 1.1
+bun add -g ontrack
 ```
 
-The normalized command surface is:
+Then configure your OnTrack site and sign in:
 
-```text
-auth login | status | logout
-user
-units list | show | get
-tasks list | show | read | get | set | submit
-chats list | read | mark-read | send
-roles list
-commands
-skills generate
+```bash
+export ONTRACK_BASE_URL="https://ontrack.example.edu"
+ontrack auth login
+ontrack auth status
 ```
 
-Run `ontrack commands --json` for the full command tree, aliases, positionals, options, enum values, and mutation metadata. The shared contract is supplied by the published `@bunizao/cli-kit` npm package (`^0.1.0`).
+Run the CLI through Bun without a global install:
 
-## Output
-
-Output defaults from stdout:
-
-- terminal: table
-- pipe or file: JSON
-
-All commands share:
-
-```text
---json | --yaml | --table
---fields id,name
--o, --output FILE
--q, --quiet
---verbose
---no-color
+```bash
+bunx --bun ontrack --version
 ```
 
-`--json`, `--yaml`, and `--table` are mutually exclusive. `tasks read` emits Markdown because Markdown is the command's payload, not an output flag.
+Set `ONTRACK_BASE_URL` to the root URL of your institution's OnTrack site. You can put it in `~/.config/ontrack-cli/config.yaml` instead:
 
-## Authentication and configuration
+```yaml
+base_url: https://ontrack.example.edu
+```
+
+## Sign in
 
 ```bash
 ontrack auth login
 ontrack auth status
-ontrack auth logout
 ```
 
-Configuration is read from `~/.config/ontrack-cli/config.yaml` by default. The standard environment variables are:
+`auth login` reuses an active Firefox or Chrome session when available. If it cannot, the CLI opens your SAML sign-in page and prints a one-time snippet. Sign in, then paste the snippet into the OnTrack tab's DevTools console.
 
-```text
-ONTRACK_BASE_URL
-ONTRACK_TOKEN
-ONTRACK_CONFIG
-```
+The CLI saves the session to `~/.config/ontrack-cli/session.json` by default. The fallback needs no browser file permissions.
 
-OnTrack also requires `ONTRACK_USERNAME` when a token is supplied directly. `ONTRACK_AUTH_TOKEN` remains a compatibility fallback for pre-normalization setups.
+## Command model
 
-Example:
+Commands follow `ontrack <plural-noun> [verb] [scope] [id] [flags]`. The canonical enrolment noun is `units`; `courses` and `projects` are equivalent aliases.
 
 ```bash
-export ONTRACK_BASE_URL='https://ontrack.example.edu'
-export ONTRACK_USERNAME='student'
-export ONTRACK_TOKEN='your_access_token'
-ontrack units --json
+ontrack units
+ontrack courses FIT1045
+ontrack tasks FIT1045
+ontrack tasks FIT1045 1.1
+ontrack tasks read FIT1045 1.1
+ontrack chats FIT1045
+ontrack roles
 ```
 
-Never copy session files, browser cookies, usernames, or tokens into issues, logs, fixtures, or agent prompts.
+The CLI infers omitted verbs when the arguments identify one command. `tasks read` prints the task sheet as Markdown.
+
+Run `ontrack commands --json` for the machine-readable command tree, including aliases, positionals, options, enum values, and mutation markers.
+
+## Downloads
+
+Download all resources for a unit, a task sheet, or the files linked from one task:
+
+```bash
+ontrack units get FIT1045 --dest FIT1045-resources.zip
+ontrack tasks get FIT1045 1.1 --dest task-1.1.pdf
+ontrack tasks get FIT1045 1.1 --resources
+```
+
+Downloads refuse to replace an existing destination. Pass `--force` to replace it with an atomic rename. Global `-o/--output` writes CLI output to a file; downloads use `--dest`.
 
 ## Mutations
 
-`send`, `submit`, `set`, and `mark-read` show a plan and require a plain `y/N` confirmation in an interactive terminal. Non-interactive callers must pass `--yes`.
+Commands that change OnTrack print a plan and prompt with `y/N` in a terminal. Scripts must pass `--yes`. Use `--dry-run` to inspect the target without sending a write request.
 
 ```bash
 ontrack tasks set FIT1045 1.1 working_on_it --dry-run
-ontrack chats send FIT1045 1.1 --message 'Please review this.' --yes
+ontrack chats send FIT1045 1.1 --message "Please review this." --yes
+ontrack tasks submit FIT1045 1.1 --file report.pdf --yes
 ```
 
-`chats read` is separated from `chats mark-read`, but the current OnTrack history endpoint itself marks non-discussion comments read. It always requires `-y`/`--yes` and prints that side effect on stderr before fetching history.
+The OnTrack history endpoint marks non-discussion comments as read. For that reason, `chats read` requires `--yes` and prints a warning before it fetches the history:
 
-Downloads use `--dest`; global `-o/--output` always redirects structured CLI output. Pass `--force` to replace an existing download atomically.
+```bash
+ontrack chats read FIT1045 1.1 --yes
+```
+
+## Output and errors
+
+The CLI prints a table when stdout is a terminal and JSON when stdout is piped or redirected. Use `--json`, `--yaml`, or `--table` to select a format; `--fields a,b` selects top-level fields, and `--output FILE` writes the result to a file.
+
+Errors go to stderr. Configuration and network failures exit 1, usage failures exit 2, authentication failures exit 3, missing entities exit 4, upstream rejections exit 5, and cancellation exits 130.
+
+## Environment
+
+| Variable | Purpose |
+| --- | --- |
+| `ONTRACK_BASE_URL` | Set the OnTrack site root. |
+| `ONTRACK_USERNAME` | Identify the user when you supply a token. |
+| `ONTRACK_TOKEN` | Supply an access token for automation. |
+| `ONTRACK_CONFIG` | Override the config file path. |
+
+Set `ONTRACK_USERNAME` and `ONTRACK_TOKEN` together for automation. `ONTRACK_AUTH_TOKEN` remains available for older setups. The CLI also accepts `username` and `auth_token` in the config file. Keep session files, browser cookies, usernames, and tokens out of logs, issues, fixtures, and agent prompts.
+
+## Agent skill
+
+```bash
+npx skills add https://github.com/bunizao/ontrack-cli
+ontrack skills generate
+```
+
+The tracked [SKILL.md](SKILL.md) comes from `ontrack commands --json`. The package uses the shared [`@bunizao/cli-kit`](https://www.npmjs.com/package/@bunizao/cli-kit) command contract.
 
 ## License
 
-MIT
+[MIT](LICENSE)
