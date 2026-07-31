@@ -1,0 +1,5 @@
+{
+  "username": "recorded-user",
+  "base_url": "https://school.example.invalid",
+  "auth_method": "saml"
+}

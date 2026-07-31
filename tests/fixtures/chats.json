@@ -1,0 +1,46 @@
+[
+  {
+    "id": 41,
+    "comment": "Please review the search heuristic.",
+    "has_attachment": false,
+    "type": "text",
+    "is_new": true,
+    "reply_to_id": null,
+    "author": {
+      "id": 2,
+      "first_name": "Example",
+      "last_name": "Tutor",
+      "email": "tutor@example.invalid"
+    },
+    "recipient": {
+      "id": 1,
+      "first_name": "Example",
+      "last_name": "Student",
+      "email": "student@example.invalid"
+    },
+    "created_at": "2026-07-28T01:02:03.000Z",
+    "recipient_read_time": null
+  },
+  {
+    "id": 42,
+    "comment": "Updated submission attached.",
+    "has_attachment": true,
+    "type": "pdf",
+    "is_new": false,
+    "reply_to_id": 41,
+    "author": {
+      "id": 1,
+      "first_name": "Example",
+      "last_name": "Student",
+      "email": "student@example.invalid"
+    },
+    "recipient": {
+      "id": 2,
+      "first_name": "Example",
+      "last_name": "Tutor",
+      "email": "tutor@example.invalid"
+    },
+    "created_at": "2026-07-28T02:03:04.000Z",
+    "recipient_read_time": "2026-07-28T02:05:00.000Z"
+  }
+]

@@ -1,0 +1,34 @@
+[
+  {
+    "id": 1,
+    "unit": {
+      "id": 2,
+      "code": "UNIT",
+      "name": "Unit",
+      "my_role": "Student",
+      "start_date": "2000-01-01",
+      "end_date": "2000-01-01",
+      "active": true
+    },
+    "target_grade": 3,
+    "portfolio_available": true,
+    "user_id": 3,
+    "unit_id": null
+  },
+  {
+    "id": 4,
+    "unit": {
+      "id": 5,
+      "code": "UNIT",
+      "name": "Unit",
+      "my_role": "Student",
+      "start_date": "2000-01-01",
+      "end_date": "2000-01-01",
+      "active": true
+    },
+    "target_grade": 3,
+    "portfolio_available": false,
+    "user_id": 3,
+    "unit_id": null
+  }
+]

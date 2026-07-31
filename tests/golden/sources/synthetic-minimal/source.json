@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "kind": "synthetic",
+  "live_recorded": false,
+  "description": "Invented smallest legal responses for every retained read command.",
+  "fixture": "http.json",
+  "session": "session.json"
+}

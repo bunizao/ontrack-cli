@@ -1,6 +1,9 @@
 .DS_Store
+.playwright-mcp/
 .pytest_cache/
 .venv/
 __pycache__/
 *.pyc
 dist/
+.build/
+node_modules/

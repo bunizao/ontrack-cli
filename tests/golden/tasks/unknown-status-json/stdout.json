@@ -1,0 +1,29 @@
+[
+  {
+    "id": 13,
+    "task_definition_id": 14,
+    "abbreviation": "1.2",
+    "name": "Future task",
+    "status": "future_status_2027",
+    "status_label": "future_status_2027",
+    "target_grade": 2,
+    "target_grade_label": "D (Distinction)",
+    "start_date": "2026-08-01",
+    "target_date": "2026-08-10",
+    "target_start_date": null,
+    "target_due_date": null,
+    "due_date": "2026-08-10",
+    "deadline": "2026-08-12",
+    "submission_date": null,
+    "completion_date": null,
+    "moved_to_discuss_at": null,
+    "discuss_timeout_expiry_at": null,
+    "extensions": null,
+    "grade": 2,
+    "grade_label": "D (Distinction)",
+    "quality_pts": null,
+    "include_in_portfolio": false,
+    "is_overdue": false,
+    "is_discuss_overdue": false
+  }
+]

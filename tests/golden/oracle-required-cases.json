@@ -1,0 +1,11 @@
+{
+  "auth-check/maximal-json": ["auth", "status", "--json"],
+  "project/maximal-json": ["units", "show", "1", "--json"],
+  "projects/current-json": ["units", "list", "--json"],
+  "projects/include-inactive-json": ["units", "list", "--include-inactive", "--json"],
+  "roles/active-json": ["roles", "list", "--json"],
+  "roles/all-json": ["roles", "list", "--all", "--json"],
+  "tasks/all-json": ["tasks", "list", "1", "--json"],
+  "tasks/filter-rediscuss-json": ["tasks", "list", "1", "--status", "rediscuss", "--json"],
+  "user/maximal-json": ["user", "--json"]
+}

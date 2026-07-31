@@ -1,0 +1,34 @@
+{
+  "project": {
+    "id": 7,
+    "unit": {
+      "id": 9,
+      "code": "UNIT",
+      "name": "Unit",
+      "my_role": null,
+      "start_date": null,
+      "end_date": null,
+      "active": null
+    },
+    "target_grade": null,
+    "submitted_grade": null,
+    "compile_portfolio": null,
+    "portfolio_available": null,
+    "uses_draft_learning_summary": null,
+    "tasks": []
+  },
+  "unit": {
+    "summary": {
+      "id": 9,
+      "code": "UNIT",
+      "name": "Unit",
+      "my_role": null,
+      "start_date": null,
+      "end_date": null,
+      "active": null
+    },
+    "description": null,
+    "task_definitions": []
+  },
+  "tasks": []
+}

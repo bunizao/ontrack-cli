@@ -1,0 +1,12 @@
+{
+  "base_url": "https://school.example.invalid",
+  "username": "synthetic-student",
+  "user": {
+    "id": 42,
+    "username": "synthetic-student",
+    "first_name": "Example",
+    "last_name": "Student",
+    "email": "student@example.invalid",
+    "nickname": "Example"
+  }
+}

@@ -1,0 +1,30 @@
+[
+  {
+    "request": { "method": "GET", "path": "/api/auth/method", "params": {} },
+    "response": { "status_code": 200, "json": { "method": "saml" } }
+  },
+  {
+    "request": { "method": "GET", "path": "/api/projects", "params": { "include_inactive": false } },
+    "response": { "status_code": 200, "json": [] }
+  },
+  {
+    "request": { "method": "GET", "path": "/api/projects", "params": { "include_inactive": true } },
+    "response": { "status_code": 200, "json": [] }
+  },
+  {
+    "request": { "method": "GET", "path": "/api/projects/1", "params": {} },
+    "response": { "status_code": 200, "json": { "id": 7, "unit": { "id": 9, "code": "UNIT", "name": "Unit" }, "tasks": [] } }
+  },
+  {
+    "request": { "method": "GET", "path": "/api/units/9", "params": {} },
+    "response": { "status_code": 200, "json": { "id": 9, "code": "UNIT", "name": "Unit", "task_definitions": [] } }
+  },
+  {
+    "request": { "method": "GET", "path": "/api/unit_roles", "params": { "active_only": true } },
+    "response": { "status_code": 200, "json": [] }
+  },
+  {
+    "request": { "method": "GET", "path": "/api/unit_roles", "params": { "active_only": false } },
+    "response": { "status_code": 200, "json": [] }
+  }
+]

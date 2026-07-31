@@ -1,0 +1,16 @@
+.build/
+.github/
+.pytest_cache/
+.venv/
+!dist/
+!dist/**
+ontrack_cli/
+release-notes/
+src/
+tests/
+*.tgz
+*.pyc
+config.example.yaml
+pyproject.toml
+tsconfig*.json
+uv.lock
