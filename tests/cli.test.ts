@@ -141,7 +141,9 @@ export async function test_output_defaults_to_json_for_pipes_and_table_for_termi
   assert.deepEqual(JSON.parse(piped.stdout), [{ id: 7, unit: { code: "FIT1045" } }]);
   const terminalApp = fakeApplication().app;
   const terminal = await executeCli(["units"], dependencies(terminalApp, { version: "1.0.0", stdoutIsTty: true }));
-  assert.match(terminal.stdout, /^id\s+unit/mu);
+  // A table shows the columns that identify a unit, reaching into the nested unit.
+  assert.match(terminal.stdout, /^project\s+code\s+name/mu);
+  assert.match(terminal.stdout, /^7\s+FIT1045/mu);
   const yamlApp = fakeApplication().app;
   const yaml = await executeCli(["units", "--yaml"], dependencies(yamlApp, { version: "1.0.0" }));
   assert.match(yaml.stdout, /code: FIT1045/u);

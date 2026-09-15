@@ -611,3 +611,30 @@ export async function test_application_reports_upstream_chat_send_rejection_with
   );
   assert.equal(posts, 1);
 }
+
+export async function test_the_project_list_is_read_once_per_process(): Promise<void> {
+  const reads: string[] = [];
+  const projects = [{ id: 6200, unit: { id: 16, code: "CS101", name: "Systems", active: true } }];
+  const http = {
+    request: async (path: string, options: HttpRequestOptions = {}): Promise<unknown> => {
+      if (path === "api/auth/method") return { method: "saml" };
+      if (path === "api/projects") {
+        reads.push(String(options.query?.include_inactive));
+        return projects;
+      }
+      throw new Error(`unexpected request ${path}`);
+    },
+  } as HttpClient;
+  const app = new OnTrackApplication(
+    { current: session("alice") },
+    new OnTrackClient(http),
+    createClock("2026-07-26T12:00:00Z"),
+  );
+
+  // Checking the session, resolving a unit and listing units all want the same list.
+  await app.user();
+  assert.equal(await app.resolveProject("CS101"), 6200);
+  await app.projects({ includeInactive: true });
+  await app.projects({ includeInactive: false });
+  assert.deepEqual(reads, ["true", "false"], "each scope is fetched at most once");
+}

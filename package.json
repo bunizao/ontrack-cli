@@ -46,7 +46,7 @@
     "url": "git+https://github.com/bunizao/ontrack-cli.git"
   },
   "dependencies": {
-    "@bunizao/cli-kit": "^0.1.0",
+    "@bunizao/cli-kit": "^0.2.0",
     "@opendocsg/pdf2md": "0.2.7",
     "@steipete/sweet-cookie": "0.4.0"
   }

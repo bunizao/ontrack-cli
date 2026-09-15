@@ -50,10 +50,17 @@ export interface AuthMethod {
 export class OnTrackClient {
   constructor(private readonly http: HttpClient) {}
 
+  // Resolving a unit reads the list, and so does the command that follows; one
+  // process is short enough that reading it twice is only a wasted round trip.
+  private readonly projectsByScope = new Map<boolean, Promise<ProjectSummary[]>>();
+
   async getProjects(includeInactive = false): Promise<ProjectSummary[]> {
-    return readProjects(await this.http.request("api/projects", {
-      query: { include_inactive: includeInactive },
-    }));
+    let pending = this.projectsByScope.get(includeInactive);
+    if (!pending) {
+      pending = this.http.request("api/projects", { query: { include_inactive: includeInactive } }).then(readProjects);
+      this.projectsByScope.set(includeInactive, pending);
+    }
+    return pending;
   }
 
   async getProject(id: number): Promise<Project> {

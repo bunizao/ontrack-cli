@@ -167,6 +167,11 @@ async function createApplication(signal: AbortSignal, env: Environment, platform
     baseUrl,
     credentials: { username: session.username, accessToken: session.accessToken },
     signal,
+    // --verbose is the flag you reach for when a command feels slow, so it reports
+    // the requests and their timings. Never the token: it is a header.
+    ...(process.argv.includes("--verbose")
+      ? { trace: (entry) => process.stderr.write(`${entry.method} ${entry.url} ${entry.status} ${entry.ms}ms\n`) }
+      : {}),
     refresh: async (refreshSignal) => {
       session = await resolveAuthenticatedSession({
         baseUrl,
@@ -201,6 +206,8 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       confirmMutation: (summary) => confirmMutation(summary, controller.signal),
       interactive: process.stdin.isTTY === true,
       stdoutIsTty: process.stdout.isTTY === true,
+      // A pty that will not report its size still needs a table narrow enough to read.
+      ...(terminalWidth() === undefined ? {} : { stdoutColumns: terminalWidth() as number }),
       runtime: {
         nodeVersion: process.versions.node,
         ...(Reflect.get(process.versions, "bun") ? { bunVersion: String(Reflect.get(process.versions, "bun")) } : {}),
@@ -215,6 +222,10 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     process.removeListener("SIGINT", cancel);
     if (platform === "win32") process.removeListener("SIGBREAK", cancel);
   }
+}
+
+function terminalWidth(): number | undefined {
+  return process.stdout.columns || (process.stdout.isTTY ? 80 : undefined);
 }
 
 process.exitCode = await relaunchForNodeSqlite() ?? await main();

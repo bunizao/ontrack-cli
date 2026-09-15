@@ -93,10 +93,12 @@ export class OnTrackApplication implements CliApplication {
   }
 
   async user(): Promise<unknown> {
+    // The identity below comes from cached session state, and api/auth/method is
+    // unauthenticated, so one protected endpoint is read to prove the session is
+    // still live. getProjects is memoized, so a later command reuses this answer.
     const [authMethod] = await Promise.all([
       this.client.getAuthMethod(),
       this.client.getProjects(true),
-      this.client.getRoles(false),
     ]);
     const session = this.sessionState.current;
     if (session.user) {

@@ -63,7 +63,29 @@ interface Dependencies {
   readonly confirmMutation?: (summary: string) => Promise<boolean>;
   readonly interactive?: boolean;
   readonly stdoutIsTty?: boolean;
+  /** Terminal width tables have to fit into. Omitted means unlimited. */
+  readonly stdoutColumns?: number;
   readonly runtime?: { readonly nodeVersion: string; readonly bunVersion?: string };
+}
+
+/**
+ * What a person wants to see per row. Every field stays in --json; a table that
+ * carries two dozen columns has to shave them all down to nothing to fit a
+ * terminal, so the human format picks the few that identify the row.
+ */
+const TABLE_COLUMNS: Readonly<Record<string, readonly [string, string][]>> = {
+  "units list": [["id", "project"], ["unit.code", "code"], ["unit.name", "name"], ["target_grade", "target"]],
+  "tasks list": [["abbreviation", "task"], ["name", "name"], ["status_label", "status"], ["deadline", "due"], ["grade_label", "grade"]],
+  "roles list": [["id", "id"], ["role", "role"], ["unit.code", "code"], ["unit.name", "name"]],
+  "chats list": [["id", "id"], ["abbreviation", "task"], ["name", "name"], ["status_label", "status"]],
+};
+
+function commandPath(command: { name(): string; parent?: unknown }): string {
+  const names: string[] = [];
+  for (let current = command; current?.parent; current = current.parent as typeof command) {
+    names.unshift(current.name());
+  }
+  return names.join(" ");
 }
 
 export interface ChatSendConfirmation {
@@ -86,7 +108,6 @@ interface GlobalOptions {
   readonly table?: boolean;
   readonly fields?: string;
   readonly output?: string;
-  readonly quiet?: boolean;
   readonly yes?: boolean;
   readonly dryRun?: boolean;
 }
@@ -214,6 +235,7 @@ export async function executeCli(argv: readonly string[], dependencies: Dependen
   let stderr = "";
   let result: InvocationResult | undefined;
   let format: OutputFormat;
+  let ranCommand = "";
   try {
     if (dependencies.runtime) assertSupportedRuntime(dependencies.runtime.nodeVersion, dependencies.runtime.bunVersion);
     format = selectedFormat(argv, dependencies.stdoutIsTty ?? false);
@@ -234,6 +256,7 @@ export async function executeCli(argv: readonly string[], dependencies: Dependen
     outputError: () => undefined,
   });
   const setResult = (value: InvocationResult): void => { result = value; };
+  program.hook("preAction", (_program, action) => { ranCommand = commandPath(action); });
   const globalOptions = (): GlobalOptions => program.opts<GlobalOptions>();
 
   program.command("user").description("Show the signed-in user").action(async () => {
@@ -394,7 +417,14 @@ export async function executeCli(argv: readonly string[], dependencies: Dependen
     else if (result?.markdown !== undefined) stdout += result.markdown.endsWith("\n") ? result.markdown : `${result.markdown}\n`;
     else if (result && "value" in result) {
       const selectedFields = fields(options);
-      stdout += render(sanitized(result.value), { format, ...(selectedFields ? { fields: selectedFields } : {}) });
+      // JSON stays indented: the golden corpus pins this CLI's stdout byte for byte
+      // against the Python implementation it replaced, formatting included.
+      stdout += render(sanitized(result.value), {
+        format,
+        ...(selectedFields ? { fields: selectedFields } : {}),
+        ...(!selectedFields && TABLE_COLUMNS[ranCommand] ? { columns: TABLE_COLUMNS[ranCommand] } : {}),
+        ...(dependencies.stdoutColumns ? { width: dependencies.stdoutColumns } : {}),
+      });
     }
     if (result?.diagnostic) stderr += result.diagnostic;
     return {

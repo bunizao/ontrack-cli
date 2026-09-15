@@ -12,6 +12,8 @@ export interface HttpClientOptions {
   readonly fetch?: typeof globalThis.fetch;
   readonly timeoutMs?: number;
   readonly signal?: AbortSignal;
+  /** Called once per request. The URL never carries credentials, which are headers. */
+  readonly trace?: (entry: { method: string; url: string; status: number; ms: number }) => void;
 }
 
 export interface HttpRequestOptions {
@@ -169,6 +171,7 @@ export class HttpClient {
   readonly #refresh: ((signal: AbortSignal) => Promise<AccessCredentials | void>) | undefined;
   readonly #timeoutMs: number;
   readonly #signal: AbortSignal | undefined;
+  readonly #trace: HttpClientOptions["trace"];
   #credentials: AccessCredentials;
   #refreshing: Promise<void> | undefined;
   #sessionVersion = 0;
@@ -180,6 +183,7 @@ export class HttpClient {
     this.#refresh = options.refresh;
     this.#timeoutMs = options.timeoutMs ?? 30_000;
     this.#signal = options.signal;
+    this.#trace = options.trace;
   }
 
   async request(path: string, options: HttpRequestOptions = {}): Promise<unknown> {
@@ -233,7 +237,9 @@ export class HttpClient {
     const method = (options.method ?? "GET").toUpperCase();
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const sessionVersion = this.#sessionVersion;
+      const startedAt = Date.now();
       const response = await this.#send(url, method, options, responseLimit);
+      this.#trace?.({ method, url: url.toString(), status: response.status, ms: Date.now() - startedAt });
       if (response.status === 419 && method === "GET" && attempt === 0 && this.#refresh) {
         if (sessionVersion === this.#sessionVersion) {
           await this.#refreshOnce(options.signal ?? this.#signal ?? new AbortController().signal);
