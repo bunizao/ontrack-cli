@@ -148,11 +148,14 @@ function positiveId(value: string): number {
   return id;
 }
 
+// A unit reference is a project ID or anything the site's unit list can match
+// (code or name). No code format is assumed here; resolution compares against
+// the enrolled units.
 async function resolvedProjectId(value: string, application: () => Promise<CliApplication>): Promise<number> {
   const reference = value.trim();
   if (/^\d+$/u.test(reference)) return positiveId(reference);
-  if (/^[a-z]{2,}\d{3,}[a-z0-9_-]*$/iu.test(reference)) return (await application()).resolveProject(reference);
-  throw new CliError("usage", "unit must be a project ID or unit code such as FIT1045");
+  if (reference) return (await application()).resolveProject(reference);
+  throw new CliError("usage", "unit must be a project ID or a unit code or name as shown by `ontrack units`");
 }
 
 function nonEmpty(value: string, label: string): string {

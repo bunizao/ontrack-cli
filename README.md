@@ -58,13 +58,15 @@ Commands follow `ontrack <plural-noun> [verb] [scope] [id] [flags]`. The canonic
 
 ```bash
 ontrack units
-ontrack courses FIT1045
-ontrack tasks FIT1045
-ontrack tasks FIT1045 1.1
-ontrack tasks read FIT1045 1.1
-ontrack chats FIT1045
+ontrack courses UNIT
+ontrack tasks UNIT
+ontrack tasks UNIT TASK
+ontrack tasks read UNIT TASK
+ontrack chats UNIT
 ontrack roles
 ```
+
+`UNIT` is a project ID, or the unit's code or name exactly as OnTrack shows it (run `ontrack units` to see them). The CLI never assumes what a code looks like; if a reference matches several units it lists their project IDs. `TASK` is the task abbreviation shown by `ontrack tasks UNIT`, or a task definition ID.
 
 The CLI infers omitted verbs when the arguments identify one command. `tasks read` prints the task sheet as Markdown.
 
@@ -75,9 +77,9 @@ Run `ontrack commands --json` for the machine-readable command tree, including a
 Download all resources for a unit, a task sheet, or the files linked from one task:
 
 ```bash
-ontrack units get FIT1045 --dest FIT1045-resources.zip
-ontrack tasks get FIT1045 1.1 --dest task-1.1.pdf
-ontrack tasks get FIT1045 1.1 --resources
+ontrack units get UNIT --dest unit-resources.zip
+ontrack tasks get UNIT TASK --dest task-sheet.pdf
+ontrack tasks get UNIT TASK --resources
 ```
 
 Downloads refuse to replace an existing destination. Pass `--force` to replace it with an atomic rename. Global `-o/--output` writes CLI output to a file; downloads use `--dest`.
@@ -87,15 +89,15 @@ Downloads refuse to replace an existing destination. Pass `--force` to replace i
 Commands that change OnTrack print a plan and prompt with `y/N` in a terminal. Scripts must pass `--yes`. Use `--dry-run` to inspect the target without sending a write request.
 
 ```bash
-ontrack tasks set FIT1045 1.1 working_on_it --dry-run
-ontrack chats send FIT1045 1.1 --message "Please review this." --yes
-ontrack tasks submit FIT1045 1.1 --file report.pdf --yes
+ontrack tasks set UNIT TASK working_on_it --dry-run
+ontrack chats send UNIT TASK --message "Please review this." --yes
+ontrack tasks submit UNIT TASK --file report.pdf --yes
 ```
 
 The OnTrack history endpoint marks non-discussion comments as read. For that reason, `chats read` requires `--yes` and prints a warning before it fetches the history:
 
 ```bash
-ontrack chats read FIT1045 1.1 --yes
+ontrack chats read UNIT TASK --yes
 ```
 
 ## Output and errors

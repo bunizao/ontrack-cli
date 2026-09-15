@@ -6,7 +6,7 @@ import { projectSummaryToJson, roleToJson, snapshotToJson, userToJson } from "./
 import { assertOutputAvailable, writeDownloadedFile, writeResourceArchive } from "./resources.js";
 import { CliError } from "./errors.js";
 import type { ProjectSnapshot, TaskRow } from "./project-snapshot.js";
-import type { TaskDefinition } from "./types.js";
+import type { ProjectSummary, TaskDefinition } from "./types.js";
 import type { Clock } from "./time.js";
 import { pdfToMarkdown } from "./pdf.js";
 import { submissionType, type TaskSubmissionOptions, type TaskSubmissionPlan } from "./submission.js";
@@ -54,6 +54,15 @@ function selectedDownloadTask(
   return { abbreviation: definition.abbreviation, definition };
 }
 
+// Exact code first, then a unique substring of the code or the unit name.
+// The site's unit list is the vocabulary; no code format is assumed.
+function matchingProjects(projects: readonly ProjectSummary[], query: string): ProjectSummary[] {
+  const exact = projects.filter((project) => project.unit.code.toLowerCase() === query);
+  if (exact.length > 0) return exact;
+  return projects.filter((project) =>
+    project.unit.code.toLowerCase().includes(query) || project.unit.name.toLowerCase().includes(query));
+}
+
 function placeholderFile(filename: string | null): boolean {
   return filename?.toLowerCase() === "filenotfound.pdf";
 }
@@ -71,14 +80,16 @@ export class OnTrackApplication implements CliApplication {
   ) {}
 
   async resolveProject(reference: string): Promise<number> {
-    const unitCode = reference.trim().toLowerCase();
-    const active = (await this.client.getProjects(false)).filter((project) => project.unit.code.toLowerCase() === unitCode);
+    const query = reference.trim().toLowerCase();
+    const active = matchingProjects(await this.client.getProjects(false), query);
     if (active.length === 1) return active[0]!.id;
     if (active.length > 1) throw this.ambiguousProject(reference, active.map((project) => project.id));
-    const all = (await this.client.getProjects(true)).filter((project) => project.unit.code.toLowerCase() === unitCode);
+    const everything = await this.client.getProjects(true);
+    const all = matchingProjects(everything, query);
     if (all.length === 1) return all[0]!.id;
     if (all.length > 1) throw this.ambiguousProject(reference, all.map((project) => project.id));
-    throw new CliError("not_found", `No project found for unit ${reference}. Use \`ontrack units list --include-inactive\` to find a project ID.`);
+    const known = [...new Set(everything.map((project) => project.unit.code))].join(", ");
+    throw new CliError("not_found", `No unit matches ${reference.trim()}. Your units: ${known || "none"}. Use \`ontrack units list --include-inactive\` for project IDs.`);
   }
 
   async user(): Promise<unknown> {
@@ -362,6 +373,6 @@ export class OnTrackApplication implements CliApplication {
 
   private ambiguousProject(reference: string, projectIds: readonly number[]): CliError {
     const ids = [...new Set(projectIds)].sort((left, right) => left - right);
-    return new CliError("usage", `Unit ${reference.trim().toUpperCase()} matches multiple projects: ${ids.join(", ")}. Use a project ID.`);
+    return new CliError("usage", `Unit ${reference.trim()} matches multiple projects: ${ids.join(", ")}. Use a project ID.`);
   }
 }

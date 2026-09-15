@@ -1,8 +1,8 @@
 {
   "ok": false,
   "error": {
-    "code": "usage",
-    "message": "unit must be a project ID or unit code such as FIT1045"
+    "code": "not_found",
+    "message": "No unit matches not-an-id. Your units: none. Use `ontrack units list --include-inactive` for project IDs."
   },
-  "exit_code": 2
+  "exit_code": 4
 }

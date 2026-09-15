@@ -77,6 +77,27 @@ export async function test_application_resolves_a_unique_active_project_by_unit_
   assert.equal(await app.resolveProject("fit1045"), 6200);
 }
 
+export async function test_application_resolves_a_unit_by_name_substring_and_by_unusual_code(): Promise<void> {
+  const http = new HttpClient({
+    baseUrl: "https://school.example.edu",
+    credentials: { username: "student", accessToken: "secret" },
+    fetch: async () => Response.json([
+      { id: 5183, unit: { id: 15, code: "2026-S2-AI", name: "Artificial Intelligence" } },
+      { id: 6200, unit: { id: 16, code: "algo", name: "Algorithms and Data Structures" } },
+      { id: 6300, unit: { id: 17, code: "Ethics", name: "Ethics in Computing" } },
+    ]),
+  });
+  const app = new OnTrackApplication({ current: session("student") }, new OnTrackClient(http), createClock("2026-07-26T12:00:00Z"));
+
+  assert.equal(await app.resolveProject("2026-s2-ai"), 5183);
+  assert.equal(await app.resolveProject("data structures"), 6200);
+  assert.equal(await app.resolveProject("ethics"), 6300);
+  await assert.rejects(
+    app.resolveProject("statistics"),
+    (error) => error instanceof CliError && error.category === "not_found" && error.message.includes("Your units: 2026-S2-AI, algo, Ethics"),
+  );
+}
+
 export async function test_application_prefers_one_active_project_without_scanning_inactive_duplicates(): Promise<void> {
   const queries: string[] = [];
   const http = new HttpClient({
@@ -127,7 +148,7 @@ export async function test_application_reports_ambiguous_project_ids_once_in_num
     app.resolveProject("fit1045"),
     (error) => error instanceof CliError
       && error.category === "usage"
-      && error.message === "Unit FIT1045 matches multiple projects: 6200, 6300. Use a project ID.",
+      && error.message === "Unit fit1045 matches multiple projects: 6200, 6300. Use a project ID.",
   );
 }
 
