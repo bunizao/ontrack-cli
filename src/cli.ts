@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { unlink } from "node:fs/promises";
 
-import { createUi, writeOutput } from "@bunizao/cli-kit";
+import { createUi, detectAudience, formatFromArgv, writeOutput } from "@bunizao/cli-kit";
 
 import { OnTrackApplication } from "./application.js";
 import { loginAuthenticatedSession, resolveAuthenticatedSession } from "./auth.js";
@@ -201,6 +201,14 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       confirmTaskSubmit: (plan) => confirmTaskSubmit(plan, controller.signal),
       confirmMutation: (summary) => confirmMutation(summary, controller.signal),
       interactive: process.stdin.isTTY === true,
+      // One rule for who is on the other end: a person at a terminal reading a table gets
+      // asked for what they left out; a pipe, --json or an agent's shell gets the usage error.
+      ui: createUi({
+        input: process.stdin,
+        output: process.stderr,
+        signal: controller.signal,
+        interactive: detectAudience({ stdin: process.stdin, stdout: process.stdout, env, format: formatFromArgv(argv, process.stdout.isTTY === true) }) === "human",
+      }),
       stdoutIsTty: process.stdout.isTTY === true,
       // A pty that will not report its size still needs a table narrow enough to read.
       ...(terminalWidth() === undefined ? {} : { stdoutColumns: terminalWidth() as number }),

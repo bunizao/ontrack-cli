@@ -88,6 +88,8 @@ Downloads refuse to replace an existing destination. Pass `--force` to replace i
 
 Commands that change OnTrack print a plan and prompt with `y/N` in a terminal. Scripts must pass `--yes`. Use `--dry-run` to inspect the target without sending a write request.
 
+In a terminal, a command missing its unit or task asks for it with a picker: `ontrack tasks` lists your units, then the unit's tasks. Pipes, `--json` and agent shells get the usage error with the usage line instead.
+
 ```bash
 ontrack tasks set UNIT TASK working_on_it --dry-run
 ontrack chats send UNIT TASK --message "Please review this." --yes
