@@ -322,7 +322,7 @@ export async function executeCli(argv: readonly string[], dependencies: Dependen
       setResult({ value: await dependencies.authLogout() });
     });
 
-    const units = program.command("units").aliases(["courses", "projects"]).description("OnTrack enrolments");
+    const units = program.command("units").aliases(["courses", "projects"]).description("Enrolled units");
     units.command("list").description("List units").option("--include-inactive", "Include past units").action(async (options) => {
       setResult({ value: await (await application()).projects({ includeInactive: options.includeInactive === true }) });
     });
@@ -336,7 +336,7 @@ export async function executeCli(argv: readonly string[], dependencies: Dependen
         setResult({ value: await (await application()).resourcesDownload(await resolvedProjectId(unit, application), downloadOptions(options)) });
       });
 
-    const tasks = program.command("tasks").description("OnTrack tasks");
+    const tasks = program.command("tasks").description("Tasks in a unit: list, read, submit, set state");
     tasks.command("list <unit>").description("List tasks")
       .option("--status <status...>", "Filter by raw task status")
       .action(async (unit, options) => {
@@ -395,7 +395,7 @@ export async function executeCli(argv: readonly string[], dependencies: Dependen
         setResult({ value: await (await application()).submitTask(plan) });
       }));
 
-    const chats = program.command("chats").description("Task chats");
+    const chats = program.command("chats").description("Read and send task chat messages");
     chats.command("list <unit>").description("List unread chat counts").action(async (unit) => {
       setResult({ value: await (await application()).chats(await resolvedProjectId(unit, application), {}) });
     });
@@ -437,7 +437,7 @@ export async function executeCli(argv: readonly string[], dependencies: Dependen
         setResult({ value: await (await application()).chatSend(plan) });
       }));
 
-    const roles = program.command("roles").description("Teaching roles");
+    const roles = program.command("roles").description("Teaching roles you hold");
     roles.command("list").description("List teaching roles").option("--all", "Include inactive roles").action(async (options) => {
       setResult({ value: await (await application()).roles({ showAll: options.all === true }) });
     });
@@ -445,7 +445,7 @@ export async function executeCli(argv: readonly string[], dependencies: Dependen
     program.command("commands").description("Describe the complete command tree").action(() => {
       setResult({ value: commandsJson(program) });
     });
-    const skills = program.command("skills").description("Generate agent integration artifacts");
+    const skills = program.command("skills").description("Generate the agent skill");
     skills.command("generate").description("Generate SKILL.md from the command tree").action(() => {
       setResult({ markdown: renderSkill(commandsJson(program)) });
     });
