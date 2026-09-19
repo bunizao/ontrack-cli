@@ -3,10 +3,9 @@
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { createInterface } from "node:readline/promises";
 import { unlink } from "node:fs/promises";
 
-import { writeOutput } from "@bunizao/cli-kit";
+import { createUi, writeOutput } from "@bunizao/cli-kit";
 
 import { OnTrackApplication } from "./application.js";
 import { loginAuthenticatedSession, resolveAuthenticatedSession } from "./auth.js";
@@ -25,48 +24,45 @@ import { VERSION } from "./version.js";
 const INTERACTIVE_KEYCHAIN_PROMPT_TIMEOUT_MS = 120_000;
 
 async function promptForBrowserLogin(message: string, signal: AbortSignal): Promise<void> {
-  if (!process.stdin.isTTY) throw new CliError("auth", "Interactive browser login requires a terminal.");
-  const prompt = createInterface({ input: process.stdin, output: process.stderr });
-  try {
-    await prompt.question(`${message} `, { signal });
-  } finally {
-    prompt.close();
-  }
+  const ui = createUi({ input: process.stdin, output: process.stderr, signal });
+  if (!ui.interactive) throw new CliError("auth", "Interactive browser login requires a terminal.");
+  if (!await ui.confirm(message, { initial: true }).catch(rethrowAsOnTrack)) throw new CliError("cancellation", "Sign-in cancelled.");
 }
 
-async function terminalAnswer(question: string, unavailableMessage: string, signal: AbortSignal): Promise<string> {
-  if (!process.stdin.isTTY) throw new CliError("usage", unavailableMessage);
-  const prompt = createInterface({ input: process.stdin, output: process.stderr });
-  try {
-    return await prompt.question(question, { signal });
-  } finally {
-    prompt.close();
-  }
+/** Show the plan of a write, then ask. Only a person at a terminal is asked; anyone else needs --yes. */
+async function askToContinue(plan: string, unavailableMessage: string, signal: AbortSignal): Promise<boolean> {
+  const ui = createUi({ input: process.stdin, output: process.stderr, signal });
+  if (!ui.interactive) throw new CliError("usage", unavailableMessage);
+  ui.note(plan, "Plan");
+  return ui.confirm("Continue?").catch(rethrowAsOnTrack);
 }
 
-async function confirmChatSend(details: ChatSendConfirmation, signal: AbortSignal): Promise<boolean> {
-  const message = JSON.stringify(details.message);
-  const answer = await terminalAnswer(
-    `Send this OnTrack chat message to project ${details.projectId}, task ${details.task}?\n${message}\nContinue? y/N `,
+// cli-kit reports Ctrl+C inside a prompt with its own error class; OnTrack has its own codes.
+function rethrowAsOnTrack(error: unknown): never {
+  const code = error instanceof Error && error.name === "CliError" ? (error as { code?: string }).code : undefined;
+  if (code === "cancelled") throw new CliError("cancellation", "Cancelled.");
+  throw error;
+}
+
+function confirmChatSend(details: ChatSendConfirmation, signal: AbortSignal): Promise<boolean> {
+  return askToContinue(
+    `Send this OnTrack chat message to project ${details.projectId}, task ${details.task}?\n${JSON.stringify(details.message)}`,
     "Chat sending requires an interactive terminal or --yes after explicit user confirmation.",
     signal,
   );
-  return answer.trim().toLowerCase() === "y";
 }
 
-async function confirmTaskSubmit(plan: TaskSubmissionPlan, signal: AbortSignal): Promise<boolean> {
-  const files = plan.uploads.map((upload, index) => `  ${index + 1}. ${upload.requirementName} (${upload.requirementType}, ${upload.bytes.length} bytes): ${upload.path}`).join("\n");
-  const answer = await terminalAnswer(
-    `Submit task ${plan.task} in project ${plan.projectId} as ${plan.type}?\n${files}\nTurnitin EULA accepted: ${plan.acceptTiiEula ? "yes" : "no"}\nContinue? y/N `,
+function confirmTaskSubmit(plan: TaskSubmissionPlan, signal: AbortSignal): Promise<boolean> {
+  const files = plan.uploads.map((upload, index) => `${index + 1}. ${upload.requirementName} (${upload.requirementType}, ${upload.bytes.length} bytes): ${upload.path}`).join("\n");
+  return askToContinue(
+    `Submit task ${plan.task} in project ${plan.projectId} as ${plan.type}?\n${files}\nTurnitin EULA accepted: ${plan.acceptTiiEula ? "yes" : "no"}`,
     "Task submission requires an interactive terminal or --yes after explicit user confirmation.",
     signal,
   );
-  return answer.trim().toLowerCase() === "y";
 }
 
-async function confirmMutation(summary: string, signal: AbortSignal): Promise<boolean> {
-  const answer = await terminalAnswer(`${summary}\nContinue? y/N `, "Mutation requires an interactive terminal or --yes.", signal);
-  return answer.trim().toLowerCase() === "y";
+function confirmMutation(summary: string, signal: AbortSignal): Promise<boolean> {
+  return askToContinue(summary, "Mutation requires an interactive terminal or --yes.", signal);
 }
 
 async function authLogout(env: Environment, platform: NodeJS.Platform): Promise<unknown> {
