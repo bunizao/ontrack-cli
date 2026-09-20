@@ -172,14 +172,15 @@ async function main() {
     );
 
     const shimHelp = await run(shim, ["--help"]);
-    assert(shimHelp.code === 0 && shimHelp.stdout.startsWith("Usage\n  ontrack ") && shimHelp.stderr === "", "installed shim help failed");
+    // The styled help opens with the name and version, then the description, then Usage.
+    assert(shimHelp.code === 0 && shimHelp.stdout.startsWith(`ontrack v${expectedVersion}`) && shimHelp.stdout.includes("\nUsage\n  ontrack ") && shimHelp.stderr === "", "installed shim help failed");
     const shimVersion = await run(shim, ["--version"]);
     assert(shimVersion.code === 0 && shimVersion.stdout === expectedVersion && shimVersion.stderr === "", "installed shim version failed");
 
     const runtimes = [process.execPath, runtimeExecutable("bun")];
     for (const runtime of runtimes) {
       const help = await run(runtime, [cli, "--help"]);
-      assert(help.code === 0 && help.stdout.startsWith("Usage\n  ontrack ") && help.stderr === "", `${runtime} help failed`);
+      assert(help.code === 0 && help.stdout.startsWith(`ontrack v${expectedVersion}`) && help.stdout.includes("\nUsage\n  ontrack ") && help.stderr === "", `${runtime} help failed`);
       const version = await run(runtime, [cli, "--version"]);
       assert(version.code === 0 && version.stdout === expectedVersion && version.stderr === "", `${runtime} version failed`);
     }
