@@ -1,3 +1,5 @@
+import type { Tone } from "@bunizao/cli-kit";
+
 import { CliError } from "./errors.js";
 
 interface StatusMetadata {
@@ -49,3 +51,30 @@ export function isFinalStatus(key: string): boolean {
 export function isSubmittedStatus(key: string): boolean {
   return metadata(key)?.submitted ?? false;
 }
+
+/**
+ * How each status reads to the student: green when the work is in, yellow while it
+ * is with them or the tutor, red when something is asked of them or has gone wrong.
+ */
+export const STATUS_TONES: Readonly<Record<string, Tone>> = {
+  "Ready for Feedback": "success",
+  "Not Started": "muted",
+  "Working On It": "warning",
+  "Need Help": "danger",
+  "Redo": "danger",
+  "Feedback Exceeded": "danger",
+  "Resubmit": "danger",
+  "Discuss": "warning",
+  "Demonstrate": "warning",
+  "Complete": "success",
+  "Fail": "danger",
+  "Time Exceeded": "danger",
+  "Assess in Portfolio": "info",
+  "Attention Required": "danger",
+  "Rediscuss": "warning",
+  ...Object.fromEntries(Object.entries({
+    ready_for_feedback: "success", not_started: "muted", working_on_it: "warning", need_help: "danger", redo: "danger",
+    feedback_exceeded: "danger", fix_and_resubmit: "danger", discuss: "warning", demonstrate: "warning", complete: "success",
+    fail: "danger", time_exceeded: "danger", assess_in_portfolio: "info", attention_required: "danger", rediscuss: "warning",
+  } as const)),
+};

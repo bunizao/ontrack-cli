@@ -2,24 +2,26 @@
 
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
-import { unlink } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { appendFile, mkdir, unlink } from "node:fs/promises";
 
-import { createUi, detectAudience, formatFromArgv, writeOutput } from "@bunizao/cli-kit";
+import { colorEnabled, createTheme, createUi, detectAudience, formatFromArgv, writeOutput, type Theme, type Ui } from "@bunizao/cli-kit";
 
 import { OnTrackApplication } from "./application.js";
 import { loginAuthenticatedSession, resolveAuthenticatedSession } from "./auth.js";
 import { openSystemBrowser } from "./browser.js";
 import { authenticationCookieCandidates } from "./browser-cookies.js";
 import { executeCli, type ChatSendConfirmation } from "./cli-app.js";
-import { loadConfig, resolveBaseUrl, resolveConfigPaths, type Environment } from "./config.js";
+import { configuredBaseUrl, loadConfig, resolveBaseUrl, resolveConfigPaths, type ConfigPaths, type Environment } from "./config.js";
 import { CliError } from "./errors.js";
 import { HttpClient } from "./http.js";
 import { OnTrackClient } from "./ontrack.js";
 import { relaunchForNodeSqlite } from "./runtime.js";
+import { STATUS_TONES } from "./status.js";
 import { createClock } from "./time.js";
 import type { TaskSubmissionPlan } from "./submission.js";
 import { VERSION } from "./version.js";
+import { showWordmark } from "./wordmark.js";
 
 const INTERACTIVE_KEYCHAIN_PROMPT_TIMEOUT_MS = 120_000;
 
@@ -44,18 +46,26 @@ function rethrowAsOnTrack(error: unknown): never {
   throw error;
 }
 
+// Plans go to stderr, so that stream decides whether the roles in them are painted.
+function planTheme(): Theme {
+  return createTheme(colorEnabled(process.stderr) && !process.argv.includes("--no-color"));
+}
+
 function confirmChatSend(details: ChatSendConfirmation, signal: AbortSignal): Promise<boolean> {
+  const theme = planTheme();
   return askToContinue(
-    `Send this OnTrack chat message to project ${details.projectId}, task ${details.task}?\n${JSON.stringify(details.message)}`,
+    `${theme.dim("Send")}  ${theme.subject(JSON.stringify(details.message))}\n${theme.dim("  to")}  ${theme.target(`task ${details.task}`)} ${theme.dim(`in project ${details.projectId}`)}`,
     "Chat sending requires an interactive terminal or --yes after explicit user confirmation.",
     signal,
   );
 }
 
+// What is sent and where it lands are the two facts to check before saying yes, so each gets its own role and line.
 function confirmTaskSubmit(plan: TaskSubmissionPlan, signal: AbortSignal): Promise<boolean> {
-  const files = plan.uploads.map((upload, index) => `${index + 1}. ${upload.requirementName} (${upload.requirementType}, ${upload.bytes.length} bytes): ${upload.path}`).join("\n");
+  const theme = planTheme();
+  const files = plan.uploads.map((upload, index) => `${index ? "        " : ""}${theme.subject(upload.path)} ${theme.dim(`${upload.requirementName}, ${upload.requirementType}, ${upload.bytes.length} bytes`)}`).join("\n");
   return askToContinue(
-    `Submit task ${plan.task} in project ${plan.projectId} as ${plan.type}?\n${files}\nTurnitin EULA accepted: ${plan.acceptTiiEula ? "yes" : "no"}`,
+    `${theme.dim("Submit")}  ${files}\n${theme.dim("    to")}  ${theme.target(`task ${plan.task}`)} ${theme.dim(`in project ${plan.projectId}`)}  ${theme.dim("as")} ${theme.status(plan.type, STATUS_TONES)}\n${theme.dim(`Turnitin EULA accepted: ${plan.acceptTiiEula ? "yes" : "no"}`)}`,
     "Task submission requires an interactive terminal or --yes after explicit user confirmation.",
     signal,
   );
@@ -66,37 +76,64 @@ function confirmMutation(summary: string, signal: AbortSignal): Promise<boolean>
 }
 
 async function authLogout(env: Environment, platform: NodeJS.Platform): Promise<unknown> {
-  const cwd = process.cwd();
-  const paths = resolveConfigPaths({
-    env,
-    platform,
-    homeDir: homedir(),
-    cwd,
-    cwdConfigExists: existsSync(join(cwd, "config.yaml")),
-  });
+  const paths = configPaths(env, platform);
   await unlink(paths.sessionFile).catch((error: NodeJS.ErrnoException) => {
     if (error.code !== "ENOENT") throw error;
   });
   return { logged_out: true };
 }
 
-function applicationResolver(signal: AbortSignal, env: Environment, platform: NodeJS.Platform): () => Promise<OnTrackApplication> {
-  let application: Promise<OnTrackApplication> | undefined;
-  return () => {
-    application ??= createApplication(signal, env, platform);
-    return application;
-  };
-}
-
-async function authLogin(signal: AbortSignal, env: Environment, platform: NodeJS.Platform): Promise<unknown> {
+function configPaths(env: Environment, platform: NodeJS.Platform): ConfigPaths {
   const cwd = process.cwd();
-  const paths = resolveConfigPaths({
+  return resolveConfigPaths({
     env,
     platform,
     homeDir: homedir(),
     cwd,
     cwdConfigExists: existsSync(join(cwd, "config.yaml")),
   });
+}
+
+// First run on this machine: a person is asked which site they use and it is remembered;
+// a pipe or an agent keeps the config error, which names the variable and the file.
+async function ensureBaseUrl(env: Environment, platform: NodeJS.Platform, ui: Ui): Promise<void> {
+  const paths = configPaths(env, platform);
+  if (!ui.interactive || configuredBaseUrl(env, loadConfig(paths))) return;
+  showWordmark(ui);
+  ui.note(`Which OnTrack site do you use?\nThe address is saved to ${paths.configFile}.`, "One-time setup");
+  const url = await ui.text("OnTrack URL", {
+    placeholder: "https://ontrack.example.edu",
+    validate: (value) => {
+      try {
+        resolveBaseUrl({ ONTRACK_BASE_URL: value }, {});
+        return undefined;
+      } catch (error) {
+        return error instanceof Error ? error.message : String(error);
+      }
+    },
+  }).catch(rethrowAsOnTrack);
+  await mkdir(dirname(paths.configFile), { recursive: true });
+  await appendFile(paths.configFile, `base_url: ${resolveBaseUrl({ ONTRACK_BASE_URL: url }, {})}\n`);
+}
+
+function applicationResolver(signal: AbortSignal, env: Environment, platform: NodeJS.Platform, ui: Ui): () => Promise<OnTrackApplication> {
+  let application: Promise<OnTrackApplication> | undefined;
+  return () => {
+    application ??= ensureBaseUrl(env, platform, ui).then(() => createApplication(signal, env, platform)).catch(async (error: unknown) => {
+      // A person with no session is walked through the browser sign-in once; an agent gets the auth error.
+      if (!ui.interactive || !(error instanceof CliError) || error.category !== "auth") throw error;
+      showWordmark(ui);
+      ui.note(`${error.message}\nSign in once in your browser; later commands reuse that session.`, "One-time setup");
+      if (!await ui.confirm("Sign in through the browser now?", { initial: true }).catch(rethrowAsOnTrack)) throw error;
+      await authLogin(signal, env, platform);
+      return createApplication(signal, env, platform);
+    });
+    return application;
+  };
+}
+
+async function authLogin(signal: AbortSignal, env: Environment, platform: NodeJS.Platform): Promise<unknown> {
+  const paths = configPaths(env, platform);
   const config = loadConfig(paths);
   const baseUrl = resolveBaseUrl(env, config);
   const browserCookieProvider = async () => {
@@ -140,14 +177,7 @@ async function authLogin(signal: AbortSignal, env: Environment, platform: NodeJS
 }
 
 async function createApplication(signal: AbortSignal, env: Environment, platform: NodeJS.Platform): Promise<OnTrackApplication> {
-  const cwd = process.cwd();
-  const paths = resolveConfigPaths({
-    env,
-    platform,
-    homeDir: homedir(),
-    cwd,
-    cwdConfigExists: existsSync(join(cwd, "config.yaml")),
-  });
+  const paths = configPaths(env, platform);
   const config = loadConfig(paths);
   const baseUrl = resolveBaseUrl(env, config);
   let session = await resolveAuthenticatedSession({
@@ -192,24 +222,26 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   const cancel = (): void => controller.abort();
   process.once("SIGINT", cancel);
   if (platform === "win32") process.once("SIGBREAK", cancel);
+  // One rule for who is on the other end: a person at a terminal reading a table gets
+  // asked for what they left out; a pipe, --json or an agent's shell gets the usage error.
+  const ui = createUi({
+    input: process.stdin,
+    output: process.stderr,
+    signal: controller.signal,
+    interactive: detectAudience({ stdin: process.stdin, stdout: process.stdout, env, format: formatFromArgv(argv, process.stdout.isTTY === true) }) === "human",
+  });
   try {
     const result = await executeCli(argv, {
-      application: applicationResolver(controller.signal, env, platform),
+      application: applicationResolver(controller.signal, env, platform, ui),
       authLogin: () => authLogin(controller.signal, env, platform),
       authLogout: () => authLogout(env, platform),
       confirmChatSend: (details) => confirmChatSend(details, controller.signal),
       confirmTaskSubmit: (plan) => confirmTaskSubmit(plan, controller.signal),
       confirmMutation: (summary) => confirmMutation(summary, controller.signal),
       interactive: process.stdin.isTTY === true,
-      // One rule for who is on the other end: a person at a terminal reading a table gets
-      // asked for what they left out; a pipe, --json or an agent's shell gets the usage error.
-      ui: createUi({
-        input: process.stdin,
-        output: process.stderr,
-        signal: controller.signal,
-        interactive: detectAudience({ stdin: process.stdin, stdout: process.stdout, env, format: formatFromArgv(argv, process.stdout.isTTY === true) }) === "human",
-      }),
+      ui,
       stdoutIsTty: process.stdout.isTTY === true,
+      stdoutColor: colorEnabled(process.stdout, env),
       // A pty that will not report its size still needs a table narrow enough to read.
       ...(terminalWidth() === undefined ? {} : { stdoutColumns: terminalWidth() as number }),
       runtime: {

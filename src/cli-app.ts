@@ -2,6 +2,8 @@ import {
   CliError as ContractError,
   commandsJson,
   createProgram,
+  banner,
+  createTheme,
   createUi,
   examples,
   helpSection,
@@ -22,7 +24,8 @@ import { CliError } from "./errors.js";
 import { assertSupportedRuntime } from "./runtime.js";
 import { renderSkill } from "./skill.js";
 import { submissionType, submissionTypes, type TaskSubmissionOptions, type TaskSubmissionPlan } from "./submission.js";
-import { writableTaskState, writableTaskStates, type WritableTaskState } from "./status.js";
+import { STATUS_TONES, writableTaskState, writableTaskStates, type WritableTaskState } from "./status.js";
+import { ONTRACK_TAGLINE, ONTRACK_WORDMARK } from "./wordmark.js";
 
 export interface CliApplication {
   resolveProject(reference: string): Promise<number>;
@@ -72,6 +75,8 @@ interface Dependencies {
   /** Prompts for what a person left out; omitted means never prompt. */
   readonly ui?: Ui;
   readonly stdoutIsTty?: boolean;
+  /** Whether stdout takes colour; the entrypoint decides from the stream and the environment. Omitted means plain. */
+  readonly stdoutColor?: boolean;
   /** Terminal width tables have to fit into. Omitted means unlimited. */
   readonly stdoutColumns?: number;
   readonly runtime?: { readonly nodeVersion: string; readonly bunVersion?: string };
@@ -112,6 +117,7 @@ interface InvocationResult {
 }
 
 interface GlobalOptions {
+  readonly color?: boolean;
   readonly json?: boolean;
   readonly yaml?: boolean;
   readonly table?: boolean;
@@ -149,9 +155,11 @@ function describeArguments(command: ReturnType<typeof createProgram>): void {
   for (const child of command.commands) describeArguments(child);
 }
 
+// Grouped the way `gh` does: what a person reaches for daily, then the rest, then what only an agent runs.
 const HELP_SECTIONS: Readonly<Record<string, readonly string[]>> = {
-  Reading: ["user", "units", "tasks", "chats", "roles"],
-  Setup: ["auth", "commands", "skills"],
+  "Core commands": ["units", "tasks", "chats"],
+  "Additional commands": ["user", "roles", "auth"],
+  "Agent commands": ["commands", "skills"],
 };
 
 // A person who typed `ontrack tasks` is shown their units, then the unit's tasks.
@@ -296,8 +304,9 @@ export async function executeCli(argv: readonly string[], dependencies: Dependen
     const program = createProgram({
       name: "ontrack",
       version: dependencies.version,
-      description: "Terminal-first CLI for OnTrack and Doubtfire",
+      description: ONTRACK_TAGLINE,
     });
+    banner(program, ONTRACK_WORDMARK);
     program.configureOutput({
       writeOut: (text) => { stdout += text; },
       writeErr: (text) => { stderr += text; },
@@ -451,15 +460,13 @@ export async function executeCli(argv: readonly string[], dependencies: Dependen
     });
     describeArguments(program);
     for (const [title, names] of Object.entries(HELP_SECTIONS)) {
-      for (const command of program.commands) if (names.includes(command.name())) helpSection(command, title);
+      // Placed in the order the list names them: that order is the help page.
+      for (const name of names) for (const command of program.commands) if (command.name() === name) helpSection(command, title);
     }
     examples(program, [
-      "ontrack units",
       "ontrack tasks UNIT  # every task with its status and due date",
-      "ontrack tasks UNIT 1.1 --json",
       "ontrack tasks read UNIT 1.1  # the task sheet as Markdown",
       "ontrack tasks submit UNIT 1.1 report.pdf",
-      "ontrack chats UNIT 1.1",
     ]);
     return (current = program);
   };
@@ -480,11 +487,14 @@ export async function executeCli(argv: readonly string[], dependencies: Dependen
       const selectedFields = fields(options);
       // JSON stays indented: the golden corpus pins this CLI's stdout byte for byte
       // against the Python implementation it replaced, formatting included.
+      // Colour rides on the table alone: a file, a pipe or --json never carries escape codes.
+      const theme = format === "table" && !options.output && dependencies.stdoutColor && options.color !== false ? createTheme(true) : undefined;
       stdout += render(sanitized(result.value), {
         format,
         ...(selectedFields ? { fields: selectedFields } : {}),
         ...(!selectedFields && TABLE_COLUMNS[ranCommand] ? { columns: TABLE_COLUMNS[ranCommand] } : {}),
         ...(dependencies.stdoutColumns ? { width: dependencies.stdoutColumns } : {}),
+        ...(theme ? { theme, tones: STATUS_TONES } : {}),
       });
     }
     if (result?.diagnostic) stderr += result.diagnostic;

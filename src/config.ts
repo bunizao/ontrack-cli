@@ -146,8 +146,13 @@ export function loadConfig(paths: ConfigPaths): OnTrackConfig {
   }
 }
 
+/** The site address as given, before any validation; undefined on a machine that has never been set up. */
+export function configuredBaseUrl(env: Environment, config: OnTrackConfig): string | undefined {
+  return nonEmptyString(env.ONTRACK_BASE_URL) ?? nonEmptyString(config.base_url);
+}
+
 export function resolveBaseUrl(env: Environment, config: OnTrackConfig): string {
-  const candidate = nonEmptyString(env.ONTRACK_BASE_URL) ?? nonEmptyString(config.base_url);
+  const candidate = configuredBaseUrl(env, config);
   if (!candidate) {
     throw new CliError(
       "config",
