@@ -60,7 +60,9 @@ ontrack auth login --paste
 
 `--reuse-browser` tries your existing browser session with a bounded cookie-store read. If reuse is unavailable, it opens your SAML sign-in page and prints a one-time snippet to paste into the OnTrack tab's DevTools console. `--paste` goes straight to that manual flow.
 
-The CLI saves the access token to `~/.config/ontrack-cli/session.json` with owner-only permissions. The private browser profile is stored under `~/.config/ontrack-cli/browser/`, separately for each site. When an access token expires or a read request rejects it, the CLI first tries to renew through that profile in a background browser. If your institution's SSO session has expired, run `auth login` again. `auth logout` removes both the access-token cache and the CLI browser profiles.
+The CLI encrypts the access-token cache in `~/.config/ontrack-cli/session.json` with AES-256-GCM and owner-only permissions. Existing plaintext caches migrate when read. The key uses macOS Keychain, Windows DPAPI, or Linux Secret Service. Linux systems without Secret Service use a private key file under `~/.config/ontrack-cli/keys/`; that fallback relies on your filesystem permissions for protection.
+
+The private browser profile is stored under `~/.config/ontrack-cli/browser/`, separately for each site. When an access token expires or a read request rejects it, the CLI first tries to renew through that profile in a background browser. If your institution's SSO session has expired, run `auth login` again. `auth logout` removes both the access-token cache and the CLI browser profiles.
 
 ## Command model
 

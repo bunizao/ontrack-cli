@@ -14,16 +14,24 @@ import type { BrowserCookie, BrowserCookieCandidate } from "../src/browser-cooki
 import { loadConfig, resolveConfigPaths, resolveCredentialSource } from "../src/config.js";
 import { CliError } from "../src/errors.js";
 
+import { readSessionCache } from "../src/session-cache.js";
+
+const cacheOptions = { encryptionKey: async () => Buffer.alloc(32, 17) };
+
+async function readStoredTestSession(path: string): Promise<Record<string, unknown>> {
+  return (await readSessionCache(path, cacheOptions))?.value as Record<string, unknown>;
+}
+
 async function temporaryDirectory(): Promise<string> {
   return mkdtemp(join(tmpdir(), "ontrack-auth-test-"));
 }
 
 function loginAuthenticatedSession(options: LoginAuthenticatedSessionOptions) {
-  return loginAuthenticatedSessionWithRuntime({ mode: "reuse", ...options });
+  return loginAuthenticatedSessionWithRuntime({ ...cacheOptions, mode: "reuse", ...options });
 }
 
 function resolveAuthenticatedSession(options: ResolveAuthenticatedSessionOptions) {
-  return resolveAuthenticatedSessionWithRuntime(options);
+  return resolveAuthenticatedSessionWithRuntime({ ...cacheOptions, ...options });
 }
 
 function browserCandidate(cookies: readonly BrowserCookie[]): readonly BrowserCookieCandidate[] {
@@ -198,6 +206,9 @@ export async function test_valid_cached_session_is_reused_and_expired_session_is
   assert.equal(cached.provenance, "session_cache");
   assert.equal(cached.accessToken, "cached-token");
   assert.equal(cached.user, null);
+  const migrated = await readFile(sessionFile, "utf8");
+  assert.equal(JSON.parse(migrated).version, 2);
+  assert.doesNotMatch(migrated, /cached-token|cached-user/u);
 
   const refreshed = await resolveAuthenticatedSession({
     baseUrl: "https://school.example.edu",
@@ -215,7 +226,7 @@ export async function test_valid_cached_session_is_reused_and_expired_session_is
   assert.equal(refreshed.accessToken, "new-access-token");
   if (process.platform !== "win32") assert.equal((await stat(sessionFile)).mode & 0o777, 0o600);
   const storedText = await readFile(sessionFile, "utf8");
-  assert.equal(JSON.parse(storedText).access_token, "new-access-token");
+  assert.equal((await readStoredTestSession(sessionFile)).access_token, "new-access-token");
   assert.doesNotMatch(storedText, /refresh-secret/u);
 }
 
@@ -320,7 +331,7 @@ export async function test_interactive_browser_login_completes_via_loopback_call
     "wait:45000",
   ]);
 
-  const persisted = JSON.parse(await readFile(sessionFile, "utf8")) as Record<string, unknown>;
+  const persisted = await readStoredTestSession(sessionFile);
   assert.equal(persisted.access_token, "access-secret");
   assert.equal(persisted.provenance, "browser");
 }
@@ -638,6 +649,7 @@ export async function test_cli_browser_login_validates_cookies_before_saving(): 
   let storeReads = 0;
   let exchanges = 0;
   const session = await loginAuthenticatedSessionWithRuntime({
+    ...cacheOptions,
     baseUrl: "https://school.example.edu", sessionFile,
     browserCookieProvider: async () => { storeReads += 1; return []; },
     now: () => new Date("2029-01-01T00:00:00Z"),
@@ -663,7 +675,7 @@ export async function test_cli_browser_login_validates_cookies_before_saving(): 
   assert.equal(storeReads, 0);
   assert.equal(exchanges, 2);
   assert.equal(session.username, "alice");
-  assert.equal(JSON.parse(await readFile(sessionFile, "utf8")).access_token, "test-access");
+  assert.equal((await readStoredTestSession(sessionFile)).access_token, "test-access");
 }
 
 export async function test_stalled_cookie_store_does_not_block_manual_login(): Promise<void> {
@@ -698,6 +710,7 @@ export async function test_cookie_store_wait_can_be_cancelled(): Promise<void> {
 export async function test_paste_login_skips_the_cookie_store_and_cli_browser(): Promise<void> {
   const directory = await temporaryDirectory();
   const session = await loginAuthenticatedSessionWithRuntime({
+    ...cacheOptions,
     mode: "paste", baseUrl: "https://school.example.edu", sessionFile: join(directory, "session.json"),
     browserCookieProvider: async () => { throw new Error("must not read browser files"); },
     cdpLogin: async () => { throw new Error("must not launch a CLI browser"); },

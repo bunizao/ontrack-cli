@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
-import { access, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { access } from "node:fs/promises";
 import { createServer } from "node:http";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 
 import type { BrowserCookie, BrowserCookieCandidate } from "./browser-cookies.js";
 import type { Environment, OnTrackConfig } from "./config.js";
@@ -10,6 +10,8 @@ import { CliError } from "./errors.js";
 import type { UserView } from "./types.js";
 import { safeUserView } from "./user.js";
 import { CdpError, loginWithCdp, type CdpLoginOptions, type CdpLoginResult } from "./cdp-login.js";
+
+import { readSessionCache, writeSessionCache, type SessionCacheOptions } from "./session-cache.js";
 
 export type LoginMode = "browser" | "reuse" | "paste";
 
@@ -44,7 +46,7 @@ interface CookieRecord {
   readonly path: string;
 }
 
-interface BrowserSessionOptions {
+interface BrowserSessionOptions extends SessionCacheOptions {
   readonly baseUrl: string;
   readonly sessionFile: string;
   readonly now?: () => Date;
@@ -130,27 +132,23 @@ function readStoredSession(value: unknown, baseUrl: string, now: Date): StoredSe
   };
 }
 
-async function loadStoredSession(sessionFile: string, baseUrl: string, now: Date): Promise<AuthenticatedSession | undefined> {
-  try {
-    const parsed: unknown = JSON.parse(await readFile(sessionFile, "utf8"));
-    const stored = readStoredSession(parsed, baseUrl, now);
-    if (!stored) return undefined;
-    return {
-      baseUrl: stored.base_url,
-      username: stored.username,
-      accessToken: stored.access_token,
-      authTokenExpiry: stored.auth_token_expiry,
-      provenance: "session_cache",
-      user: null,
-    };
-  } catch (error) {
-    const code = typeof error === "object" && error !== null && "code" in error ? (error as { code?: unknown }).code : undefined;
-    if (code === "ENOENT" || error instanceof SyntaxError) return undefined;
-    throw authError("Could not read the authenticated session cache.");
-  }
+async function loadStoredSession(options: BrowserSessionOptions, now: Date): Promise<AuthenticatedSession | undefined> {
+  const record = await readSessionCache(options.sessionFile, options);
+  if (!record) return undefined;
+  const stored = readStoredSession(record.value, options.baseUrl, now);
+  if (!stored) return undefined;
+  if (!record.encrypted) await writeSessionCache(options.sessionFile, stored, options);
+  return {
+    baseUrl: stored.base_url,
+    username: stored.username,
+    accessToken: stored.access_token,
+    authTokenExpiry: stored.auth_token_expiry,
+    provenance: "session_cache",
+    user: null,
+  };
 }
 
-async function saveStoredSession(sessionFile: string, session: AuthenticatedSession): Promise<void> {
+async function saveStoredSession(options: BrowserSessionOptions, session: AuthenticatedSession): Promise<void> {
   if (!session.authTokenExpiry || session.provenance !== "browser") return;
   const stored: StoredSession = {
     base_url: session.baseUrl,
@@ -159,16 +157,7 @@ async function saveStoredSession(sessionFile: string, session: AuthenticatedSess
     auth_token_expiry: session.authTokenExpiry,
     provenance: session.provenance,
   };
-  const temporary = `${sessionFile}.${randomUUID()}.tmp`;
-  try {
-    await mkdir(dirname(sessionFile), { recursive: true, mode: 0o700 });
-    await writeFile(temporary, `${JSON.stringify(stored, null, 2)}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
-    await rename(temporary, sessionFile);
-  } catch {
-    throw authError("Could not write the authenticated session cache.");
-  } finally {
-    await rm(temporary, { force: true }).catch(() => undefined);
-  }
+  await writeSessionCache(options.sessionFile, stored, options);
 }
 
 async function discoverLoginUrl(
@@ -371,7 +360,7 @@ async function exchangeBrowserCookieCandidates(
         timeoutMs,
         options.signal,
       );
-      await saveStoredSession(options.sessionFile, session);
+      await saveStoredSession(options, session);
       return session;
     } catch (error) {
       if (error instanceof RejectedBrowserCookieCandidate) continue;
@@ -444,7 +433,7 @@ async function browserSession(options: LoginAuthenticatedSessionOptions, headles
     throw error;
   }
   if (!session) throw authError("The browser did not return an authenticated OnTrack session.");
-  await saveStoredSession(options.sessionFile, session);
+  await saveStoredSession(options, session);
   return session;
 }
 
@@ -547,9 +536,8 @@ export async function resolveAuthenticatedSession(
   }
 
   const now = currentTime(options);
-  const sessionFile = options.sessionFile;
   if (!options.skipCache) {
-    const cached = await loadStoredSession(sessionFile, options.baseUrl, now);
+    const cached = await loadStoredSession(options, now);
     if (cached) return cached;
   }
 
@@ -643,6 +631,6 @@ export async function loginAuthenticatedSession(
     provenance: "browser",
     user: null,
   };
-  await saveStoredSession(options.sessionFile, session);
+  await saveStoredSession(options, session);
   return session;
 }

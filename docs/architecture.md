@@ -31,7 +31,7 @@ Each boundary has one job:
 
 Explicit credentials take precedence over the local session cache and browser cookies. When the cached access token is expired or rejected, an existing private CLI browser profile is tried headlessly before reading normal browser cookie stores. Browser cookies are filtered for the target deployment and exchanged in memory for an OnTrack access token. Refresh cookies are not copied into the CLI cache.
 
-The cache stores the deployment URL, username, access token, expiry, and credential source with file mode `0600`. Writes use a temporary file and atomic rename. A rejected GET request may refresh credentials and retry once. The client does not retry mutating requests.
+The cache encrypts the deployment URL, username, access token, expiry, and credential source with AES-256-GCM and file mode `0600`. The encryption key is held by macOS Keychain, Windows DPAPI, or Linux Secret Service; Linux without Secret Service uses an owner-only key file outside the working directory. Legacy plaintext entries migrate after validation. Missing keys and failed authentication of ciphertext preserve the original cache. Writes use a temporary file and atomic rename. A rejected GET request may refresh credentials and retry once. The client does not retry mutating requests.
 
 Normal browser-cookie discovery is delegated to `@steipete/sweet-cookie`, then normalized behind the local browser-cookie boundary. Each browser is queried separately so credentials from different profiles are never combined. Store reads have an eight-second limit and support cancellation. Non-fatal provider warnings are shown during `auth login --reuse-browser` without exposing cookie values.
 
