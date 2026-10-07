@@ -1,13 +1,26 @@
+<p align="center"><a href="https://unicorn.tuuhub.com"><img src=".github/assets/hero.jpg" alt="ontrack: OnTrack and Doubtfire from your terminal, scripts and AI agent, part of unicorn" width="100%"></a></p>
+
 # ontrack
 
-CLI access to OnTrack and Doubtfire for students, teaching staff, scripts, and agents. Runs on Node.js 22.5+ and Bun.
+**CLI access to OnTrack and Doubtfire for students, teaching staff, scripts, and agents.** Runs on Node.js 22.5+ and Bun.
 
 [![npm version](https://img.shields.io/npm/v/ontrack?logo=npm)](https://www.npmjs.com/package/ontrack)
 [![CI](https://github.com/bunizao/ontrack-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/bunizao/ontrack-cli/actions/workflows/ci.yml)
 [![Node.js 22.5+](https://img.shields.io/badge/Node.js-22.5%2B-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-## Install
+> The live layer of [unicorn](https://unicorn.tuuhub.com): live tools answer what is there now, unicorn answers what changed. `ontrack` is CLI only; it has no MCP server. Docs: [unicorn.tuuhub.com/docs/ontrack](https://unicorn.tuuhub.com/docs/ontrack).
+
+## Quick start
+
+```bash
+npm install -g ontrack
+export ONTRACK_BASE_URL="https://ontrack.example.edu"
+ontrack auth login
+ontrack units
+```
+
+## Install and configure
 
 With npm:
 
@@ -43,14 +56,9 @@ base_url: https://ontrack.example.edu
 
 ## Sign in
 
-```bash
-ontrack auth login
-ontrack auth status
-```
-
 `auth login` offers three sign-in paths in a terminal. The recommended path opens Chrome, Edge, Brave, or Chromium with a private CLI profile. Complete your institution's sign-in in that window; the CLI captures and validates the OnTrack session automatically, without reading your normal browser's files or asking you to paste anything.
 
-Choose a path directly:
+### Choose a path
 
 ```bash
 ontrack auth login --browser
@@ -62,11 +70,13 @@ ontrack auth login --paste
 
 `--paste` reads credentials without echoing them. It accepts the Cookie header or cURL command for your site's `/api/auth/access-token` request, or its response JSON. A bare refresh cookie requires `--username USERNAME`. Multi-line pastes stay together. Scripts can pipe the credentials through stdin; keep them out of command arguments and shell history. Pasted access tokens are verified against a protected endpoint before saving.
 
+### Where the session is kept
+
 The CLI encrypts the access token and renewal cookies in `~/.config/ontrack-cli/session.json` with AES-256-GCM and owner-only permissions. Existing plaintext caches migrate when authentication loads them. The key uses macOS Keychain, Windows DPAPI, or Linux Secret Service. Linux systems without Secret Service use a private key file under `~/.config/ontrack-cli/keys/`; that fallback relies on your filesystem permissions for protection.
 
 The private browser profile is stored under `~/.config/ontrack-cli/browser/`, separately for each site. When an access token expires or a read request rejects it, the CLI first uses the encrypted renewal cookie, then tries the private profile in a background browser. Temporary network failures preserve renewal credentials. Automatic renewal must return the same account; an explicit `auth login` can switch accounts. If both the renewal cookie and institution SSO session have expired, run `auth login` again. `auth logout` removes both the session cache and the CLI browser profiles.
 
-Inspect or renew authentication:
+### Inspect or renew authentication
 
 ```bash
 ontrack auth status --local
@@ -152,6 +162,20 @@ ontrack skills generate
 ```
 
 The tracked [SKILL.md](SKILL.md) comes from `ontrack commands --json`. The package uses the shared [`@bunizao/cli-kit`](https://www.npmjs.com/package/@bunizao/cli-kit) command contract.
+
+## Part of unicorn
+
+unicorn is one project in two layers. The live tools answer what is there now; unicorn answers what changed.
+
+| Project | Layer | What it does | Repo |
+| --- | --- | --- | --- |
+| unicorn | Memory | A Cloudflare Worker on your own account. Reads Moodle, Ed, Canvas, Gmail and feeds every hour, remembers what each said, and tells your AI agent what changed. | [TuuHub/unicorn](https://github.com/TuuHub/unicorn) |
+| moodle-cli | Live | Moodle from the terminal and MCP: units, deadlines, grades, forums, files, submissions. | [bunizao/moodle-cli](https://github.com/bunizao/moodle-cli) |
+| edstem-cli | Live | Ed Discussion from the terminal and MCP: units, threads, lessons, files, posting. | [bunizao/edstem-cli](https://github.com/bunizao/edstem-cli) |
+| **ontrack** (you are here) | **Live** | **OnTrack / Doubtfire from the terminal: units, tasks, chats, submissions. CLI only, no MCP server.** | [bunizao/ontrack-cli](https://github.com/bunizao/ontrack-cli) |
+
+The three live tools share one command contract through [@bunizao/cli-kit](https://github.com/bunizao/cli-kit).
+Docs for everything: [unicorn.tuuhub.com/docs](https://unicorn.tuuhub.com/docs). This project: [unicorn.tuuhub.com/docs/ontrack](https://unicorn.tuuhub.com/docs/ontrack). CLIs overview: [unicorn.tuuhub.com/cli](https://unicorn.tuuhub.com/cli).
 
 ## License
 
