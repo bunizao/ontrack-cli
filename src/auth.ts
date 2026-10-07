@@ -29,6 +29,7 @@ export interface AuthenticatedSession {
   readonly authTokenExpiry: string | null;
   readonly provenance: SessionProvenance;
   readonly user: UserView | null;
+  readonly renewalCookies?: readonly BrowserCookie[];
 }
 
 interface StoredSession {
@@ -37,6 +38,9 @@ interface StoredSession {
   readonly access_token: string;
   readonly auth_token_expiry: string;
   readonly provenance: "browser" | "okta";
+  readonly refresh_cookies?: readonly BrowserCookie[];
+  readonly access_token_invalidated?: boolean;
+  readonly user?: UserView;
 }
 
 interface CookieRecord {
@@ -44,6 +48,8 @@ interface CookieRecord {
   readonly value: string;
   readonly domain: string;
   readonly path: string;
+  readonly secure?: boolean;
+  readonly expires?: string | number;
 }
 
 interface BrowserSessionOptions extends SessionCacheOptions {
@@ -57,12 +63,15 @@ interface BrowserSessionOptions extends SessionCacheOptions {
   readonly cookieStoreTimeoutMs?: number;
   readonly browserProfileDir?: string;
   readonly cdpLogin?: (options: CdpLoginOptions) => Promise<CdpLoginResult>;
+  readonly expectedUsername?: string;
+  readonly expectedAccessToken?: string;
 }
 
 export interface ResolveAuthenticatedSessionOptions extends BrowserSessionOptions {
   readonly env: Environment;
   readonly config?: OnTrackConfig;
   readonly skipCache?: boolean;
+  readonly rejectedAccessToken?: string;
 }
 
 export interface LoopbackCallbackResult {
@@ -100,6 +109,7 @@ function authError(message: string): CliError {
 }
 
 class RejectedBrowserCookieCandidate extends Error {}
+class BrowserCookieReadError extends CliError {}
 
 function currentTime(options: BrowserSessionOptions): Date {
   return options.now?.() ?? new Date();
@@ -110,7 +120,7 @@ function isFuture(value: string, now: Date): boolean {
   return !Number.isNaN(expiry.valueOf()) && expiry.valueOf() > now.valueOf();
 }
 
-function readStoredSession(value: unknown, baseUrl: string, now: Date): StoredSession | undefined {
+function readStoredSession(value: unknown, baseUrl: string): StoredSession | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
   const data = value as Record<string, unknown>;
   if (
@@ -120,44 +130,72 @@ function readStoredSession(value: unknown, baseUrl: string, now: Date): StoredSe
     || typeof data.access_token !== "string"
     || !data.access_token
     || typeof data.auth_token_expiry !== "string"
-    || !isFuture(data.auth_token_expiry, now)
+    || Number.isNaN(Date.parse(data.auth_token_expiry))
     || (data.provenance !== "browser" && data.provenance !== "okta")
   ) return undefined;
+  const cookies = Array.isArray(data.refresh_cookies) ? data.refresh_cookies.filter((cookie: unknown): cookie is BrowserCookie => {
+    if (typeof cookie !== "object" || cookie === null || !("name" in cookie) || !("value" in cookie) || !("domain" in cookie)) return false;
+    return (cookie.name === "username" || cookie.name === "refresh_token") && typeof cookie.value === "string"
+      && typeof cookie.domain === "string"
+      && (!("path" in cookie) || typeof cookie.path === "string")
+      && (!("secure" in cookie) || typeof cookie.secure === "boolean")
+      && (!("expires" in cookie) || typeof cookie.expires === "string" || typeof cookie.expires === "number");
+  }) : [];
   return {
     base_url: baseUrl,
     username: data.username,
     access_token: data.access_token,
     auth_token_expiry: data.auth_token_expiry,
     provenance: data.provenance,
+    ...(cookies.length ? { refresh_cookies: cookies } : {}),
+    ...(data.access_token_invalidated === true ? { access_token_invalidated: true } : {}),
+    ...(typeof data.user === "object" && data.user !== null && !Array.isArray(data.user) ? { user: safeUserView(data.user as Record<string, unknown>, data.username) } : {}),
   };
 }
 
-async function loadStoredSession(options: BrowserSessionOptions, now: Date): Promise<AuthenticatedSession | undefined> {
+function cachedAuth(stored: StoredSession): AuthenticatedSession {
+  return {
+    baseUrl: stored.base_url, username: stored.username, accessToken: stored.access_token,
+    authTokenExpiry: stored.auth_token_expiry, provenance: "session_cache", user: stored.user ?? null,
+    ...(stored.refresh_cookies ? { renewalCookies: stored.refresh_cookies } : {}),
+  };
+}
+
+function cacheMatches(value: unknown, options: BrowserSessionOptions, token: string): boolean {
+  const stored = readStoredSession(value, options.baseUrl);
+  return stored?.access_token === token;
+}
+
+async function loadStoredSession(options: BrowserSessionOptions): Promise<StoredSession | undefined> {
   const record = await readSessionCache(options.sessionFile, options);
   if (!record) return undefined;
-  const stored = readStoredSession(record.value, options.baseUrl, now);
+  const stored = readStoredSession(record.value, options.baseUrl);
   if (!stored) return undefined;
-  if (!record.encrypted) await writeSessionCache(options.sessionFile, stored, options);
-  return {
-    baseUrl: stored.base_url,
-    username: stored.username,
-    accessToken: stored.access_token,
-    authTokenExpiry: stored.auth_token_expiry,
-    provenance: "session_cache",
-    user: null,
-  };
+  if (record.encrypted) return stored;
+  const chosen = await writeSessionCache(options.sessionFile, stored, options, (value) => cacheMatches(value, options, stored.access_token));
+  return readStoredSession(chosen, options.baseUrl);
 }
 
-async function saveStoredSession(options: BrowserSessionOptions, session: AuthenticatedSession): Promise<void> {
-  if (!session.authTokenExpiry || session.provenance !== "browser") return;
+async function saveStoredSession(options: BrowserSessionOptions, session: AuthenticatedSession): Promise<AuthenticatedSession> {
+  if (!session.authTokenExpiry || session.provenance !== "browser") return session;
+  if (!isFuture(session.authTokenExpiry, currentTime(options))) throw authError("The access token expired before it could be saved. Sign in again.");
+  let previous: StoredSession | undefined;
+  try { previous = readStoredSession((await readSessionCache(options.sessionFile, options))?.value, options.baseUrl); }
+  catch (error) { if (error instanceof CliError && error.category === "cancellation") throw error; }
+  const retained = previous?.username === session.username ? previous.refresh_cookies : undefined;
+  const cookies = session.renewalCookies ?? retained;
   const stored: StoredSession = {
-    base_url: session.baseUrl,
-    username: session.username,
-    access_token: session.accessToken,
-    auth_token_expiry: session.authTokenExpiry,
-    provenance: session.provenance,
+    base_url: session.baseUrl, username: session.username, access_token: session.accessToken,
+    auth_token_expiry: session.authTokenExpiry, provenance: session.provenance,
+    ...(cookies ? { refresh_cookies: cookies } : {}),
+    ...(session.user ? { user: session.user } : {}),
   };
-  await writeSessionCache(options.sessionFile, stored, options);
+  const chosen = await writeSessionCache(options.sessionFile, stored, options,
+    options.expectedAccessToken ? (value) => cacheMatches(value, options, options.expectedAccessToken!) : undefined);
+  if (chosen === stored) return session;
+  const latest = readStoredSession(chosen, options.baseUrl);
+  if (latest?.username === session.username && !latest.access_token_invalidated && isFuture(latest.auth_token_expiry, currentTime(options))) return cachedAuth(latest);
+  throw authError("The cached account changed during renewal. Run `ontrack auth login` again.");
 }
 
 async function discoverLoginUrl(
@@ -246,7 +284,10 @@ function applicableCookies(records: readonly BrowserCookie[], baseUrl: string, n
       || /[;\r\n]/.test(record.name)
       || /[;\r\n]/.test(record.value)
     ) return [];
-    return [{ name: record.name, value: record.value, domain: record.domain, path }];
+    return [{ name: record.name, value: record.value, domain: record.domain, path,
+      ...(record.secure === undefined ? {} : { secure: record.secure }),
+      ...(record.expires === undefined ? {} : { expires: record.expires }),
+    }];
   });
 }
 
@@ -285,15 +326,15 @@ async function exchangeCookies(
   } catch {
     clearTimeout(timeout);
     if (signal?.aborted) throw new CliError("cancellation", "Authentication cancelled.");
-    if (timeoutController.signal.aborted) throw authError(`Cookie exchange timed out after ${timeoutMs}ms.`);
-    throw authError("Cookie exchange failed: OnTrack could not be reached.");
+    if (timeoutController.signal.aborted) throw new CliError("network", `Cookie exchange timed out after ${timeoutMs}ms.`);
+    throw new CliError("network", "Cookie exchange failed: OnTrack could not be reached.");
   }
   if (!response.ok) {
     clearTimeout(timeout);
     if (response.status === 401 || response.status === 403 || response.status === 419) {
       throw new RejectedBrowserCookieCandidate();
     }
-    throw authError(`Cookie exchange failed: OnTrack returned HTTP ${response.status}.`);
+    throw new CliError("upstream_api", `Cookie exchange failed: OnTrack returned HTTP ${response.status}.`, response.status);
   }
 
   let payload: unknown;
@@ -301,8 +342,8 @@ async function exchangeCookies(
     payload = await response.json();
   } catch {
     if (signal?.aborted) throw new CliError("cancellation", "Authentication cancelled.");
-    if (timeoutController.signal.aborted) throw authError(`Cookie exchange timed out after ${timeoutMs}ms.`);
-    throw authError("Cookie exchange failed: OnTrack returned malformed JSON.");
+    if (timeoutController.signal.aborted) throw new CliError("network", `Cookie exchange timed out after ${timeoutMs}ms.`);
+    throw new CliError("upstream_contract", "Cookie exchange failed: OnTrack returned malformed JSON.");
   } finally {
     clearTimeout(timeout);
   }
@@ -332,6 +373,9 @@ async function exchangeCookies(
     authTokenExpiry: new Date(data.auth_token_expiry).toISOString(),
     provenance: "browser",
     user: safeUserView(userData, username),
+    ...(cookies.some((cookie) => cookie.name === "refresh_token") ? {
+      renewalCookies: cookies.filter((cookie) => cookie.name === "refresh_token" || cookie.name === "username"),
+    } : {}),
   };
 }
 
@@ -346,6 +390,9 @@ async function exchangeBrowserCookieCandidates(
   try {
     candidates = await readBrowserCookies(options);
   } catch (error) {
+    if (error instanceof CliError && error.category === "auth") {
+      throw new BrowserCookieReadError("auth", error.message, error.statusCode, error.hint);
+    }
     if (error instanceof CliError) throw error;
     return undefined;
   }
@@ -360,8 +407,8 @@ async function exchangeBrowserCookieCandidates(
         timeoutMs,
         options.signal,
       );
-      await saveStoredSession(options, session);
-      return session;
+      if (options.expectedUsername && session.username !== options.expectedUsername) continue;
+      return await saveStoredSession(options, session);
     } catch (error) {
       if (error instanceof RejectedBrowserCookieCandidate) continue;
       throw error;
@@ -418,8 +465,10 @@ async function browserSession(options: LoginAuthenticatedSessionOptions, headles
         lastCookies = fingerprint;
         lastChecked = now.valueOf();
         try {
-          session = await exchangeCookies(options.baseUrl, cookies, options.fetch ?? fetch, now,
+          const candidate = await exchangeCookies(options.baseUrl, cookies, options.fetch ?? fetch, now,
             options.exchangeTimeoutMs ?? 30_000, options.signal);
+          if (options.expectedUsername && candidate.username !== options.expectedUsername) return false;
+          session = candidate;
           return true;
         } catch (error) {
           if (error instanceof RejectedBrowserCookieCandidate) return false;
@@ -433,8 +482,7 @@ async function browserSession(options: LoginAuthenticatedSessionOptions, headles
     throw error;
   }
   if (!session) throw authError("The browser did not return an authenticated OnTrack session.");
-  await saveStoredSession(options, session);
-  return session;
+  return saveStoredSession(options, session);
 }
 
 function buildLoginSnippet(port: number, state: string): string {
@@ -536,26 +584,46 @@ export async function resolveAuthenticatedSession(
   }
 
   const now = currentTime(options);
-  if (!options.skipCache) {
-    const cached = await loadStoredSession(options, now);
-    if (cached) return cached;
+  let cached = await loadStoredSession(options);
+  if (options.rejectedAccessToken && cached?.access_token === options.rejectedAccessToken) {
+    const invalidated = { ...cached, access_token_invalidated: true };
+    const chosen = await writeSessionCache(options.sessionFile, invalidated, options,
+      (value) => cacheMatches(value, options, options.rejectedAccessToken!));
+    cached = readStoredSession(chosen, options.baseUrl);
   }
-
-  if (options.browserProfileDir && await access(options.browserProfileDir).then(() => true, () => false)) {
+  if (!options.skipCache && cached && !cached.access_token_invalidated && isFuture(cached.auth_token_expiry, now)) return cachedAuth(cached);
+  // Another command may already have recovered the rejected token.
+  if (options.rejectedAccessToken && cached && cached.access_token !== options.rejectedAccessToken
+    && !cached.access_token_invalidated && isFuture(cached.auth_token_expiry, now)) return cachedAuth(cached);
+  const renewalOptions: BrowserSessionOptions = {
+    ...options,
+    ...(cached ? { expectedUsername: cached.username, expectedAccessToken: cached.access_token } : {}),
+  };
+  if (cached?.refresh_cookies) {
+    const cookies = applicableCookies(cached.refresh_cookies, options.baseUrl, now);
     try {
-      return await browserSession(options, true);
+      const renewed = await exchangeCookies(options.baseUrl, cookies, options.fetch ?? fetch, now,
+        options.exchangeTimeoutMs ?? 30_000, options.signal);
+      if (renewed.username !== cached.username) throw authError("The renewal cookie returned a different account. Run `ontrack auth login` again.");
+      return await saveStoredSession(renewalOptions, renewed);
     } catch (error) {
-      if (!(error instanceof CliError) || error.category !== "auth") throw error;
-      // An expired SSO session needs an explicit interactive login.
+      if (!(error instanceof RejectedBrowserCookieCandidate)) throw error;
+      // Only an upstream refusal discards the durable cookie. Network failures keep it.
+      const { refresh_cookies: _refused, ...remaining } = cached;
+      const chosen = await writeSessionCache(options.sessionFile, { ...remaining, access_token_invalidated: true }, options,
+        (value) => cacheMatches(value, options, cached!.access_token));
+      cached = readStoredSession(chosen, options.baseUrl);
+      if (cached && cached.access_token !== renewalOptions.expectedAccessToken && !cached.access_token_invalidated
+        && isFuture(cached.auth_token_expiry, currentTime(options))) return cachedAuth(cached);
     }
   }
-
-  const reused = await exchangeBrowserCookieCandidates(
-    options,
-    now,
-    options.fetch ?? fetch,
-    options.exchangeTimeoutMs ?? 30_000,
-  );
+  if (options.browserProfileDir && await access(options.browserProfileDir).then(() => true, () => false)) {
+    try { return await browserSession(renewalOptions, true); }
+    catch (error) {
+      if (!(error instanceof CliError) || error.category !== "auth") throw error;
+    }
+  }
+  const reused = await exchangeBrowserCookieCandidates(renewalOptions, now, options.fetch ?? fetch, options.exchangeTimeoutMs ?? 30_000);
   if (reused) return reused;
   throw authError("No active OnTrack browser session was found. Run `ontrack auth login` to sign in.");
 }
@@ -574,7 +642,7 @@ export async function loginAuthenticatedSession(
       const reused = await exchangeBrowserCookieCandidates(options, now, fetchImplementation, exchangeTimeoutMs);
       if (reused) return reused;
     } catch (error) {
-      if (!(error instanceof CliError) || error.category !== "auth") throw error;
+      if (!(error instanceof BrowserCookieReadError)) throw error;
       options.onWarning?.("Browser cookie reuse is unavailable. Continuing with manual browser sign-in.");
     }
   }
@@ -631,6 +699,5 @@ export async function loginAuthenticatedSession(
     provenance: "browser",
     user: null,
   };
-  await saveStoredSession(options, session);
-  return session;
+  return saveStoredSession(options, session);
 }

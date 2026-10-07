@@ -8,7 +8,7 @@ export interface AccessCredentials {
 export interface HttpClientOptions {
   readonly baseUrl: string;
   readonly credentials: AccessCredentials;
-  readonly refresh?: (signal: AbortSignal) => Promise<AccessCredentials | void>;
+  readonly refresh?: (signal: AbortSignal, rejected: AccessCredentials) => Promise<AccessCredentials | void>;
   readonly fetch?: typeof globalThis.fetch;
   readonly timeoutMs?: number;
   readonly signal?: AbortSignal;
@@ -168,7 +168,7 @@ function upstreamErrorDetail(bytes: Uint8Array): string | undefined {
 export class HttpClient {
   readonly #baseUrl: URL;
   readonly #fetch: typeof globalThis.fetch;
-  readonly #refresh: ((signal: AbortSignal) => Promise<AccessCredentials | void>) | undefined;
+  readonly #refresh: HttpClientOptions["refresh"];
   readonly #timeoutMs: number;
   readonly #signal: AbortSignal | undefined;
   readonly #trace: HttpClientOptions["trace"];
@@ -237,12 +237,13 @@ export class HttpClient {
     const method = (options.method ?? "GET").toUpperCase();
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const sessionVersion = this.#sessionVersion;
+      const usedCredentials = this.#credentials;
       const startedAt = Date.now();
       const response = await this.#send(url, method, options, responseLimit);
       this.#trace?.({ method, url: url.toString(), status: response.status, ms: Date.now() - startedAt });
-      if (response.status === 419 && method === "GET" && attempt === 0 && this.#refresh) {
+      if ((response.status === 401 || response.status === 419) && method === "GET" && attempt === 0 && this.#refresh) {
         if (sessionVersion === this.#sessionVersion) {
-          await this.#refreshOnce(options.signal ?? this.#signal ?? new AbortController().signal);
+          await this.#refreshOnce(options.signal ?? this.#signal ?? new AbortController().signal, usedCredentials);
         }
         continue;
       }
@@ -253,7 +254,7 @@ export class HttpClient {
         throw new CliError("not_found", "The requested OnTrack entity does not exist", response.status);
       }
       if (!response.ok) {
-        const detail = upstreamErrorDetail(response.bytes);
+        const detail = upstreamErrorDetail(response.bytes)?.replaceAll(usedCredentials.accessToken, "[redacted]");
         throw new CliError("upstream_api", `OnTrack returned HTTP ${response.status}${detail ? `: ${detail}` : ""}`, response.status);
       }
       return response;
@@ -261,9 +262,9 @@ export class HttpClient {
     throw new CliError("auth", "OnTrack rejected the refreshed session", 419);
   }
 
-  async #refreshOnce(signal: AbortSignal): Promise<void> {
+  async #refreshOnce(signal: AbortSignal, rejected: AccessCredentials): Promise<void> {
     this.#refreshing ??= (async () => {
-      const refreshed = await this.#refresh?.(signal);
+      const refreshed = await this.#refresh?.(signal, rejected);
       if (refreshed) this.#credentials = refreshed;
       this.#sessionVersion += 1;
     })().finally(() => {
@@ -284,7 +285,7 @@ export class HttpClient {
       ? AbortSignal.any([externalSignal, timeoutController.signal])
       : timeoutController.signal;
     try {
-      const init: RequestInit = { method, headers, signal };
+      const init: RequestInit = { method, headers, signal, redirect: "error" };
       if (options.body !== undefined) init.body = options.body;
       const response = await this.#fetch(url, init);
       if (!response.ok) {
@@ -304,7 +305,7 @@ export class HttpClient {
       if (timeoutController.signal.aborted) {
         throw new CliError("network", `OnTrack request timed out after ${this.#timeoutMs}ms`);
       }
-      throw new CliError("network", error instanceof Error ? error.message : "Network request failed");
+      throw new CliError("network", error instanceof Error ? error.message.replaceAll(this.#credentials.accessToken, "[redacted]") : "Network request failed");
     } finally {
       clearTimeout(timeout);
     }

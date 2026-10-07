@@ -190,10 +190,8 @@ function keyId(sessionFile: string): string {
   return createHash("sha256").update(resolve(sessionFile)).digest("hex").slice(0, 24);
 }
 
-async function withKeyLock<T>(id: string, options: SessionCacheOptions, action: () => Promise<T>): Promise<T> {
-  if (options.encryptionKey) return action();
-  const directory = join(options.homeDir ?? homedir(), ".config", "ontrack-cli", "keys");
-  const lock = join(directory, `${id}.lock`);
+async function withFileLock<T>(lock: string, options: SessionCacheOptions, action: () => Promise<T>): Promise<T> {
+  const directory = dirname(lock);
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const deadline = Date.now() + 20_000;
   for (;;) {
@@ -203,7 +201,7 @@ async function withKeyLock<T>(id: string, options: SessionCacheOptions, action: 
       if (!(typeof error === "object" && error !== null && "code" in error && error.code === "EEXIST")) throw error;
       const age = await stat(lock).then((value) => Date.now() - value.mtimeMs, () => 0);
       if (age > 60_000) { await rm(lock, { recursive: true, force: true }); continue; }
-      if (Date.now() > deadline) throw cacheError("Timed out waiting for the session encryption key store.");
+      if (Date.now() > deadline) throw cacheError("Timed out waiting for the session cache lock.");
       await new Promise((resolveWait) => setTimeout(resolveWait, 50));
     }
   }
@@ -216,7 +214,8 @@ async function cacheKey(sessionFile: string, options: SessionCacheOptions, backe
     : (options.platform ?? process.platform) === "win32" ? "windows_dpapi" : "secret_service");
   try {
     const read = () => keyValue(selected, keyId(sessionFile), options, backend === undefined);
-    return { key: backend === undefined ? await withKeyLock(keyId(sessionFile), options, read) : await read(), backend: selected };
+    const lock = join(options.homeDir ?? homedir(), ".config", "ontrack-cli", "keys", `${keyId(sessionFile)}.lock`);
+    return { key: backend === undefined && !options.encryptionKey ? await withFileLock(lock, options, read) : await read(), backend: selected };
   } catch (error) {
     const unavailable = error instanceof SessionKeyCommandError && (error.code === "ENOENT"
       || (selected === "secret_service" && /D-Bus|DBus|Cannot autolaunch|not available|cannot connect|connection refused/i.test(error.detail)));
@@ -246,7 +245,23 @@ export async function readSessionCache(sessionFile: string, options: SessionCach
   }
 }
 
-export async function writeSessionCache(sessionFile: string, value: unknown, options: SessionCacheOptions = {}): Promise<void> {
+export async function writeSessionCache(
+  sessionFile: string,
+  value: unknown,
+  options: SessionCacheOptions = {},
+  replaceIf?: (current: unknown) => boolean,
+): Promise<unknown> {
+  return withFileLock(`${sessionFile}.lock`, options, async () => {
+    if (replaceIf) {
+      const current = await readSessionCache(sessionFile, options);
+      if (!replaceIf(current?.value)) return current?.value;
+    }
+    await writeEncryptedCache(sessionFile, value, options);
+    return value;
+  });
+}
+
+async function writeEncryptedCache(sessionFile: string, value: unknown, options: SessionCacheOptions): Promise<void> {
   let previous: unknown;
   try { previous = await readJson(sessionFile); }
   catch { throw cacheError("Could not write the authenticated session cache."); }

@@ -208,7 +208,7 @@ async function createApplication(signal: AbortSignal, env: Environment, platform
     ...(process.argv.includes("--verbose")
       ? { trace: (entry) => process.stderr.write(`${entry.method} ${entry.url} ${entry.status} ${entry.ms}ms\n`) }
       : {}),
-    refresh: async (refreshSignal) => {
+    refresh: async (refreshSignal, rejected) => {
       session = await resolveAuthenticatedSession({
         baseUrl,
         sessionFile: paths.sessionFile,
@@ -217,6 +217,7 @@ async function createApplication(signal: AbortSignal, env: Environment, platform
         signal: refreshSignal,
         browserProfileDir: browserProfileForSite(paths.configDir, baseUrl),
         skipCache: true,
+        rejectedAccessToken: rejected.accessToken,
         browserCookieProvider: () => authenticationCookieCandidates(baseUrl),
       });
       sessionState.current = session;

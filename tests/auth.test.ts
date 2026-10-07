@@ -191,7 +191,7 @@ export async function test_valid_cached_session_is_reused_and_expired_session_is
   const sessionFile = join(directory, "session.json");
   await writeFile(sessionFile, JSON.stringify({
     base_url: "https://school.example.edu",
-    username: "cached-user",
+    username: "alice",
     access_token: "cached-token",
     auth_token_expiry: "2030-01-01T00:00:00.000Z",
     provenance: "okta",
@@ -581,7 +581,7 @@ export async function test_cookie_exchange_surfaces_rate_limits_and_server_failu
       browserCookieProvider: async () => browserCandidate(validCookies()),
       fetch: async () => new Response(null, { status }),
     }), (error) => error instanceof CliError
-      && error.category === "auth"
+      && error.category === "upstream_api"
       && error.message.includes(`HTTP ${status}`));
   }
 }
@@ -597,16 +597,14 @@ export async function test_cookie_exchange_has_its_own_timeout(): Promise<void> 
     fetch: async (_input, init) => new Promise<Response>((_resolve, reject) => {
       init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
     }),
-  }), (error) => error instanceof CliError && error.category === "auth" && /timed out after 5ms/u.test(error.message));
+  }), (error) => error instanceof CliError && error.category === "network" && /timed out after 5ms/u.test(error.message));
 }
 
 export async function test_cookie_exchange_reports_session_cache_write_failure(): Promise<void> {
   const directory = await temporaryDirectory();
-  await assert.rejects(resolveAuthenticatedSession({
+  await assert.rejects(loginAuthenticatedSession({
     baseUrl: "https://school.example.edu",
     sessionFile: directory,
-    env: {},
-    skipCache: true,
     browserCookieProvider: async () => browserCandidate(validCookies()),
     fetch: exchangeResponse({
       auth_token: "access-secret",
@@ -621,7 +619,7 @@ export async function test_skip_cache_bypasses_a_rejected_unexpired_session(): P
   const sessionFile = join(directory, "session.json");
   await writeFile(sessionFile, JSON.stringify({
     base_url: "https://school.example.edu",
-    username: "rejected-user",
+    username: "alice",
     access_token: "rejected-token",
     auth_token_expiry: "2030-01-01T00:00:00.000Z",
     provenance: "browser",
@@ -743,4 +741,107 @@ export async function test_expired_session_renews_in_the_private_browser_before_
   });
   assert.equal(session.accessToken, "new-access");
   assert.equal(storeReads, 0);
+}
+
+async function seedRenewalSession(sessionFile: string): Promise<void> {
+  const { writeSessionCache } = await import("../src/session-cache.js");
+  await writeSessionCache(sessionFile, {
+    base_url: "https://school.example.edu", username: "alice", access_token: "old-access",
+    auth_token_expiry: "2020-01-01T00:00:00Z", provenance: "browser", refresh_cookies: validCookies(),
+  }, cacheOptions);
+}
+
+export async function test_durable_cookie_renews_without_a_browser(): Promise<void> {
+  const directory = await temporaryDirectory();
+  const sessionFile = join(directory, "session.json");
+  await seedRenewalSession(sessionFile);
+  const session = await resolveAuthenticatedSession({
+    baseUrl: "https://school.example.edu", sessionFile, env: {},
+    browserCookieProvider: async () => { throw new Error("must not read browser files"); },
+    cdpLogin: async () => { throw new Error("must not launch a browser"); },
+    fetch: exchangeResponse({ auth_token: "renewed-access", auth_token_expiry: "2030-01-01T00:00:00Z", user: { username: "alice" } }),
+  });
+  assert.equal(session.accessToken, "renewed-access");
+  const stored = await readStoredTestSession(sessionFile);
+  assert.equal(stored.access_token, "renewed-access");
+  assert.equal((stored.refresh_cookies as BrowserCookie[])[1]?.value, "refresh-secret");
+  assert.doesNotMatch(await readFile(sessionFile, "utf8"), /refresh-secret|renewed-access/u);
+}
+
+export async function test_transient_renewal_failures_keep_durable_credentials(): Promise<void> {
+  const directory = await temporaryDirectory();
+  for (const status of [429, 500]) {
+    const sessionFile = join(directory, `${status}.json`);
+    await seedRenewalSession(sessionFile);
+    const before = await readFile(sessionFile, "utf8");
+    await assert.rejects(resolveAuthenticatedSession({
+      baseUrl: "https://school.example.edu", sessionFile, env: {}, fetch: async () => new Response(null, { status }),
+    }), (error) => error instanceof CliError && error.category === "upstream_api");
+    assert.equal(await readFile(sessionFile, "utf8"), before);
+  }
+}
+
+export async function test_rejected_refresh_cookie_is_removed_and_the_access_token_stays_invalidated(): Promise<void> {
+  const directory = await temporaryDirectory();
+  const sessionFile = join(directory, "session.json");
+  await seedRenewalSession(sessionFile);
+  await assert.rejects(resolveAuthenticatedSession({
+    baseUrl: "https://school.example.edu", sessionFile, env: {}, fetch: async () => new Response(null, { status: 401 }),
+  }), CliError);
+  const stored = await readStoredTestSession(sessionFile);
+  assert.equal(stored.refresh_cookies, undefined);
+  assert.equal(stored.access_token_invalidated, true);
+  assert.equal(stored.access_token, "old-access");
+}
+
+export async function test_renewal_cannot_switch_the_cached_account(): Promise<void> {
+  const directory = await temporaryDirectory();
+  const sessionFile = join(directory, "session.json");
+  await seedRenewalSession(sessionFile);
+  const before = await readFile(sessionFile, "utf8");
+  await assert.rejects(resolveAuthenticatedSession({
+    baseUrl: "https://school.example.edu", sessionFile, env: {},
+    fetch: exchangeResponse({ auth_token: "other-access", auth_token_expiry: "2030-01-01T00:00:00Z", user: { username: "bob" } }),
+  }), (error) => error instanceof CliError && /different account/u.test(error.message));
+  assert.equal(await readFile(sessionFile, "utf8"), before);
+}
+
+export async function test_a_late_renewal_cannot_replace_a_newer_session(): Promise<void> {
+  const { writeSessionCache } = await import("../src/session-cache.js");
+  const directory = await temporaryDirectory();
+  const sessionFile = join(directory, "session.json");
+  await seedRenewalSession(sessionFile);
+  const result = await resolveAuthenticatedSession({
+    baseUrl: "https://school.example.edu", sessionFile, env: {},
+    fetch: async () => {
+      await writeSessionCache(sessionFile, {
+        base_url: "https://school.example.edu", username: "alice", access_token: "newer-access",
+        auth_token_expiry: "2030-01-01T00:00:00Z", provenance: "browser", refresh_cookies: validCookies(),
+      }, cacheOptions);
+      return Response.json({ auth_token: "late-access", auth_token_expiry: "2030-01-01T00:00:00Z", user: { username: "alice" } });
+    },
+  });
+  assert.equal(result.accessToken, "newer-access");
+  assert.equal((await readStoredTestSession(sessionFile)).access_token, "newer-access");
+}
+
+export async function test_a_failed_recovery_does_not_reuse_a_rejected_unexpired_token(): Promise<void> {
+  const { writeSessionCache } = await import("../src/session-cache.js");
+  const directory = await temporaryDirectory();
+  const sessionFile = join(directory, "session.json");
+  await writeSessionCache(sessionFile, {
+    base_url: "https://school.example.edu", username: "alice", access_token: "rejected-access",
+    auth_token_expiry: "2030-01-01T00:00:00Z", provenance: "browser", refresh_cookies: validCookies(),
+  }, cacheOptions);
+  await assert.rejects(resolveAuthenticatedSession({
+    baseUrl: "https://school.example.edu", sessionFile, env: {}, rejectedAccessToken: "rejected-access", skipCache: true,
+    fetch: async () => new Response(null, { status: 500 }),
+  }), CliError);
+  const stored = await readStoredTestSession(sessionFile);
+  assert.equal(stored.access_token_invalidated, true);
+  assert.ok(stored.refresh_cookies);
+  await assert.rejects(resolveAuthenticatedSession({
+    baseUrl: "https://school.example.edu", sessionFile, env: {},
+    fetch: async () => new Response(null, { status: 500 }),
+  }), (error) => error instanceof CliError && error.category === "upstream_api");
 }

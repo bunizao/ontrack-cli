@@ -636,3 +636,42 @@ export async function test_auth_method_accepts_null_redirect(): Promise<void> {
 
   assert.deepEqual(await client.getAuthMethod(), { method: "database", redirect_to: null });
 }
+
+export async function test_get_401_recovers_once_and_reports_the_rejected_credentials(): Promise<void> {
+  let refreshes = 0;
+  const client = new HttpClient({
+    baseUrl: "https://school.example.edu", credentials: { username: "alice", accessToken: "initial" },
+    refresh: async (_signal, rejected) => {
+      refreshes += 1;
+      assert.equal(rejected.accessToken, "initial");
+      return { username: "alice", accessToken: "renewed" };
+    },
+    fetch: async (_input, init) => {
+      assert.equal(init?.redirect, "error");
+      return new Headers(init?.headers).get("Auth-Token") === "initial"
+        ? new Response(null, { status: 401 }) : Response.json({ ok: true });
+    },
+  });
+  assert.deepEqual(await client.request("api/projects"), { ok: true });
+  assert.equal(refreshes, 1);
+}
+
+export async function test_post_401_is_never_retried(): Promise<void> {
+  let requests = 0;
+  const client = new HttpClient({
+    baseUrl: "https://school.example.edu", credentials: { username: "alice", accessToken: "initial" },
+    refresh: async () => { throw new Error("must not renew a mutation"); },
+    fetch: async () => { requests += 1; return new Response(null, { status: 401 }); },
+  });
+  await assert.rejects(client.request("api/example", { method: "POST" }), CliError);
+  assert.equal(requests, 1);
+}
+
+export async function test_upstream_error_text_cannot_echo_the_access_token(): Promise<void> {
+  const client = new HttpClient({
+    baseUrl: "https://school.example.edu", credentials: { username: "alice", accessToken: "test-access-secret" },
+    fetch: async () => Response.json({ error: "Invalid token test-access-secret" }, { status: 500 }),
+  });
+  await assert.rejects(client.request("api/projects"), (error) => error instanceof CliError
+    && error.message.includes("[redacted]") && !error.message.includes("test-access-secret"));
+}
