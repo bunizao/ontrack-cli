@@ -227,3 +227,20 @@ export async function test_old_singular_command_groups_are_removed(): Promise<vo
     assert.equal(result.exitCode, 2);
   }
 }
+
+export async function test_auth_login_modes_are_explicit_and_mutually_exclusive(): Promise<void> {
+  const { app } = fakeApplication();
+  const modes: unknown[] = [];
+  const deps = dependencies(app, {
+    version: "1.0.0",
+    authLogin: async (mode) => { modes.push(mode); return { username: "student" }; },
+  });
+  for (const flag of ["--browser", "--reuse-browser", "--paste"]) {
+    const result = await executeCli(["auth", "login", flag, "--json"], deps);
+    assert.equal(result.exitCode, 0, result.stderr);
+  }
+  assert.deepEqual(modes, ["browser", "reuse", "paste"]);
+  const invalid = await executeCli(["auth", "login", "--browser", "--paste", "--json"], deps);
+  assert.equal(invalid.exitCode, 2);
+  assert.equal(modes.length, 3);
+}

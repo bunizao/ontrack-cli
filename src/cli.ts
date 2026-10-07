@@ -3,12 +3,12 @@
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { appendFile, mkdir, unlink } from "node:fs/promises";
+import { appendFile, mkdir, rm, unlink } from "node:fs/promises";
 
 import { colorEnabled, createTheme, createUi, detectAudience, formatFromArgv, writeOutput, type Theme, type Ui } from "@bunizao/cli-kit";
 
 import { OnTrackApplication } from "./application.js";
-import { loginAuthenticatedSession, resolveAuthenticatedSession } from "./auth.js";
+import { browserProfileForSite, loginAuthenticatedSession, resolveAuthenticatedSession, type LoginMode } from "./auth.js";
 import { openSystemBrowser } from "./browser.js";
 import { authenticationCookieCandidates } from "./browser-cookies.js";
 import { executeCli, type ChatSendConfirmation } from "./cli-app.js";
@@ -22,8 +22,6 @@ import { createClock } from "./time.js";
 import type { TaskSubmissionPlan } from "./submission.js";
 import { VERSION } from "./version.js";
 import { showWordmark } from "./wordmark.js";
-
-const INTERACTIVE_KEYCHAIN_PROMPT_TIMEOUT_MS = 120_000;
 
 async function promptForBrowserLogin(message: string, signal: AbortSignal): Promise<void> {
   const ui = createUi({ input: process.stdin, output: process.stderr, signal });
@@ -80,6 +78,7 @@ async function authLogout(env: Environment, platform: NodeJS.Platform): Promise<
   await unlink(paths.sessionFile).catch((error: NodeJS.ErrnoException) => {
     if (error.code !== "ENOENT") throw error;
   });
+  await rm(join(paths.configDir, "browser"), { recursive: true, force: true });
   return { logged_out: true };
 }
 
@@ -125,21 +124,27 @@ function applicationResolver(signal: AbortSignal, env: Environment, platform: No
       showWordmark(ui);
       ui.note(`${error.message}\nSign in once in your browser; later commands reuse that session.`, "One-time setup");
       if (!await ui.confirm("Sign in through the browser now?", { initial: true }).catch(rethrowAsOnTrack)) throw error;
-      await authLogin(signal, env, platform);
+      await authLogin(signal, env, platform, ui);
       return createApplication(signal, env, platform);
     });
     return application;
   };
 }
 
-async function authLogin(signal: AbortSignal, env: Environment, platform: NodeJS.Platform): Promise<unknown> {
+async function authLogin(signal: AbortSignal, env: Environment, platform: NodeJS.Platform, ui: Ui, requestedMode?: LoginMode): Promise<unknown> {
+  await ensureBaseUrl(env, platform, ui);
   const paths = configPaths(env, platform);
   const config = loadConfig(paths);
   const baseUrl = resolveBaseUrl(env, config);
+  const mode = requestedMode ?? (ui.interactive ? await ui.select<LoginMode>("How would you like to sign in?", [
+    { value: "browser", label: "CLI browser (recommended)", hint: "Sign in once; no browser file permissions needed" },
+    { value: "reuse", label: "Use my existing browser", hint: "Reuse its current session" },
+    { value: "paste", label: "Manual browser sign-in", hint: "Paste a one-time snippet in DevTools" },
+  ]).catch(rethrowAsOnTrack) : "browser");
   const browserCookieProvider = async () => {
     const warnings: string[] = [];
     const candidates = await authenticationCookieCandidates(baseUrl, {
-      keychainPromptTimeoutMs: INTERACTIVE_KEYCHAIN_PROMPT_TIMEOUT_MS,
+      keychainPromptTimeoutMs: 8_000,
       onWarning: (warning) => warnings.push(warning),
     });
     if (candidates.length > 0) return candidates;
@@ -153,8 +158,12 @@ async function authLogin(signal: AbortSignal, env: Environment, platform: NodeJS
   const session = await loginAuthenticatedSession({
     baseUrl,
     sessionFile: paths.sessionFile,
+    browserProfileDir: browserProfileForSite(paths.configDir, baseUrl),
+    mode,
     signal,
     browserCookieProvider,
+    onBrowserOpened: () => { process.stderr.write("Complete the OnTrack sign-in in the browser window. Press Ctrl-C to cancel.\n"); },
+    onWarning: (message) => { process.stderr.write(`${message}\n`); },
     onLoginUrl: (url) => { process.stderr.write(`Sign-in URL: ${url}\n`); },
     onConsoleSnippet: (snippet) => {
       process.stderr.write(
@@ -186,6 +195,7 @@ async function createApplication(signal: AbortSignal, env: Environment, platform
     env,
     config,
     signal,
+    browserProfileDir: browserProfileForSite(paths.configDir, baseUrl),
     browserCookieProvider: () => authenticationCookieCandidates(baseUrl),
   });
   const sessionState = { current: session };
@@ -205,6 +215,7 @@ async function createApplication(signal: AbortSignal, env: Environment, platform
         env,
         config,
         signal: refreshSignal,
+        browserProfileDir: browserProfileForSite(paths.configDir, baseUrl),
         skipCache: true,
         browserCookieProvider: () => authenticationCookieCandidates(baseUrl),
       });
@@ -233,7 +244,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   try {
     const result = await executeCli(argv, {
       application: applicationResolver(controller.signal, env, platform, ui),
-      authLogin: () => authLogin(controller.signal, env, platform),
+      authLogin: (mode) => authLogin(controller.signal, env, platform, ui, mode),
       authLogout: () => authLogout(env, platform),
       confirmChatSend: (details) => confirmChatSend(details, controller.signal),
       confirmTaskSubmit: (plan) => confirmTaskSubmit(plan, controller.signal),

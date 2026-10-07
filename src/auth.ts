@@ -1,7 +1,7 @@
-import { randomUUID } from "node:crypto";
-import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { access, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 
 import type { BrowserCookie, BrowserCookieCandidate } from "./browser-cookies.js";
 import type { Environment, OnTrackConfig } from "./config.js";
@@ -9,6 +9,14 @@ import { resolveCredentialSource } from "./config.js";
 import { CliError } from "./errors.js";
 import type { UserView } from "./types.js";
 import { safeUserView } from "./user.js";
+import { CdpError, loginWithCdp, type CdpLoginOptions, type CdpLoginResult } from "./cdp-login.js";
+
+export type LoginMode = "browser" | "reuse" | "paste";
+
+export function browserProfileForSite(configDir: string, baseUrl: string): string {
+  const site = createHash("sha256").update(new URL(baseUrl).origin).digest("hex").slice(0, 16);
+  return join(configDir, "browser", site);
+}
 
 export type SessionProvenance = "environment" | "config" | "migration" | "session_cache" | "browser";
 
@@ -44,6 +52,9 @@ interface BrowserSessionOptions {
   readonly fetch?: typeof fetch;
   readonly signal?: AbortSignal;
   readonly browserCookieProvider?: () => Promise<readonly BrowserCookieCandidate[]>;
+  readonly cookieStoreTimeoutMs?: number;
+  readonly browserProfileDir?: string;
+  readonly cdpLogin?: (options: CdpLoginOptions) => Promise<CdpLoginResult>;
 }
 
 export interface ResolveAuthenticatedSessionOptions extends BrowserSessionOptions {
@@ -69,6 +80,9 @@ export interface LoopbackLoginRequest {
 export type LoopbackLoginListener = (request: LoopbackLoginRequest) => Promise<LoopbackCallbackResult>;
 
 export interface LoginAuthenticatedSessionOptions extends BrowserSessionOptions {
+  readonly mode?: LoginMode;
+  readonly onBrowserOpened?: () => void;
+  readonly onWarning?: (message: string) => void;
   readonly loginTimeoutMs?: number;
   readonly onLoginUrl?: (url: string) => void;
   readonly onConsoleSnippet?: (snippet: string) => void;
@@ -145,12 +159,15 @@ async function saveStoredSession(sessionFile: string, session: AuthenticatedSess
     auth_token_expiry: session.authTokenExpiry,
     provenance: session.provenance,
   };
+  const temporary = `${sessionFile}.${randomUUID()}.tmp`;
   try {
-    await mkdir(dirname(sessionFile), { recursive: true });
-    await writeFile(sessionFile, `${JSON.stringify(stored, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
-    await chmod(sessionFile, 0o600);
+    await mkdir(dirname(sessionFile), { recursive: true, mode: 0o700 });
+    await writeFile(temporary, `${JSON.stringify(stored, null, 2)}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
+    await rename(temporary, sessionFile);
   } catch {
     throw authError("Could not write the authenticated session cache.");
+  } finally {
+    await rm(temporary, { force: true }).catch(() => undefined);
   }
 }
 
@@ -272,6 +289,7 @@ async function exchangeCookies(
         Cookie: cookieHeader(cookies),
       },
       body: JSON.stringify({ delete_auth_token: false }),
+      redirect: "error",
     };
     init.signal = requestSignal;
     response = await fetchImplementation(`${baseUrl}/api/auth/access-token`, init);
@@ -337,7 +355,7 @@ async function exchangeBrowserCookieCandidates(
   if (!options.browserCookieProvider) return undefined;
   let candidates: readonly BrowserCookieCandidate[];
   try {
-    candidates = await options.browserCookieProvider();
+    candidates = await readBrowserCookies(options);
   } catch (error) {
     if (error instanceof CliError) throw error;
     return undefined;
@@ -361,6 +379,73 @@ async function exchangeBrowserCookieCandidates(
     }
   }
   return undefined;
+}
+
+async function readBrowserCookies(options: BrowserSessionOptions): Promise<readonly BrowserCookieCandidate[]> {
+  const signal = options.signal;
+  if (signal?.aborted) throw new CliError("cancellation", "Authentication cancelled.");
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(() => options.browserCookieProvider!()),
+      new Promise<readonly BrowserCookieCandidate[]>((resolve, reject) => {
+        timer = setTimeout(() => resolve([]), options.cookieStoreTimeoutMs ?? 8_000);
+        onAbort = () => reject(new CliError("cancellation", "Authentication cancelled."));
+        signal?.addEventListener("abort", onAbort, { once: true });
+        if (signal?.aborted) onAbort();
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+    if (onAbort) signal?.removeEventListener("abort", onAbort);
+  }
+}
+
+async function browserSession(options: LoginAuthenticatedSessionOptions, headless: boolean): Promise<AuthenticatedSession> {
+  const runCdp = options.cdpLogin ?? loginWithCdp;
+  const loginUrl = await discoverLoginUrl(
+    options.baseUrl, options.fetch ?? fetch, options.exchangeTimeoutMs ?? 30_000, options.signal,
+  );
+  let session: AuthenticatedSession | undefined;
+  let lastCookies = "";
+  let lastChecked = 0;
+  try {
+    await runCdp({
+      url: loginUrl,
+      headless,
+      signal: options.signal,
+      ...(options.browserProfileDir ? { profileDir: options.browserProfileDir } : {}),
+      ...(options.loginTimeoutMs === undefined ? {} : { timeoutMs: options.loginTimeoutMs }),
+      ...(options.onBrowserOpened ? { onOpened: options.onBrowserOpened } : {}),
+      isDone: async (records) => {
+        const now = currentTime(options);
+        const cookies = applicableCookies(records, options.baseUrl, now)
+          .filter((cookie) => cookie.name === "username" || cookie.name === "refresh_token");
+        if (!cookies.some((cookie) => cookie.name === "refresh_token")) return false;
+        const fingerprint = cookieHeader(cookies);
+        // Retry a rejected cookie after a short pause; SSO can finish without changing it.
+        if (fingerprint === lastCookies && now.valueOf() - lastChecked < 5_000) return false;
+        lastCookies = fingerprint;
+        lastChecked = now.valueOf();
+        try {
+          session = await exchangeCookies(options.baseUrl, cookies, options.fetch ?? fetch, now,
+            options.exchangeTimeoutMs ?? 30_000, options.signal);
+          return true;
+        } catch (error) {
+          if (error instanceof RejectedBrowserCookieCandidate) return false;
+          throw error;
+        }
+      },
+    });
+  } catch (error) {
+    if (options.signal?.aborted) throw new CliError("cancellation", "Authentication cancelled.");
+    if (error instanceof CdpError) throw new CliError("auth", error.message, undefined, error.hint);
+    throw error;
+  }
+  if (!session) throw authError("The browser did not return an authenticated OnTrack session.");
+  await saveStoredSession(options.sessionFile, session);
+  return session;
 }
 
 function buildLoginSnippet(port: number, state: string): string {
@@ -468,29 +553,43 @@ export async function resolveAuthenticatedSession(
     if (cached) return cached;
   }
 
-  const browserSession = await exchangeBrowserCookieCandidates(
+  if (options.browserProfileDir && await access(options.browserProfileDir).then(() => true, () => false)) {
+    try {
+      return await browserSession(options, true);
+    } catch (error) {
+      if (!(error instanceof CliError) || error.category !== "auth") throw error;
+      // An expired SSO session needs an explicit interactive login.
+    }
+  }
+
+  const reused = await exchangeBrowserCookieCandidates(
     options,
     now,
     options.fetch ?? fetch,
     options.exchangeTimeoutMs ?? 30_000,
   );
-  if (browserSession) return browserSession;
+  if (reused) return reused;
   throw authError("No active OnTrack browser session was found. Run `ontrack auth login` to sign in.");
 }
 
 export async function loginAuthenticatedSession(
   options: LoginAuthenticatedSessionOptions,
 ): Promise<AuthenticatedSession> {
+  if (options.signal?.aborted) throw new CliError("cancellation", "Authentication cancelled.");
+  const mode = options.mode ?? "browser";
+  if (mode === "browser") return browserSession(options, false);
   const now = currentTime(options);
   const fetchImplementation = options.fetch ?? fetch;
   const exchangeTimeoutMs = options.exchangeTimeoutMs ?? 30_000;
-  const browserSession = await exchangeBrowserCookieCandidates(
-    options,
-    now,
-    fetchImplementation,
-    exchangeTimeoutMs,
-  );
-  if (browserSession) return browserSession;
+  if (mode === "reuse") {
+    try {
+      const reused = await exchangeBrowserCookieCandidates(options, now, fetchImplementation, exchangeTimeoutMs);
+      if (reused) return reused;
+    } catch (error) {
+      if (!(error instanceof CliError) || error.category !== "auth") throw error;
+      options.onWarning?.("Browser cookie reuse is unavailable. Continuing with manual browser sign-in.");
+    }
+  }
   const loginUrl = await discoverLoginUrl(
     options.baseUrl,
     fetchImplementation,

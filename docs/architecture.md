@@ -20,7 +20,7 @@ Each boundary has one job:
 | --- | --- | --- |
 | CLI | `cli.ts`, `cli-app.ts` | Parse commands, select output mode, and map failures to exit codes. |
 | Application | `application.ts`, `resources.ts`, `uploads.ts`, `submission.ts` | Coordinate authenticated reads, downloads, task updates, and confirmed submissions. |
-| Authentication | `auth.ts`, `browser-cookies.ts`, `config.ts` | Resolve credentials, exchange application cookies, and maintain the local access-token cache. |
+| Authentication | `auth.ts`, `cdp-login.ts`, `browser-cookies.ts`, `config.ts` | Resolve credentials, exchange application cookies, and maintain the local access-token cache and private browser profiles. |
 | Transport | `http.ts` | Apply timeouts, cancellation, authentication headers, and the safe retry policy. |
 | OnTrack API | `ontrack.ts`, `readers.ts` | Call API routes and validate unknown response payloads. |
 | Domain | `project-snapshot.ts`, `time.ts`, `status.ts`, `grades.ts` | Build task schedules and interpret statuses and grades. |
@@ -29,13 +29,15 @@ Each boundary has one job:
 
 ## Authentication boundary
 
-Explicit credentials take precedence over the local session cache and browser cookies. Browser cookies are filtered for the target deployment and exchanged in memory for an OnTrack access token. Browser profiles are searched first; compatible Playwright storage-state files are an optional fallback. Refresh cookies are not copied into the CLI cache.
+Explicit credentials take precedence over the local session cache and browser cookies. When the cached access token is expired or rejected, an existing private CLI browser profile is tried headlessly before reading normal browser cookie stores. Browser cookies are filtered for the target deployment and exchanged in memory for an OnTrack access token. Refresh cookies are not copied into the CLI cache.
 
-The cache stores the deployment URL, username, access token, expiry, and credential source with file mode `0600`. A rejected GET request may refresh credentials and retry once. The client does not retry mutating requests.
+The cache stores the deployment URL, username, access token, expiry, and credential source with file mode `0600`. Writes use a temporary file and atomic rename. A rejected GET request may refresh credentials and retry once. The client does not retry mutating requests.
 
-Browser discovery is delegated to `@steipete/sweet-cookie`, then normalized behind the local browser-cookie boundary. Each browser is queried separately so credentials from different profiles are never combined. Non-fatal provider warnings are shown during `auth login` without exposing cookie values.
+Normal browser-cookie discovery is delegated to `@steipete/sweet-cookie`, then normalized behind the local browser-cookie boundary. Each browser is queried separately so credentials from different profiles are never combined. Store reads have an eight-second limit and support cancellation. Non-fatal provider warnings are shown during `auth login --reuse-browser` without exposing cookie values.
 
-When no usable browser cookies exist, `auth login` requests a dynamic SAML URL from `/api/auth/method` and starts a temporary `127.0.0.1` listener. After signing in, the user runs the printed one-time snippet in the OnTrack tab. The browser exchanges its HttpOnly session cookie for an access token and returns it through a top-level navigation to the listener; the CLI validates the random state and expiry before caching the session. Other commands never start interactive authentication.
+`auth login` offers a choice of CLI browser, existing-browser reuse, and manual sign-in. The default browser path requests a dynamic SAML URL from `/api/auth/method`, launches Chromium with a private site-specific profile, and reads cookies through a CDP pipe. It validates the refresh cookie against OnTrack before caching an access token. Each CDP request has a timeout; cancellation and pipe errors close the transport. Shutdown allows the browser to flush its profile, then escalates from a bounded graceful close to process termination if necessary.
+
+`auth login --paste`, and the fallback from `--reuse-browser`, start a temporary `127.0.0.1` listener. After signing in, the user runs the printed one-time snippet in the OnTrack tab. The browser exchanges its HttpOnly session cookie for an access token and returns it through a top-level navigation to the listener; the CLI validates the random state and expiry before caching the session. Other commands never start interactive authentication. Logout removes the CLI browser profiles as well as the access-token cache, preventing unattended renewal from undoing a local logout.
 
 Authentication cannot extend a server-side session beyond the deployment or identity provider policy. When the browser session expires, interactive sign-in is required.
 

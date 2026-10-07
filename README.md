@@ -48,9 +48,19 @@ ontrack auth login
 ontrack auth status
 ```
 
-`auth login` reuses an active Firefox or Chrome session when available. If it cannot, the CLI opens your SAML sign-in page and prints a one-time snippet. Sign in, then paste the snippet into the OnTrack tab's DevTools console.
+`auth login` offers three sign-in paths in a terminal. The recommended path opens Chrome, Edge, Brave, or Chromium with a private CLI profile. Complete your institution's sign-in in that window; the CLI captures and validates the OnTrack session automatically, without reading your normal browser's files or asking you to paste anything.
 
-The CLI saves the session to `~/.config/ontrack-cli/session.json` by default. The fallback needs no browser file permissions.
+Choose a path directly:
+
+```bash
+ontrack auth login --browser
+ontrack auth login --reuse-browser
+ontrack auth login --paste
+```
+
+`--reuse-browser` tries your existing browser session with a bounded cookie-store read. If reuse is unavailable, it opens your SAML sign-in page and prints a one-time snippet to paste into the OnTrack tab's DevTools console. `--paste` goes straight to that manual flow.
+
+The CLI saves the access token to `~/.config/ontrack-cli/session.json` with owner-only permissions. The private browser profile is stored under `~/.config/ontrack-cli/browser/`, separately for each site. When an access token expires or a read request rejects it, the CLI first tries to renew through that profile in a background browser. If your institution's SSO session has expired, run `auth login` again. `auth logout` removes both the access-token cache and the CLI browser profiles.
 
 ## Command model
 

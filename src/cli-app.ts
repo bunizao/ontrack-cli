@@ -26,6 +26,7 @@ import { renderSkill } from "./skill.js";
 import { submissionType, submissionTypes, type TaskSubmissionOptions, type TaskSubmissionPlan } from "./submission.js";
 import { STATUS_TONES, writableTaskState, writableTaskStates, type WritableTaskState } from "./status.js";
 import { ONTRACK_TAGLINE, ONTRACK_WORDMARK } from "./wordmark.js";
+import type { LoginMode } from "./auth.js";
 
 export interface CliApplication {
   resolveProject(reference: string): Promise<number>;
@@ -63,7 +64,7 @@ export interface CliExecution {
 
 interface Dependencies {
   readonly application: () => Promise<CliApplication>;
-  readonly authLogin?: () => Promise<unknown>;
+  readonly authLogin?: (mode?: LoginMode) => Promise<unknown>;
   readonly authLogout?: () => Promise<unknown>;
   readonly version: string;
   readonly sensitiveValues?: readonly string[];
@@ -319,9 +320,17 @@ export async function executeCli(argv: readonly string[], dependencies: Dependen
     });
 
     const auth = program.command("auth").description("Manage authentication");
-    auth.command("login").description("Sign in through OnTrack").action(async () => {
+    auth.command("login").description("Sign in through OnTrack")
+      .option("--browser", "Sign in in a browser owned by the CLI")
+      .option("--reuse-browser", "Reuse cookies from your existing browser, or sign in manually")
+      .option("--paste", "Sign in using the manual browser snippet")
+      .action(async (options: { browser?: boolean; reuseBrowser?: boolean; paste?: boolean }) => {
       if (!dependencies.authLogin) throw new CliError("config", "Interactive login is unavailable.");
-      setResult({ value: await dependencies.authLogin() });
+      if ([options.browser, options.reuseBrowser, options.paste].filter(Boolean).length > 1) {
+        throw new CliError("usage", "Choose one of --browser, --reuse-browser, or --paste.");
+      }
+      const mode = options.browser ? "browser" : options.reuseBrowser ? "reuse" : options.paste ? "paste" : undefined;
+      setResult({ value: await dependencies.authLogin(mode) });
     });
     auth.command("status").description("Validate current credentials").action(async () => {
       setResult({ value: await (await application()).authCheck() });

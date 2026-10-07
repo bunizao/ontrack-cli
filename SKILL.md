@@ -35,6 +35,8 @@ Use `ontrack` to inspect and update OnTrack from a terminal. Start from what the
 - `chats read` is an upstream exception: it marks comments read and always requires `--yes`.
 - Use `--dry-run` before a mutation when the intended target is uncertain.
 - Never print or copy session tokens, browser cookies, or authentication files.
+- `auth login --browser` signs in through a private CLI browser; `--reuse-browser` reuses existing browser cookies, and `--paste` uses a manual DevTools snippet.
+- Expired access tokens can renew through the private browser profile while SSO remains live. `auth logout` removes that profile too.
 
 ## Commands
 
