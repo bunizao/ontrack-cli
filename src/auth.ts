@@ -12,8 +12,9 @@ import { safeUserView } from "./user.js";
 import { CdpError, loginWithCdp, type CdpLoginOptions, type CdpLoginResult } from "./cdp-login.js";
 
 import { readSessionCache, writeSessionCache, type SessionCacheOptions } from "./session-cache.js";
+import { HttpClient } from "./http.js";
 
-export type LoginMode = "browser" | "reuse" | "paste";
+export type LoginMode = "browser" | "reuse" | "paste" | "manual";
 
 export function browserProfileForSite(configDir: string, baseUrl: string): string {
   const site = createHash("sha256").update(new URL(baseUrl).origin).digest("hex").slice(0, 16);
@@ -102,6 +103,9 @@ export interface LoginAuthenticatedSessionOptions extends BrowserSessionOptions 
   readonly openBrowser?: (url: string) => Promise<void>;
   readonly createState?: () => string;
   readonly loopbackLoginListener?: LoopbackLoginListener;
+  readonly readSecret?: () => Promise<string>;
+  readonly pastedCredentials?: string;
+  readonly pasteUsername?: string;
 }
 
 function authError(message: string): CliError {
@@ -192,7 +196,7 @@ async function saveStoredSession(options: BrowserSessionOptions, session: Authen
   };
   const chosen = await writeSessionCache(options.sessionFile, stored, options,
     options.expectedAccessToken ? (value) => cacheMatches(value, options, options.expectedAccessToken!) : undefined);
-  if (chosen === stored) return session;
+  if (chosen === stored) return { ...session, ...(cookies ? { renewalCookies: cookies } : {}) };
   const latest = readStoredSession(chosen, options.baseUrl);
   if (latest?.username === session.username && !latest.access_token_invalidated && isFuture(latest.auth_token_expiry, currentTime(options))) return cachedAuth(latest);
   throw authError("The cached account changed during renewal. Run `ontrack auth login` again.");
@@ -235,7 +239,13 @@ async function discoverLoginUrl(
   }
   const method = Reflect.get(value, "method");
   const redirectTo = Reflect.get(value, "redirect_to");
-  if (method !== "saml" || typeof redirectTo !== "string" || !redirectTo.trim()) {
+  if (typeof method !== "string" || !method.trim()) {
+    throw new CliError("upstream_contract", "auth method response has no sign-in method");
+  }
+  if (method !== "saml" && (redirectTo === undefined || redirectTo === null || redirectTo === "")) {
+    return new URL("/sign_in", baseUrl).href;
+  }
+  if (typeof redirectTo !== "string" || !redirectTo.trim()) {
     throw new CliError("upstream_contract", "auth method response has no SAML sign-in URL");
   }
   let loginUrl: URL;
@@ -634,6 +644,11 @@ export async function loginAuthenticatedSession(
   if (options.signal?.aborted) throw new CliError("cancellation", "Authentication cancelled.");
   const mode = options.mode ?? "browser";
   if (mode === "browser") return browserSession(options, false);
+  if (mode === "paste") {
+    const raw = options.pastedCredentials ?? await options.readSecret?.();
+    if (raw === undefined) throw authError("Paste login requires credentials from stdin or a terminal prompt.");
+    return authenticateWithPastedCredentials(raw, options);
+  }
   const now = currentTime(options);
   const fetchImplementation = options.fetch ?? fetch;
   const exchangeTimeoutMs = options.exchangeTimeoutMs ?? 30_000;
@@ -700,4 +715,81 @@ export async function loginAuthenticatedSession(
     user: null,
   };
   return saveStoredSession(options, session);
+}
+
+export function parsePastedCookies(raw: string, baseUrl: string, username?: string): BrowserCookie[] {
+  const text = raw.trim();
+  if (!text || text.length > 65_536) return [];
+  if (/^curl(?:\.exe)?\s/iu.test(text)) {
+    const target = text.match(/https?:\/\/[^\s'"<>]+/iu)?.[0];
+    if (!target) return [];
+    try { if (new URL(target).origin !== new URL(baseUrl).origin) return []; }
+    catch { return []; }
+  }
+  const pairs = [...text.matchAll(/\b(username|refresh_token)=([^;\s'"\\]+)/gu)];
+  const values = new Map(pairs.map((match) => [match[1]!, match[2]!]));
+  if (!pairs.length && !/[\s=;"'\\]/u.test(text)) values.set("refresh_token", text);
+  if (!values.has("username") && username) values.set("username", username);
+  if (!values.get("username") || !values.get("refresh_token")) return [];
+  const domain = new URL(baseUrl).hostname;
+  return [...values].map(([name, value]) => ({ name, value, domain, path: "/api/auth" }));
+}
+
+export async function authenticateWithPastedCredentials(raw: string, options: LoginAuthenticatedSessionOptions): Promise<AuthenticatedSession> {
+  if (raw.length > 65_536) throw authError("The pasted credentials are too large.");
+  if (raw.trimStart().startsWith("{")) {
+    let value: unknown;
+    try { value = JSON.parse(raw); }
+    catch { throw authError("The pasted sign-in response is invalid JSON."); }
+    if (typeof value !== "object" || value === null || Array.isArray(value)) throw authError("The pasted sign-in response is invalid.");
+    const data = value as Record<string, unknown>;
+    const user = typeof data.user === "object" && data.user !== null && !Array.isArray(data.user) ? data.user as Record<string, unknown> : undefined;
+    if (typeof data.auth_token !== "string" || !data.auth_token || typeof data.auth_token_expiry !== "string"
+      || !isFuture(data.auth_token_expiry, currentTime(options)) || typeof user?.username !== "string" || !user.username) {
+      throw authError("The pasted sign-in response has no valid token, expiry, and username.");
+    }
+    const session: AuthenticatedSession = {
+      baseUrl: options.baseUrl, username: user.username, accessToken: data.auth_token,
+      authTokenExpiry: new Date(data.auth_token_expiry).toISOString(), provenance: "browser", user: safeUserView(user, user.username),
+    };
+    const http = new HttpClient({
+      baseUrl: options.baseUrl, credentials: { username: session.username, accessToken: session.accessToken },
+      ...(options.fetch ? { fetch: options.fetch } : {}),
+      ...(options.signal ? { signal: options.signal } : {}),
+      timeoutMs: options.exchangeTimeoutMs ?? 30_000,
+    });
+    if (!Array.isArray(await http.request("api/projects", { query: { include_inactive: false } }))) {
+      throw new CliError("upstream_contract", "The pasted token did not return a valid project list.");
+    }
+    return saveStoredSession(options, session);
+  }
+  const cookies = applicableCookies(parsePastedCookies(raw, options.baseUrl, options.pasteUsername), options.baseUrl, currentTime(options));
+  if (!cookies.length) throw new CliError("auth", "The paste does not contain OnTrack renewal credentials.", undefined,
+    "Copy the Cookie header or cURL command for this site's /api/auth/access-token request. A bare refresh cookie also needs --username. Use --manual for the DevTools snippet.");
+  try {
+    const session = await exchangeCookies(options.baseUrl, cookies, options.fetch ?? fetch, currentTime(options), options.exchangeTimeoutMs ?? 30_000, options.signal);
+    return await saveStoredSession(options, session);
+  } catch (error) {
+    if (error instanceof RejectedBrowserCookieCandidate) throw authError("The pasted renewal cookie did not authenticate. Sign in on the site and copy it again.");
+    throw error;
+  }
+}
+
+export async function localAuthStatus(options: ResolveAuthenticatedSessionOptions): Promise<Record<string, unknown>> {
+  const explicit = resolveCredentialSource(options.env, options.config ?? {});
+  const record = await readSessionCache(options.sessionFile, options);
+  const cached = readStoredSession(record?.value, options.baseUrl);
+  const profile = Boolean(options.browserProfileDir && await access(options.browserProfileDir).then(() => true, () => false));
+  const cookies = cached?.refresh_cookies ? applicableCookies(cached.refresh_cookies, options.baseUrl, currentTime(options)) : [];
+  return {
+    base_url: options.baseUrl,
+    credential_source: explicit?.provenance ?? (cached ? "session_cache" : "none"),
+    cache_present: Boolean(cached), cache_encrypted: Boolean(record?.encrypted), key_storage: record?.keyBackend ?? null,
+    username: explicit?.username ?? cached?.username ?? null,
+    auth_token_expiry: cached?.auth_token_expiry ?? null,
+    access_token_valid: Boolean(cached && !cached.access_token_invalidated && isFuture(cached.auth_token_expiry, currentTime(options))),
+    access_token_invalidated: cached?.access_token_invalidated === true,
+    browser_profile: profile,
+    renewal: explicit ? "explicit_credentials" : cookies.some((cookie) => cookie.name === "refresh_token") ? "refresh_cookie" : profile ? "browser" : "sign_in",
+  };
 }

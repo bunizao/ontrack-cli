@@ -67,3 +67,35 @@ export async function test_session_cache_keeps_legacy_data_if_keychain_access_is
     assert.equal(await readFile(file, "utf8"), legacy);
   } finally { await rm(directory, { recursive: true, force: true }); }
 }
+
+export async function test_native_key_backends_use_stdin_for_secret_key_material(): Promise<void> {
+  for (const platform of ["darwin", "win32", "linux"] as const) {
+    const directory = await mkdtemp(join(tmpdir(), "ontrack-native-key-"));
+    const file = join(directory, "session.json");
+    let material = "";
+    const local = {
+      platform, homeDir: directory,
+      runCommand: async (command: string, args: string[], input = "") => {
+        assert.equal(args.join(" ").includes(material || "unavailable-key-marker"), false);
+        if (command === "secret-tool") {
+          if (args[0] === "lookup") return material;
+          assert.equal(args[0], "store");
+          material = input;
+        } else {
+          const payload = JSON.parse(input) as { operation: string; value?: string };
+          if (payload.operation === "read") return material;
+          assert.equal(payload.operation, "write");
+          material = payload.value!;
+        }
+        assert.equal(args.join(" ").includes(material), false);
+        return "";
+      },
+    };
+    try {
+      await writeSessionCache(file, { access_token: "native-test-access" }, local);
+      assert.equal(Buffer.from(material, "base64").length, 32);
+      assert.deepEqual((await readSessionCache(file, local))?.value, { access_token: "native-test-access" });
+      assert.doesNotMatch(await readFile(file, "utf8"), /native-test-access/);
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  }
+}

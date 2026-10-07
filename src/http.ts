@@ -5,6 +5,15 @@ export interface AccessCredentials {
   readonly accessToken: string;
 }
 
+function validateCredentials(credentials: AccessCredentials): void {
+  try {
+    if (!credentials.username || !credentials.accessToken) throw new Error("Empty credentials");
+    new Headers({ Username: credentials.username, "Auth-Token": credentials.accessToken });
+  } catch {
+    throw new CliError("auth", "The configured credentials are not valid HTTP header values.");
+  }
+}
+
 export interface HttpClientOptions {
   readonly baseUrl: string;
   readonly credentials: AccessCredentials;
@@ -177,6 +186,7 @@ export class HttpClient {
   #sessionVersion = 0;
 
   constructor(options: HttpClientOptions) {
+    validateCredentials(options.credentials);
     this.#baseUrl = new URL(options.baseUrl.endsWith("/") ? options.baseUrl : `${options.baseUrl}/`);
     this.#credentials = options.credentials;
     this.#fetch = options.fetch ?? globalThis.fetch;
@@ -265,7 +275,10 @@ export class HttpClient {
   async #refreshOnce(signal: AbortSignal, rejected: AccessCredentials): Promise<void> {
     this.#refreshing ??= (async () => {
       const refreshed = await this.#refresh?.(signal, rejected);
-      if (refreshed) this.#credentials = refreshed;
+      if (refreshed) {
+        validateCredentials(refreshed);
+        this.#credentials = refreshed;
+      }
       this.#sessionVersion += 1;
     })().finally(() => {
       this.#refreshing = undefined;
@@ -274,10 +287,11 @@ export class HttpClient {
   }
 
   async #send(url: URL, method: string, options: HttpRequestOptions, responseLimit?: number): Promise<HttpResponse> {
+    const credentials = this.#credentials;
     const headers = new Headers(options.headers);
     if (!headers.has("Accept")) headers.set("Accept", "application/json");
-    headers.set("Username", this.#credentials.username);
-    headers.set("Auth-Token", this.#credentials.accessToken);
+    headers.set("Username", credentials.username);
+    headers.set("Auth-Token", credentials.accessToken);
     const timeoutController = new AbortController();
     const timeout = setTimeout(() => timeoutController.abort(), this.#timeoutMs);
     const externalSignal = options.signal ?? this.#signal;
@@ -305,7 +319,7 @@ export class HttpClient {
       if (timeoutController.signal.aborted) {
         throw new CliError("network", `OnTrack request timed out after ${this.#timeoutMs}ms`);
       }
-      throw new CliError("network", error instanceof Error ? error.message.replaceAll(this.#credentials.accessToken, "[redacted]") : "Network request failed");
+      throw new CliError("network", error instanceof Error ? error.message.replaceAll(credentials.accessToken, "[redacted]") : "Network request failed");
     } finally {
       clearTimeout(timeout);
     }

@@ -35,8 +35,9 @@ Use `ontrack` to inspect and update OnTrack from a terminal. Start from what the
 - `chats read` is an upstream exception: it marks comments read and always requires `--yes`.
 - Use `--dry-run` before a mutation when the intended target is uncertain.
 - Never print or copy session tokens, browser cookies, or authentication files.
-- `auth login --browser` signs in through a private CLI browser; `--reuse-browser` reuses existing browser cookies, and `--paste` uses a manual DevTools snippet.
-- Expired access tokens can renew through the private browser profile while SSO remains live. `auth logout` removes that profile too.
+- `auth login --browser` uses a private CLI browser; `--reuse-browser` reuses existing cookies. `--paste` reads hidden browser credentials or stdin; `--manual` uses the DevTools snippet.
+- The encrypted cache retains renewal cookies. `auth renew` renews once; `auth status --local` inspects cache state without network requests. `doctor --live --cookies` diagnoses protected access and browser stores.
+- Expired access tokens can also renew through the private browser profile while SSO remains live. `auth logout` removes the session cache and profiles. Explicit environment/config credentials override the cache.
 
 ## Commands
 
@@ -44,7 +45,9 @@ Use `ontrack` to inspect and update OnTrack from a terminal. Start from what the
 - `ontrack auth` — Manage authentication
 - `ontrack auth login` — Sign in through OnTrack
 - `ontrack auth status` — Validate current credentials
+- `ontrack auth keepalive` (aliases: renew) — Renew and verify the session once without an interactive sign-in
 - `ontrack auth logout` — Remove the cached session
+- `ontrack doctor` — Diagnose authentication, cache, browser, and site discovery
 - `ontrack units` (aliases: courses, projects) — Enrolled units
 - `ontrack units list` — List units
 - `ontrack units show <unit>` — Show one unit

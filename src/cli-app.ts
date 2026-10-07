@@ -64,8 +64,11 @@ export interface CliExecution {
 
 interface Dependencies {
   readonly application: () => Promise<CliApplication>;
-  readonly authLogin?: (mode?: LoginMode) => Promise<unknown>;
+  readonly authLogin?: (mode?: LoginMode, username?: string) => Promise<unknown>;
   readonly authLogout?: () => Promise<unknown>;
+  readonly authLocalStatus?: () => Promise<unknown>;
+  readonly authRenew?: () => Promise<unknown>;
+  readonly doctor?: (live: boolean, cookies: boolean) => Promise<unknown>;
   readonly version: string;
   readonly sensitiveValues?: readonly string[];
   readonly onDiagnostic?: (message: string) => void;
@@ -159,7 +162,7 @@ function describeArguments(command: ReturnType<typeof createProgram>): void {
 // Grouped the way `gh` does: what a person reaches for daily, then the rest, then what only an agent runs.
 const HELP_SECTIONS: Readonly<Record<string, readonly string[]>> = {
   "Core commands": ["units", "tasks", "chats"],
-  "Additional commands": ["user", "roles", "auth"],
+  "Additional commands": ["user", "roles", "auth", "doctor"],
   "Agent commands": ["commands", "skills"],
 };
 
@@ -323,22 +326,40 @@ export async function executeCli(argv: readonly string[], dependencies: Dependen
     auth.command("login").description("Sign in through OnTrack")
       .option("--browser", "Sign in in a browser owned by the CLI")
       .option("--reuse-browser", "Reuse cookies from your existing browser, or sign in manually")
-      .option("--paste", "Sign in using the manual browser snippet")
-      .action(async (options: { browser?: boolean; reuseBrowser?: boolean; paste?: boolean }) => {
+      .option("--paste", "Read renewal cookies, a cURL command, or a sign-in response securely")
+      .option("--manual", "Sign in using the manual DevTools snippet")
+      .option("--username <username>", "Username for a bare refresh cookie with --paste")
+      .action(async (options: { browser?: boolean; reuseBrowser?: boolean; paste?: boolean; manual?: boolean; username?: string }) => {
       if (!dependencies.authLogin) throw new CliError("config", "Interactive login is unavailable.");
-      if ([options.browser, options.reuseBrowser, options.paste].filter(Boolean).length > 1) {
-        throw new CliError("usage", "Choose one of --browser, --reuse-browser, or --paste.");
+      if ([options.browser, options.reuseBrowser, options.paste, options.manual].filter(Boolean).length > 1) {
+        throw new CliError("usage", "Choose one of --browser, --reuse-browser, --paste, or --manual.");
       }
-      const mode = options.browser ? "browser" : options.reuseBrowser ? "reuse" : options.paste ? "paste" : undefined;
-      setResult({ value: await dependencies.authLogin(mode) });
+      if (options.username !== undefined && !options.paste) throw new CliError("usage", "--username requires --paste.");
+      const mode = options.browser ? "browser" : options.reuseBrowser ? "reuse" : options.paste ? "paste" : options.manual ? "manual" : undefined;
+      setResult({ value: await dependencies.authLogin(mode, options.username === undefined ? undefined : nonEmpty(options.username, "username")) });
     });
-    auth.command("status").description("Validate current credentials").action(async () => {
+    auth.command("status").description("Validate current credentials").option("--local", "Inspect cache and renewal state without network requests").action(async (options: { local?: boolean }) => {
+      if (options.local) {
+        if (!dependencies.authLocalStatus) throw new CliError("config", "Local authentication status is unavailable.");
+        return setResult({ value: await dependencies.authLocalStatus() });
+      }
       setResult({ value: await (await application()).authCheck() });
+    });
+    auth.command("keepalive").alias("renew").description("Renew and verify the session once without an interactive sign-in").action(async () => {
+      if (!dependencies.authRenew) throw new CliError("config", "Session renewal is unavailable.");
+      setResult({ value: await dependencies.authRenew() });
     });
     auth.command("logout").description("Remove the cached session").action(async () => {
       if (!dependencies.authLogout) throw new CliError("config", "Logout is unavailable.");
       setResult({ value: await dependencies.authLogout() });
     });
+    program.command("doctor").description("Diagnose authentication, cache, browser, and site discovery")
+      .option("--live", "Also verify a protected OnTrack endpoint")
+      .option("--cookies", "Also probe existing browser cookies and report access problems")
+      .action(async (options: { live?: boolean; cookies?: boolean }) => {
+        if (!dependencies.doctor) throw new CliError("config", "Authentication diagnostics are unavailable.");
+        setResult({ value: await dependencies.doctor(options.live === true, options.cookies === true) });
+      });
 
     const units = program.command("units").aliases(["courses", "projects"]).description("Enrolled units");
     units.command("list").description("List units").option("--include-inactive", "Include past units").action(async (options) => {

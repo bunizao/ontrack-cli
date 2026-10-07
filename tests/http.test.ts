@@ -675,3 +675,9 @@ export async function test_upstream_error_text_cannot_echo_the_access_token(): P
   await assert.rejects(client.request("api/projects"), (error) => error instanceof CliError
     && error.message.includes("[redacted]") && !error.message.includes("test-access-secret"));
 }
+
+export function test_invalid_credential_headers_do_not_expose_values(): void {
+  assert.throws(() => new HttpClient({
+    baseUrl: "https://school.example.edu", credentials: { username: "alice", accessToken: "private-marker\r\ninjected" },
+  }), (error) => error instanceof CliError && !error.message.includes("private-marker"));
+}

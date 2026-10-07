@@ -20,7 +20,7 @@ Each boundary has one job:
 | --- | --- | --- |
 | CLI | `cli.ts`, `cli-app.ts` | Parse commands, select output mode, and map failures to exit codes. |
 | Application | `application.ts`, `resources.ts`, `uploads.ts`, `submission.ts` | Coordinate authenticated reads, downloads, task updates, and confirmed submissions. |
-| Authentication | `auth.ts`, `cdp-login.ts`, `browser-cookies.ts`, `config.ts` | Resolve credentials, exchange application cookies, and maintain the local access-token cache and private browser profiles. |
+| Authentication | `auth.ts`, `session-cache.ts`, `cdp-login.ts`, `browser-cookies.ts`, `secret-input.ts`, `doctor.ts`, `config.ts` | Resolve credentials, exchange application cookies, protect the cache, and diagnose sign-in and renewal. |
 | Transport | `http.ts` | Apply timeouts, cancellation, authentication headers, and the safe retry policy. |
 | OnTrack API | `ontrack.ts`, `readers.ts` | Call API routes and validate unknown response payloads. |
 | Domain | `project-snapshot.ts`, `time.ts`, `status.ts`, `grades.ts` | Build task schedules and interpret statuses and grades. |
@@ -39,7 +39,11 @@ Normal browser-cookie discovery is delegated to `@steipete/sweet-cookie`, then n
 
 `auth login` offers a choice of CLI browser, existing-browser reuse, and manual sign-in. The default browser path requests a dynamic SAML URL from `/api/auth/method`, launches Chromium with a private site-specific profile, and reads cookies through a CDP pipe. It validates the refresh cookie against OnTrack before caching an access token. Each CDP request has a timeout; cancellation and pipe errors close the transport. Shutdown allows the browser to flush its profile, then escalates from a bounded graceful close to process termination if necessary.
 
-`auth login --paste`, and the fallback from `--reuse-browser`, start a temporary `127.0.0.1` listener. After signing in, the user runs the printed one-time snippet in the OnTrack tab. The browser exchanges its HttpOnly session cookie for an access token and returns it through a top-level navigation to the listener; the CLI validates the random state and expiry before caching the session. Other commands never start interactive authentication. Logout removes the CLI browser profiles as well as the access-token cache, preventing unattended renewal from undoing a local logout.
+`auth login --paste` accepts a Cookie header, a copied cURL request, a bare refresh cookie with a username, or a sign-in response JSON. The cURL parser verifies the origin and never executes the pasted command. Cookie credentials are exchanged through the configured site's auth endpoint; response JSON must pass a protected project-list check before saving. Terminal input disables echo and preserves bracketed multi-line pastes, restores raw mode on cancellation, and limits input to 64 KiB. Piped credentials use stdin instead of argv or environment variables.
+
+`auth login --manual`, and the fallback from `--reuse-browser`, start a temporary `127.0.0.1` listener. After signing in, the user runs the printed one-time snippet in the OnTrack tab. The browser exchanges its HttpOnly session cookie for an access token and returns it through a top-level navigation to the listener; the CLI validates the random state and expiry before caching the session. Unattended commands never start interactive authentication. Logout removes the CLI browser profiles as well as the session cache.
+
+`auth status --local` reports safe cache metadata and the available renewal path without network requests. `auth renew` is an alias for the contract's `auth keepalive` action, and performs one unattended renewal followed by protected endpoint verification. `doctor` combines local metadata with browser discovery and public site discovery. Protected endpoint and browser-store probes require `--live` and `--cookies` respectively. Explicit credentials override the cache; a rejected override produces guidance instead of an interactive sign-in loop.
 
 Authentication cannot extend a server-side session beyond the deployment or identity provider policy. When the browser session expires, interactive sign-in is required.
 

@@ -8,11 +8,13 @@ import { appendFile, mkdir, rm, unlink } from "node:fs/promises";
 import { colorEnabled, createTheme, createUi, detectAudience, formatFromArgv, writeOutput, type Theme, type Ui } from "@bunizao/cli-kit";
 
 import { OnTrackApplication } from "./application.js";
-import { browserProfileForSite, loginAuthenticatedSession, resolveAuthenticatedSession, type LoginMode } from "./auth.js";
+import { browserProfileForSite, localAuthStatus, loginAuthenticatedSession, resolveAuthenticatedSession, type LoginMode } from "./auth.js";
 import { openSystemBrowser } from "./browser.js";
 import { authenticationCookieCandidates } from "./browser-cookies.js";
 import { executeCli, type ChatSendConfirmation } from "./cli-app.js";
-import { configuredBaseUrl, loadConfig, resolveBaseUrl, resolveConfigPaths, type ConfigPaths, type Environment } from "./config.js";
+import { configuredBaseUrl, loadConfig, resolveBaseUrl, resolveConfigPaths, resolveCredentialSource, type ConfigPaths, type Environment } from "./config.js";
+import { diagnoseAuth } from "./doctor.js";
+import { readSecretLine } from "./secret-input.js";
 import { CliError } from "./errors.js";
 import { HttpClient } from "./http.js";
 import { OnTrackClient } from "./ontrack.js";
@@ -121,6 +123,9 @@ function applicationResolver(signal: AbortSignal, env: Environment, platform: No
     application ??= ensureBaseUrl(env, platform, ui).then(() => createApplication(signal, env, platform)).catch(async (error: unknown) => {
       // A person with no session is walked through the browser sign-in once; an agent gets the auth error.
       if (!ui.interactive || !(error instanceof CliError) || error.category !== "auth") throw error;
+      if (resolveCredentialSource(env, loadConfig(configPaths(env, platform)))) {
+        throw new CliError("auth", error.message, error.statusCode, "Explicit credentials override the cache. Replace or remove the invalid environment/config credentials before signing in through a browser.");
+      }
       showWordmark(ui);
       ui.note(`${error.message}\nSign in once in your browser; later commands reuse that session.`, "One-time setup");
       if (!await ui.confirm("Sign in through the browser now?", { initial: true }).catch(rethrowAsOnTrack)) throw error;
@@ -131,7 +136,7 @@ function applicationResolver(signal: AbortSignal, env: Environment, platform: No
   };
 }
 
-async function authLogin(signal: AbortSignal, env: Environment, platform: NodeJS.Platform, ui: Ui, requestedMode?: LoginMode): Promise<unknown> {
+async function authLogin(signal: AbortSignal, env: Environment, platform: NodeJS.Platform, ui: Ui, requestedMode?: LoginMode, pasteUsername?: string): Promise<unknown> {
   await ensureBaseUrl(env, platform, ui);
   const paths = configPaths(env, platform);
   const config = loadConfig(paths);
@@ -139,12 +144,13 @@ async function authLogin(signal: AbortSignal, env: Environment, platform: NodeJS
   const mode = requestedMode ?? (ui.interactive ? await ui.select<LoginMode>("How would you like to sign in?", [
     { value: "browser", label: "CLI browser (recommended)", hint: "Sign in once; no browser file permissions needed" },
     { value: "reuse", label: "Use my existing browser", hint: "Reuse its current session" },
-    { value: "paste", label: "Manual browser sign-in", hint: "Paste a one-time snippet in DevTools" },
+    { value: "paste", label: "Paste browser credentials", hint: "Cookie header, cURL command, or sign-in response; input is hidden" },
   ]).catch(rethrowAsOnTrack) : "browser");
   const browserCookieProvider = async () => {
     const warnings: string[] = [];
     const candidates = await authenticationCookieCandidates(baseUrl, {
       keychainPromptTimeoutMs: 8_000,
+      signal: AbortSignal.any([signal, AbortSignal.timeout(8_000)]),
       onWarning: (warning) => warnings.push(warning),
     });
     if (candidates.length > 0) return candidates;
@@ -162,6 +168,8 @@ async function authLogin(signal: AbortSignal, env: Environment, platform: NodeJS
     mode,
     signal,
     browserCookieProvider,
+    ...(pasteUsername === undefined ? {} : { pasteUsername }),
+    readSecret: () => readSecretLine(process.stdin, process.stderr, signal),
     onBrowserOpened: () => { process.stderr.write("Complete the OnTrack sign-in in the browser window. Press Ctrl-C to cancel.\n"); },
     onWarning: (message) => { process.stderr.write(`${message}\n`); },
     onLoginUrl: (url) => { process.stderr.write(`Sign-in URL: ${url}\n`); },
@@ -182,10 +190,37 @@ async function authLogin(signal: AbortSignal, env: Environment, platform: NodeJS
   return {
     username: session.username,
     auth_token_expiry: session.authTokenExpiry,
+    renewal: session.renewalCookies ? "refresh_cookie" : "sign_in",
   };
 }
 
-async function createApplication(signal: AbortSignal, env: Environment, platform: NodeJS.Platform): Promise<OnTrackApplication> {
+function authOptions(signal: AbortSignal, env: Environment, platform: NodeJS.Platform) {
+  const paths = configPaths(env, platform);
+  const config = loadConfig(paths);
+  const baseUrl = resolveBaseUrl(env, config);
+  return { baseUrl, sessionFile: paths.sessionFile, env, config, signal, platform,
+    browserProfileDir: browserProfileForSite(paths.configDir, baseUrl) };
+}
+
+async function probeBrowserCookies(baseUrl: string, signal: AbortSignal): Promise<{ profiles: number; warnings: string[] }> {
+  const warnings = new Set<string>();
+  const bounded = AbortSignal.any([signal, AbortSignal.timeout(8_000)]);
+  const candidates = await authenticationCookieCandidates(baseUrl, {
+    signal: bounded,
+    onWarning: (warning) => {
+      if (/database not found/i.test(warning)) return;
+      if (/EPERM|EACCES|Permission denied/i.test(warning)) warnings.add("Browser data access is denied for this terminal or app. Allow access or use `auth login --browser`.");
+      else if (/Keychain/i.test(warning)) warnings.add("Keychain did not authorize browser cookie decryption. Use `auth login --browser` to bypass the store.");
+      else if (/node:sqlite/i.test(warning)) warnings.add("Browser cookies need SQLite support. Use Node.js 22.13+ or Bun.");
+      else warnings.add("An existing browser's cookies could not be read.");
+    },
+  });
+  if (signal.aborted) throw new CliError("cancellation", "Authentication cancelled.");
+  if (bounded.aborted) warnings.add("Browser cookie probing timed out.");
+  return { profiles: candidates.length, warnings: [...warnings] };
+}
+
+async function createApplication(signal: AbortSignal, env: Environment, platform: NodeJS.Platform, renew = false): Promise<OnTrackApplication> {
   const paths = configPaths(env, platform);
   const config = loadConfig(paths);
   const baseUrl = resolveBaseUrl(env, config);
@@ -196,7 +231,8 @@ async function createApplication(signal: AbortSignal, env: Environment, platform
     config,
     signal,
     browserProfileDir: browserProfileForSite(paths.configDir, baseUrl),
-    browserCookieProvider: () => authenticationCookieCandidates(baseUrl),
+    ...(renew ? { skipCache: true } : {}),
+    browserCookieProvider: () => authenticationCookieCandidates(baseUrl, { signal: AbortSignal.any([signal, AbortSignal.timeout(8_000)]) }),
   });
   const sessionState = { current: session };
   const http = new HttpClient({
@@ -218,7 +254,7 @@ async function createApplication(signal: AbortSignal, env: Environment, platform
         browserProfileDir: browserProfileForSite(paths.configDir, baseUrl),
         skipCache: true,
         rejectedAccessToken: rejected.accessToken,
-        browserCookieProvider: () => authenticationCookieCandidates(baseUrl),
+        browserCookieProvider: () => authenticationCookieCandidates(baseUrl, { signal: AbortSignal.any([refreshSignal, AbortSignal.timeout(8_000)]) }),
       });
       sessionState.current = session;
       return { username: session.username, accessToken: session.accessToken };
@@ -245,8 +281,16 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   try {
     const result = await executeCli(argv, {
       application: applicationResolver(controller.signal, env, platform, ui),
-      authLogin: (mode) => authLogin(controller.signal, env, platform, ui, mode),
+      authLogin: (mode, username) => authLogin(controller.signal, env, platform, ui, mode, username),
       authLogout: () => authLogout(env, platform),
+      authLocalStatus: () => localAuthStatus(authOptions(controller.signal, env, platform)),
+      authRenew: async () => (await createApplication(controller.signal, env, platform, true)).authCheck(),
+      doctor: (live, cookies) => diagnoseAuth({
+        ...authOptions(controller.signal, env, platform), nodeVersion: process.versions.node,
+        ...(Reflect.get(process.versions, "bun") ? { bunVersion: String(Reflect.get(process.versions, "bun")) } : {}),
+        ...(live ? { liveCheck: async () => (await createApplication(controller.signal, env, platform)).authCheck() } : {}),
+        ...(cookies ? { cookieProbe: () => probeBrowserCookies(resolveBaseUrl(env, loadConfig(configPaths(env, platform))), controller.signal) } : {}),
+      }),
       confirmChatSend: (details) => confirmChatSend(details, controller.signal),
       confirmTaskSubmit: (plan) => confirmTaskSubmit(plan, controller.signal),
       confirmMutation: (summary) => confirmMutation(summary, controller.signal),
