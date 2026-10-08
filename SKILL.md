@@ -37,7 +37,7 @@ Use `ontrack` to inspect and update OnTrack from a terminal. Start from what the
 - Never print or copy session tokens, browser cookies, or authentication files.
 - `auth login --browser` uses a private CLI browser; `--reuse-browser` reuses existing cookies. `--paste` reads hidden browser credentials or stdin; `--manual` uses the DevTools snippet.
 - The encrypted cache retains renewal cookies. `auth renew` renews once; `auth status --local` inspects cache state without network requests. `doctor --live --cookies` diagnoses protected access and browser stores.
-- Expired access tokens can also renew through the private browser profile while SSO remains live. `auth logout` ends the session upstream when it can, then removes the session cache and profiles. `auth status --local` and `doctor` report `renewal_expires_at`; `doctor` exits 3 when a check fails. Explicit environment/config credentials override the cache.
+- Expired access tokens can also renew through the private browser profile while SSO remains live. `auth logout` ends the session upstream when it can, then removes the session cache and profiles. `auth status --local` and `doctor` report `renewal_expires_at` and warn under 24 hours; ordinary commands print one stderr line when the renewal cookie is about to lapse (sign in on the OnTrack website or run `auth login`); `doctor` exits 3 when a check fails. Explicit environment/config credentials override the cache.
 
 ## Commands
 

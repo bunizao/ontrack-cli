@@ -7,6 +7,7 @@ import {
   loginAuthenticatedSession as loginAuthenticatedSessionWithRuntime,
   type LoginAuthenticatedSessionOptions,
   nodeLoopbackListener,
+  renewalExpiryNotice,
   resolveAuthenticatedSession as resolveAuthenticatedSessionWithRuntime,
   type ResolveAuthenticatedSessionOptions,
 } from "../src/auth.js";
@@ -1007,15 +1008,56 @@ export async function test_local_status_reports_the_renewal_cookie_expiry_and_wa
     }, cacheOptions);
     return localAuthStatus({ ...cacheOptions, baseUrl: "https://school.example.edu", sessionFile, env: {}, now });
   };
-  const soon = await status("soon", Date.parse("2029-01-04T00:00:00Z") / 1_000);
-  assert.equal(soon.renewal_expires_at, "2029-01-04T00:00:00.000Z");
-  assert.match(String((soon.warnings as string[])[0]), /expires on 2029-01-04.*ontrack auth login/u);
-  const later = await status("later", "2029-03-01T00:00:00Z");
-  assert.equal(later.renewal_expires_at, "2029-03-01T00:00:00.000Z");
+  const soon = await status("soon", Date.parse("2029-01-01T05:00:00Z") / 1_000);
+  assert.equal(soon.renewal_expires_at, "2029-01-01T05:00:00.000Z");
+  assert.match(String((soon.warnings as string[])[0]), /expires on 2029-01-01.*ontrack auth login/u);
+  const later = await status("later", "2029-01-03T00:00:00Z");
+  assert.equal(later.renewal_expires_at, "2029-01-03T00:00:00.000Z");
   assert.equal("warnings" in later, false);
   const unknown = await status("unknown", undefined);
   assert.equal(unknown.renewal_expires_at, null);
   assert.equal("warnings" in unknown, false);
+}
+
+export async function test_cached_session_reports_a_renewal_cookie_that_lapses_within_a_day_through_the_callback(): Promise<void> {
+  const { writeSessionCache } = await import("../src/session-cache.js");
+  const directory = await temporaryDirectory();
+  const now = () => new Date("2029-01-01T00:00:00Z");
+  const reported: Date[] = [];
+  const resolve = async (name: string, expires: string | number | undefined, env: Record<string, string> = {}) => {
+    const sessionFile = join(directory, `${name}.json`);
+    const [username, refresh] = validCookies() as [BrowserCookie, BrowserCookie];
+    await writeSessionCache(sessionFile, {
+      base_url: "https://school.example.edu", username: "alice", access_token: "access",
+      auth_token_expiry: "2029-01-01T01:00:00Z", provenance: "browser",
+      refresh_cookies: [username, { ...refresh, ...(expires === undefined ? {} : { expires }) }],
+    }, cacheOptions);
+    reported.length = 0;
+    const session = await resolveAuthenticatedSession({
+      baseUrl: "https://school.example.edu", sessionFile, env, now, onRenewalExpiring: (expiresAt) => reported.push(expiresAt),
+      fetch: async () => { throw new Error("a fresh cached token must not be renewed"); },
+    });
+    return session.accessToken;
+  };
+  assert.equal(await resolve("soon", "2029-01-01T05:00:00Z"), "access");
+  assert.deepEqual(reported, [new Date("2029-01-01T05:00:00Z")]);
+  await resolve("expired", "2028-12-31T00:00:00Z");
+  assert.equal(reported.length, 1);
+  await resolve("later", "2029-01-03T00:00:00Z");
+  assert.equal(reported.length, 0);
+  await resolve("unknown", undefined);
+  assert.equal(reported.length, 0);
+  await resolve("explicit", "2029-01-01T05:00:00Z", { ONTRACK_USERNAME: "alice", ONTRACK_TOKEN: "explicit" });
+  assert.equal(reported.length, 0);
+}
+
+export function test_renewal_expiry_notice_names_the_time_left_or_that_it_has_lapsed(): void {
+  const now = new Date("2029-01-01T00:00:00Z");
+  const notice = (iso: string) => renewalExpiryNotice(new Date(iso), now);
+  assert.equal(notice("2029-01-01T05:10:00Z"), "OnTrack sign-in expires in about 5 hours. Sign in on the OnTrack website or run `ontrack auth login` to renew it.");
+  assert.match(notice("2029-01-01T01:00:00Z"), /^OnTrack sign-in expires in about 1 hour\./u);
+  assert.match(notice("2029-01-01T00:40:00Z"), /^OnTrack sign-in expires in about 40 minutes\./u);
+  assert.match(notice("2028-12-31T00:00:00Z"), /^OnTrack sign-in has expired\. Sign in on the OnTrack website/u);
 }
 
 export async function test_paste_login_accepts_curl_cookie_headers_and_bare_refresh_cookies(): Promise<void> {

@@ -75,6 +75,8 @@ export interface ResolveAuthenticatedSessionOptions extends BrowserSessionOption
   readonly config?: OnTrackConfig;
   readonly skipCache?: boolean;
   readonly rejectedAccessToken?: string;
+  /** Called when a cached session is used and its renewal cookie expires within 24 hours (or already has). */
+  readonly onRenewalExpiring?: (expiresAt: Date) => void;
 }
 
 export interface LoopbackCallbackResult {
@@ -617,7 +619,11 @@ export async function resolveAuthenticatedSession(
       (value) => cacheMatches(value, options, options.rejectedAccessToken!));
     cached = readStoredSession(chosen, options.baseUrl);
   }
-  if (!options.skipCache && cached && !cached.access_token_invalidated && isFresh(cached.auth_token_expiry, now)) return cachedAuth(cached);
+  if (!options.skipCache && cached && !cached.access_token_invalidated && isFresh(cached.auth_token_expiry, now)) {
+    const expiry = renewalCookieExpiry(cached);
+    if (expiry && expiry.valueOf() - now.valueOf() < RENEWAL_WARNING_MS) options.onRenewalExpiring?.(expiry);
+    return cachedAuth(cached);
+  }
   // Another command may already have recovered the rejected token.
   if (options.rejectedAccessToken && cached && cached.access_token !== options.rejectedAccessToken
     && !cached.access_token_invalidated && isFresh(cached.auth_token_expiry, now)) return cachedAuth(cached);
@@ -823,7 +829,21 @@ function cookieExpiry(value: string | number | undefined): Date | null {
   return Number.isNaN(expiry.valueOf()) ? null : expiry;
 }
 
-const RENEWAL_WARNING_MS = 7 * 24 * 60 * 60 * 1_000;
+const RENEWAL_WARNING_MS = 24 * 60 * 60 * 1_000;
+
+function renewalCookieExpiry(stored: StoredSession | undefined): Date | null {
+  return cookieExpiry(stored?.refresh_cookies?.find((cookie) => cookie.name === "refresh_token")?.expires);
+}
+
+/** The one stderr line for a renewal cookie that is about to lapse (or already has). */
+export function renewalExpiryNotice(expiresAt: Date, now: Date): string {
+  const minutes = Math.round((expiresAt.valueOf() - now.valueOf()) / 60_000);
+  const advice = "Sign in on the OnTrack website or run `ontrack auth login` to renew it.";
+  if (minutes <= 0) return `OnTrack sign-in has expired. ${advice}`;
+  const hours = Math.round(minutes / 60);
+  const left = minutes < 60 ? `${minutes} ${minutes === 1 ? "minute" : "minutes"}` : `${hours} ${hours === 1 ? "hour" : "hours"}`;
+  return `OnTrack sign-in expires in about ${left}. ${advice}`;
+}
 
 /** Best-effort server-side sign-out. Logout removes the local files whatever this returns. */
 export async function revokeStoredSession(options: ResolveAuthenticatedSessionOptions): Promise<boolean> {
@@ -853,7 +873,7 @@ export async function localAuthStatus(options: ResolveAuthenticatedSessionOption
   const profile = Boolean(options.browserProfileDir && await access(options.browserProfileDir).then(() => true, () => false));
   const now = currentTime(options);
   const cookies = cached?.refresh_cookies ? applicableCookies(cached.refresh_cookies, options.baseUrl, now) : [];
-  const renewalExpiry = cookieExpiry(cached?.refresh_cookies?.find((cookie) => cookie.name === "refresh_token")?.expires);
+  const renewalExpiry = renewalCookieExpiry(cached);
   const warnings = renewalExpiry && renewalExpiry.valueOf() - now.valueOf() < RENEWAL_WARNING_MS
     ? [`The renewal cookie ${renewalExpiry.valueOf() > now.valueOf() ? "expires" : "expired"} on ${renewalExpiry.toISOString()}. Run \`ontrack auth login\` before it lapses.`] : [];
   return {

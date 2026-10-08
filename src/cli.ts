@@ -8,7 +8,7 @@ import { appendFile, mkdir, rm, unlink } from "node:fs/promises";
 import { colorEnabled, createTheme, createUi, detectAudience, formatFromArgv, writeOutput, type Theme, type Ui } from "@bunizao/cli-kit";
 
 import { OnTrackApplication } from "./application.js";
-import { browserProfileForSite, localAuthStatus, loginAuthenticatedSession, resolveAuthenticatedSession, revokeStoredSession, type LoginMode } from "./auth.js";
+import { browserProfileForSite, localAuthStatus, loginAuthenticatedSession, renewalExpiryNotice, resolveAuthenticatedSession, revokeStoredSession, type LoginMode } from "./auth.js";
 import { openSystemBrowser } from "./browser.js";
 import { authenticationCookieCandidates } from "./browser-cookies.js";
 import { executeCli, type ChatSendConfirmation } from "./cli-app.js";
@@ -227,6 +227,14 @@ function announceRenewal(method: string): void {
   process.stderr.write(`Renewing the OnTrack session in a ${method}...\n`);
 }
 
+let renewalExpiryAnnounced = false;
+
+function announceRenewalExpiry(expiresAt: Date): void {
+  if (renewalExpiryAnnounced) return;
+  renewalExpiryAnnounced = true;
+  process.stderr.write(`${renewalExpiryNotice(expiresAt, new Date())}\n`);
+}
+
 async function createApplication(signal: AbortSignal, env: Environment, platform: NodeJS.Platform, renew = false): Promise<OnTrackApplication> {
   const paths = configPaths(env, platform);
   const config = loadConfig(paths);
@@ -239,6 +247,7 @@ async function createApplication(signal: AbortSignal, env: Environment, platform
     signal,
     browserProfileDir: browserProfileForSite(paths.configDir, baseUrl),
     onRenewing: announceRenewal,
+    onRenewalExpiring: announceRenewalExpiry,
     ...(renew ? { skipCache: true } : {}),
     browserCookieProvider: () => authenticationCookieCandidates(baseUrl, { signal: AbortSignal.any([signal, AbortSignal.timeout(8_000)]) }),
   });
