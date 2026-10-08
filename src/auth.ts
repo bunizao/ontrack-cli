@@ -43,6 +43,7 @@ interface StoredSession {
   readonly access_token_invalidated?: boolean;
   /** When the everyday browser was last probed for a newer renewal cookie. */
   readonly browser_checked_at?: string;
+  readonly renewal_warned_for?: string;
   readonly user?: UserView;
 }
 
@@ -167,6 +168,7 @@ function readStoredSession(value: unknown, baseUrl: string): StoredSession | und
     ...(cookies.length ? { refresh_cookies: cookies } : {}),
     ...(data.access_token_invalidated === true ? { access_token_invalidated: true } : {}),
     ...(typeof data.browser_checked_at === "string" && !Number.isNaN(Date.parse(data.browser_checked_at)) ? { browser_checked_at: data.browser_checked_at } : {}),
+    ...(typeof data.renewal_warned_for === "string" ? { renewal_warned_for: data.renewal_warned_for } : {}),
     ...(typeof data.user === "object" && data.user !== null && !Array.isArray(data.user) ? { user: safeUserView(data.user as Record<string, unknown>, data.username) } : {}),
   };
 }
@@ -203,11 +205,13 @@ async function saveStoredSession(options: BrowserSessionOptions, session: Authen
   const retained = previous?.username === session.username ? previous.refresh_cookies : undefined;
   const cookies = session.renewalCookies ?? retained;
   const browserCheckedAt = previous?.username === session.username ? previous.browser_checked_at : undefined;
+  const renewalWarnedFor = previous?.username === session.username ? previous.renewal_warned_for : undefined;
   const stored: StoredSession = {
     base_url: session.baseUrl, username: session.username, access_token: session.accessToken,
     auth_token_expiry: session.authTokenExpiry, provenance: session.provenance,
     ...(cookies ? { refresh_cookies: cookies } : {}),
     ...(browserCheckedAt ? { browser_checked_at: browserCheckedAt } : {}),
+    ...(renewalWarnedFor ? { renewal_warned_for: renewalWarnedFor } : {}),
     ...(session.user ? { user: session.user } : {}),
   };
   const chosen = await writeSessionCache(options.sessionFile, stored, options,
@@ -604,10 +608,30 @@ export async function resolveAuthenticatedSession(
   options: ResolveAuthenticatedSessionOptions,
 ): Promise<AuthenticatedSession> {
   const session = await resolveSession(options);
-  // Checked on whatever is returned: with ten-minute access tokens most commands renew before they run.
-  const expiry = cookieExpiry(session.renewalCookies?.find((cookie) => cookie.name === "refresh_token")?.expires);
-  if (expiry && expiry.valueOf() - currentTime(options).valueOf() < RENEWAL_WARNING_MS) options.onRenewalExpiring?.(expiry);
+  if (options.onRenewalExpiring) await warnOnceBeforeRenewalLapses(options, session, options.onRenewalExpiring);
   return session;
+}
+
+// One reminder per renewal cookie, in its last day. Once it lapses, commands fail with sign-in guidance anyway.
+// Checked on whatever is returned: with ten-minute access tokens most commands renew before they run.
+async function warnOnceBeforeRenewalLapses(
+  options: ResolveAuthenticatedSessionOptions,
+  session: AuthenticatedSession,
+  warn: (expiresAt: Date) => void,
+): Promise<void> {
+  const expiry = cookieExpiry(session.renewalCookies?.find((cookie) => cookie.name === "refresh_token")?.expires);
+  const left = expiry ? expiry.valueOf() - currentTime(options).valueOf() : 0;
+  if (!expiry || left <= 0 || left >= RENEWAL_WARNING_MS) return;
+  try {
+    const stored = readStoredSession((await readSessionCache(options.sessionFile, options))?.value, options.baseUrl);
+    if (!stored || stored.renewal_warned_for === expiry.toISOString()) return;
+    await writeSessionCache(options.sessionFile, { ...stored, renewal_warned_for: expiry.toISOString() }, options,
+      (value) => cacheMatches(value, options, stored.access_token));
+  } catch (error) {
+    if (error instanceof CliError && error.category === "cancellation") throw error;
+    return;
+  }
+  warn(expiry);
 }
 
 async function resolveSession(options: ResolveAuthenticatedSessionOptions): Promise<AuthenticatedSession> {

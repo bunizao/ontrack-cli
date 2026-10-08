@@ -227,11 +227,7 @@ function announceRenewal(method: string): void {
   process.stderr.write(`Renewing the OnTrack session in a ${method}...\n`);
 }
 
-let renewalExpiryAnnounced = false;
-
 function announceRenewalExpiry(expiresAt: Date): void {
-  if (renewalExpiryAnnounced) return;
-  renewalExpiryAnnounced = true;
   process.stderr.write(`${renewalExpiryNotice(expiresAt, new Date())}\n`);
 }
 

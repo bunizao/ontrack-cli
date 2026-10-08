@@ -1041,8 +1041,17 @@ export async function test_cached_session_reports_a_renewal_cookie_that_lapses_w
   };
   assert.equal(await resolve("soon", "2029-01-01T05:00:00Z"), "access");
   assert.deepEqual(reported, [new Date("2029-01-01T05:00:00Z")]);
+  // The reminder is shown once per renewal cookie, not on every command.
+  reported.length = 0;
+  await resolveAuthenticatedSession({
+    baseUrl: "https://school.example.edu", sessionFile: join(directory, "soon.json"), env: {}, now,
+    onRenewalExpiring: (expiresAt) => reported.push(expiresAt),
+    fetch: async () => { throw new Error("a fresh cached token must not be renewed"); },
+  });
+  assert.equal(reported.length, 0);
+  // A lapsed cookie is left to the sign-in error that follows.
   await resolve("expired", "2028-12-31T00:00:00Z");
-  assert.equal(reported.length, 1);
+  assert.equal(reported.length, 0);
   await resolve("later", "2029-01-03T00:00:00Z");
   assert.equal(reported.length, 0);
   await resolve("unknown", undefined);
