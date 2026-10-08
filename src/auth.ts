@@ -1,7 +1,7 @@
-import { randomUUID } from "node:crypto";
-import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { access } from "node:fs/promises";
 import { createServer } from "node:http";
-import { dirname } from "node:path";
+import { join } from "node:path";
 
 import type { BrowserCookie, BrowserCookieCandidate } from "./browser-cookies.js";
 import type { Environment, OnTrackConfig } from "./config.js";
@@ -9,6 +9,17 @@ import { resolveCredentialSource } from "./config.js";
 import { CliError } from "./errors.js";
 import type { UserView } from "./types.js";
 import { safeUserView } from "./user.js";
+import { CdpError, loginWithCdp, type CdpLoginOptions, type CdpLoginResult } from "./cdp-login.js";
+
+import { readSessionCache, writeSessionCache, type SessionCacheOptions } from "./session-cache.js";
+import { HttpClient } from "./http.js";
+
+export type LoginMode = "browser" | "reuse" | "paste" | "manual";
+
+export function browserProfileForSite(configDir: string, baseUrl: string): string {
+  const site = createHash("sha256").update(new URL(baseUrl).origin).digest("hex").slice(0, 16);
+  return join(configDir, "browser", site);
+}
 
 export type SessionProvenance = "environment" | "config" | "migration" | "session_cache" | "browser";
 
@@ -19,6 +30,7 @@ export interface AuthenticatedSession {
   readonly authTokenExpiry: string | null;
   readonly provenance: SessionProvenance;
   readonly user: UserView | null;
+  readonly renewalCookies?: readonly BrowserCookie[];
 }
 
 interface StoredSession {
@@ -27,6 +39,9 @@ interface StoredSession {
   readonly access_token: string;
   readonly auth_token_expiry: string;
   readonly provenance: "browser" | "okta";
+  readonly refresh_cookies?: readonly BrowserCookie[];
+  readonly access_token_invalidated?: boolean;
+  readonly user?: UserView;
 }
 
 interface CookieRecord {
@@ -34,9 +49,11 @@ interface CookieRecord {
   readonly value: string;
   readonly domain: string;
   readonly path: string;
+  readonly secure?: boolean;
+  readonly expires?: string | number;
 }
 
-interface BrowserSessionOptions {
+interface BrowserSessionOptions extends SessionCacheOptions {
   readonly baseUrl: string;
   readonly sessionFile: string;
   readonly now?: () => Date;
@@ -44,12 +61,18 @@ interface BrowserSessionOptions {
   readonly fetch?: typeof fetch;
   readonly signal?: AbortSignal;
   readonly browserCookieProvider?: () => Promise<readonly BrowserCookieCandidate[]>;
+  readonly cookieStoreTimeoutMs?: number;
+  readonly browserProfileDir?: string;
+  readonly cdpLogin?: (options: CdpLoginOptions) => Promise<CdpLoginResult>;
+  readonly expectedUsername?: string;
+  readonly expectedAccessToken?: string;
 }
 
 export interface ResolveAuthenticatedSessionOptions extends BrowserSessionOptions {
   readonly env: Environment;
   readonly config?: OnTrackConfig;
   readonly skipCache?: boolean;
+  readonly rejectedAccessToken?: string;
 }
 
 export interface LoopbackCallbackResult {
@@ -69,6 +92,9 @@ export interface LoopbackLoginRequest {
 export type LoopbackLoginListener = (request: LoopbackLoginRequest) => Promise<LoopbackCallbackResult>;
 
 export interface LoginAuthenticatedSessionOptions extends BrowserSessionOptions {
+  readonly mode?: LoginMode;
+  readonly onBrowserOpened?: () => void;
+  readonly onWarning?: (message: string) => void;
   readonly loginTimeoutMs?: number;
   readonly onLoginUrl?: (url: string) => void;
   readonly onConsoleSnippet?: (snippet: string) => void;
@@ -77,6 +103,9 @@ export interface LoginAuthenticatedSessionOptions extends BrowserSessionOptions 
   readonly openBrowser?: (url: string) => Promise<void>;
   readonly createState?: () => string;
   readonly loopbackLoginListener?: LoopbackLoginListener;
+  readonly readSecret?: () => Promise<string>;
+  readonly pastedCredentials?: string;
+  readonly pasteUsername?: string;
 }
 
 function authError(message: string): CliError {
@@ -84,6 +113,7 @@ function authError(message: string): CliError {
 }
 
 class RejectedBrowserCookieCandidate extends Error {}
+class BrowserCookieReadError extends CliError {}
 
 function currentTime(options: BrowserSessionOptions): Date {
   return options.now?.() ?? new Date();
@@ -94,7 +124,7 @@ function isFuture(value: string, now: Date): boolean {
   return !Number.isNaN(expiry.valueOf()) && expiry.valueOf() > now.valueOf();
 }
 
-function readStoredSession(value: unknown, baseUrl: string, now: Date): StoredSession | undefined {
+function readStoredSession(value: unknown, baseUrl: string): StoredSession | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
   const data = value as Record<string, unknown>;
   if (
@@ -104,54 +134,72 @@ function readStoredSession(value: unknown, baseUrl: string, now: Date): StoredSe
     || typeof data.access_token !== "string"
     || !data.access_token
     || typeof data.auth_token_expiry !== "string"
-    || !isFuture(data.auth_token_expiry, now)
+    || Number.isNaN(Date.parse(data.auth_token_expiry))
     || (data.provenance !== "browser" && data.provenance !== "okta")
   ) return undefined;
+  const cookies = Array.isArray(data.refresh_cookies) ? data.refresh_cookies.filter((cookie: unknown): cookie is BrowserCookie => {
+    if (typeof cookie !== "object" || cookie === null || !("name" in cookie) || !("value" in cookie) || !("domain" in cookie)) return false;
+    return (cookie.name === "username" || cookie.name === "refresh_token") && typeof cookie.value === "string"
+      && typeof cookie.domain === "string"
+      && (!("path" in cookie) || typeof cookie.path === "string")
+      && (!("secure" in cookie) || typeof cookie.secure === "boolean")
+      && (!("expires" in cookie) || typeof cookie.expires === "string" || typeof cookie.expires === "number");
+  }) : [];
   return {
     base_url: baseUrl,
     username: data.username,
     access_token: data.access_token,
     auth_token_expiry: data.auth_token_expiry,
     provenance: data.provenance,
+    ...(cookies.length ? { refresh_cookies: cookies } : {}),
+    ...(data.access_token_invalidated === true ? { access_token_invalidated: true } : {}),
+    ...(typeof data.user === "object" && data.user !== null && !Array.isArray(data.user) ? { user: safeUserView(data.user as Record<string, unknown>, data.username) } : {}),
   };
 }
 
-async function loadStoredSession(sessionFile: string, baseUrl: string, now: Date): Promise<AuthenticatedSession | undefined> {
-  try {
-    const parsed: unknown = JSON.parse(await readFile(sessionFile, "utf8"));
-    const stored = readStoredSession(parsed, baseUrl, now);
-    if (!stored) return undefined;
-    return {
-      baseUrl: stored.base_url,
-      username: stored.username,
-      accessToken: stored.access_token,
-      authTokenExpiry: stored.auth_token_expiry,
-      provenance: "session_cache",
-      user: null,
-    };
-  } catch (error) {
-    const code = typeof error === "object" && error !== null && "code" in error ? (error as { code?: unknown }).code : undefined;
-    if (code === "ENOENT" || error instanceof SyntaxError) return undefined;
-    throw authError("Could not read the authenticated session cache.");
-  }
+function cachedAuth(stored: StoredSession): AuthenticatedSession {
+  return {
+    baseUrl: stored.base_url, username: stored.username, accessToken: stored.access_token,
+    authTokenExpiry: stored.auth_token_expiry, provenance: "session_cache", user: stored.user ?? null,
+    ...(stored.refresh_cookies ? { renewalCookies: stored.refresh_cookies } : {}),
+  };
 }
 
-async function saveStoredSession(sessionFile: string, session: AuthenticatedSession): Promise<void> {
-  if (!session.authTokenExpiry || session.provenance !== "browser") return;
+function cacheMatches(value: unknown, options: BrowserSessionOptions, token: string): boolean {
+  const stored = readStoredSession(value, options.baseUrl);
+  return stored?.access_token === token;
+}
+
+async function loadStoredSession(options: BrowserSessionOptions): Promise<StoredSession | undefined> {
+  const record = await readSessionCache(options.sessionFile, options);
+  if (!record) return undefined;
+  const stored = readStoredSession(record.value, options.baseUrl);
+  if (!stored) return undefined;
+  if (record.encrypted) return stored;
+  const chosen = await writeSessionCache(options.sessionFile, stored, options, (value) => cacheMatches(value, options, stored.access_token));
+  return readStoredSession(chosen, options.baseUrl);
+}
+
+async function saveStoredSession(options: BrowserSessionOptions, session: AuthenticatedSession): Promise<AuthenticatedSession> {
+  if (!session.authTokenExpiry || session.provenance !== "browser") return session;
+  if (!isFuture(session.authTokenExpiry, currentTime(options))) throw authError("The access token expired before it could be saved. Sign in again.");
+  let previous: StoredSession | undefined;
+  try { previous = readStoredSession((await readSessionCache(options.sessionFile, options))?.value, options.baseUrl); }
+  catch (error) { if (error instanceof CliError && error.category === "cancellation") throw error; }
+  const retained = previous?.username === session.username ? previous.refresh_cookies : undefined;
+  const cookies = session.renewalCookies ?? retained;
   const stored: StoredSession = {
-    base_url: session.baseUrl,
-    username: session.username,
-    access_token: session.accessToken,
-    auth_token_expiry: session.authTokenExpiry,
-    provenance: session.provenance,
+    base_url: session.baseUrl, username: session.username, access_token: session.accessToken,
+    auth_token_expiry: session.authTokenExpiry, provenance: session.provenance,
+    ...(cookies ? { refresh_cookies: cookies } : {}),
+    ...(session.user ? { user: session.user } : {}),
   };
-  try {
-    await mkdir(dirname(sessionFile), { recursive: true });
-    await writeFile(sessionFile, `${JSON.stringify(stored, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
-    await chmod(sessionFile, 0o600);
-  } catch {
-    throw authError("Could not write the authenticated session cache.");
-  }
+  const chosen = await writeSessionCache(options.sessionFile, stored, options,
+    options.expectedAccessToken ? (value) => cacheMatches(value, options, options.expectedAccessToken!) : undefined);
+  if (chosen === stored) return { ...session, ...(cookies ? { renewalCookies: cookies } : {}) };
+  const latest = readStoredSession(chosen, options.baseUrl);
+  if (latest?.username === session.username && !latest.access_token_invalidated && isFuture(latest.auth_token_expiry, currentTime(options))) return cachedAuth(latest);
+  throw authError("The cached account changed during renewal. Run `ontrack auth login` again.");
 }
 
 async function discoverLoginUrl(
@@ -191,7 +239,13 @@ async function discoverLoginUrl(
   }
   const method = Reflect.get(value, "method");
   const redirectTo = Reflect.get(value, "redirect_to");
-  if (method !== "saml" || typeof redirectTo !== "string" || !redirectTo.trim()) {
+  if (typeof method !== "string" || !method.trim()) {
+    throw new CliError("upstream_contract", "auth method response has no sign-in method");
+  }
+  if (method !== "saml" && (redirectTo === undefined || redirectTo === null || redirectTo === "")) {
+    return new URL("/sign_in", baseUrl).href;
+  }
+  if (typeof redirectTo !== "string" || !redirectTo.trim()) {
     throw new CliError("upstream_contract", "auth method response has no SAML sign-in URL");
   }
   let loginUrl: URL;
@@ -240,7 +294,10 @@ function applicableCookies(records: readonly BrowserCookie[], baseUrl: string, n
       || /[;\r\n]/.test(record.name)
       || /[;\r\n]/.test(record.value)
     ) return [];
-    return [{ name: record.name, value: record.value, domain: record.domain, path }];
+    return [{ name: record.name, value: record.value, domain: record.domain, path,
+      ...(record.secure === undefined ? {} : { secure: record.secure }),
+      ...(record.expires === undefined ? {} : { expires: record.expires }),
+    }];
   });
 }
 
@@ -272,21 +329,22 @@ async function exchangeCookies(
         Cookie: cookieHeader(cookies),
       },
       body: JSON.stringify({ delete_auth_token: false }),
+      redirect: "error",
     };
     init.signal = requestSignal;
     response = await fetchImplementation(`${baseUrl}/api/auth/access-token`, init);
   } catch {
     clearTimeout(timeout);
     if (signal?.aborted) throw new CliError("cancellation", "Authentication cancelled.");
-    if (timeoutController.signal.aborted) throw authError(`Cookie exchange timed out after ${timeoutMs}ms.`);
-    throw authError("Cookie exchange failed: OnTrack could not be reached.");
+    if (timeoutController.signal.aborted) throw new CliError("network", `Cookie exchange timed out after ${timeoutMs}ms.`);
+    throw new CliError("network", "Cookie exchange failed: OnTrack could not be reached.");
   }
   if (!response.ok) {
     clearTimeout(timeout);
     if (response.status === 401 || response.status === 403 || response.status === 419) {
       throw new RejectedBrowserCookieCandidate();
     }
-    throw authError(`Cookie exchange failed: OnTrack returned HTTP ${response.status}.`);
+    throw new CliError("upstream_api", `Cookie exchange failed: OnTrack returned HTTP ${response.status}.`, response.status);
   }
 
   let payload: unknown;
@@ -294,8 +352,8 @@ async function exchangeCookies(
     payload = await response.json();
   } catch {
     if (signal?.aborted) throw new CliError("cancellation", "Authentication cancelled.");
-    if (timeoutController.signal.aborted) throw authError(`Cookie exchange timed out after ${timeoutMs}ms.`);
-    throw authError("Cookie exchange failed: OnTrack returned malformed JSON.");
+    if (timeoutController.signal.aborted) throw new CliError("network", `Cookie exchange timed out after ${timeoutMs}ms.`);
+    throw new CliError("upstream_contract", "Cookie exchange failed: OnTrack returned malformed JSON.");
   } finally {
     clearTimeout(timeout);
   }
@@ -325,6 +383,9 @@ async function exchangeCookies(
     authTokenExpiry: new Date(data.auth_token_expiry).toISOString(),
     provenance: "browser",
     user: safeUserView(userData, username),
+    ...(cookies.some((cookie) => cookie.name === "refresh_token") ? {
+      renewalCookies: cookies.filter((cookie) => cookie.name === "refresh_token" || cookie.name === "username"),
+    } : {}),
   };
 }
 
@@ -337,8 +398,11 @@ async function exchangeBrowserCookieCandidates(
   if (!options.browserCookieProvider) return undefined;
   let candidates: readonly BrowserCookieCandidate[];
   try {
-    candidates = await options.browserCookieProvider();
+    candidates = await readBrowserCookies(options);
   } catch (error) {
+    if (error instanceof CliError && error.category === "auth") {
+      throw new BrowserCookieReadError("auth", error.message, error.statusCode, error.hint);
+    }
     if (error instanceof CliError) throw error;
     return undefined;
   }
@@ -353,14 +417,82 @@ async function exchangeBrowserCookieCandidates(
         timeoutMs,
         options.signal,
       );
-      await saveStoredSession(options.sessionFile, session);
-      return session;
+      if (options.expectedUsername && session.username !== options.expectedUsername) continue;
+      return await saveStoredSession(options, session);
     } catch (error) {
       if (error instanceof RejectedBrowserCookieCandidate) continue;
       throw error;
     }
   }
   return undefined;
+}
+
+async function readBrowserCookies(options: BrowserSessionOptions): Promise<readonly BrowserCookieCandidate[]> {
+  const signal = options.signal;
+  if (signal?.aborted) throw new CliError("cancellation", "Authentication cancelled.");
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(() => options.browserCookieProvider!()),
+      new Promise<readonly BrowserCookieCandidate[]>((resolve, reject) => {
+        timer = setTimeout(() => resolve([]), options.cookieStoreTimeoutMs ?? 8_000);
+        onAbort = () => reject(new CliError("cancellation", "Authentication cancelled."));
+        signal?.addEventListener("abort", onAbort, { once: true });
+        if (signal?.aborted) onAbort();
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+    if (onAbort) signal?.removeEventListener("abort", onAbort);
+  }
+}
+
+async function browserSession(options: LoginAuthenticatedSessionOptions, headless: boolean): Promise<AuthenticatedSession> {
+  const runCdp = options.cdpLogin ?? loginWithCdp;
+  const loginUrl = await discoverLoginUrl(
+    options.baseUrl, options.fetch ?? fetch, options.exchangeTimeoutMs ?? 30_000, options.signal,
+  );
+  let session: AuthenticatedSession | undefined;
+  let lastCookies = "";
+  let lastChecked = 0;
+  try {
+    await runCdp({
+      url: loginUrl,
+      headless,
+      signal: options.signal,
+      ...(options.browserProfileDir ? { profileDir: options.browserProfileDir } : {}),
+      ...(options.loginTimeoutMs === undefined ? {} : { timeoutMs: options.loginTimeoutMs }),
+      ...(options.onBrowserOpened ? { onOpened: options.onBrowserOpened } : {}),
+      isDone: async (records) => {
+        const now = currentTime(options);
+        const cookies = applicableCookies(records, options.baseUrl, now)
+          .filter((cookie) => cookie.name === "username" || cookie.name === "refresh_token");
+        if (!cookies.some((cookie) => cookie.name === "refresh_token")) return false;
+        const fingerprint = cookieHeader(cookies);
+        // Retry a rejected cookie after a short pause; SSO can finish without changing it.
+        if (fingerprint === lastCookies && now.valueOf() - lastChecked < 5_000) return false;
+        lastCookies = fingerprint;
+        lastChecked = now.valueOf();
+        try {
+          const candidate = await exchangeCookies(options.baseUrl, cookies, options.fetch ?? fetch, now,
+            options.exchangeTimeoutMs ?? 30_000, options.signal);
+          if (options.expectedUsername && candidate.username !== options.expectedUsername) return false;
+          session = candidate;
+          return true;
+        } catch (error) {
+          if (error instanceof RejectedBrowserCookieCandidate) return false;
+          throw error;
+        }
+      },
+    });
+  } catch (error) {
+    if (options.signal?.aborted) throw new CliError("cancellation", "Authentication cancelled.");
+    if (error instanceof CdpError) throw new CliError("auth", error.message, undefined, error.hint);
+    throw error;
+  }
+  if (!session) throw authError("The browser did not return an authenticated OnTrack session.");
+  return saveStoredSession(options, session);
 }
 
 function buildLoginSnippet(port: number, state: string): string {
@@ -462,35 +594,73 @@ export async function resolveAuthenticatedSession(
   }
 
   const now = currentTime(options);
-  const sessionFile = options.sessionFile;
-  if (!options.skipCache) {
-    const cached = await loadStoredSession(sessionFile, options.baseUrl, now);
-    if (cached) return cached;
+  let cached = await loadStoredSession(options);
+  if (options.rejectedAccessToken && cached?.access_token === options.rejectedAccessToken) {
+    const invalidated = { ...cached, access_token_invalidated: true };
+    const chosen = await writeSessionCache(options.sessionFile, invalidated, options,
+      (value) => cacheMatches(value, options, options.rejectedAccessToken!));
+    cached = readStoredSession(chosen, options.baseUrl);
   }
-
-  const browserSession = await exchangeBrowserCookieCandidates(
-    options,
-    now,
-    options.fetch ?? fetch,
-    options.exchangeTimeoutMs ?? 30_000,
-  );
-  if (browserSession) return browserSession;
+  if (!options.skipCache && cached && !cached.access_token_invalidated && isFuture(cached.auth_token_expiry, now)) return cachedAuth(cached);
+  // Another command may already have recovered the rejected token.
+  if (options.rejectedAccessToken && cached && cached.access_token !== options.rejectedAccessToken
+    && !cached.access_token_invalidated && isFuture(cached.auth_token_expiry, now)) return cachedAuth(cached);
+  const renewalOptions: BrowserSessionOptions = {
+    ...options,
+    ...(cached ? { expectedUsername: cached.username, expectedAccessToken: cached.access_token } : {}),
+  };
+  if (cached?.refresh_cookies) {
+    const cookies = applicableCookies(cached.refresh_cookies, options.baseUrl, now);
+    try {
+      const renewed = await exchangeCookies(options.baseUrl, cookies, options.fetch ?? fetch, now,
+        options.exchangeTimeoutMs ?? 30_000, options.signal);
+      if (renewed.username !== cached.username) throw authError("The renewal cookie returned a different account. Run `ontrack auth login` again.");
+      return await saveStoredSession(renewalOptions, renewed);
+    } catch (error) {
+      if (!(error instanceof RejectedBrowserCookieCandidate)) throw error;
+      // Only an upstream refusal discards the durable cookie. Network failures keep it.
+      const { refresh_cookies: _refused, ...remaining } = cached;
+      const chosen = await writeSessionCache(options.sessionFile, { ...remaining, access_token_invalidated: true }, options,
+        (value) => cacheMatches(value, options, cached!.access_token));
+      cached = readStoredSession(chosen, options.baseUrl);
+      if (cached && cached.access_token !== renewalOptions.expectedAccessToken && !cached.access_token_invalidated
+        && isFuture(cached.auth_token_expiry, currentTime(options))) return cachedAuth(cached);
+    }
+  }
+  if (options.browserProfileDir && await access(options.browserProfileDir).then(() => true, () => false)) {
+    try { return await browserSession(renewalOptions, true); }
+    catch (error) {
+      if (!(error instanceof CliError) || error.category !== "auth") throw error;
+    }
+  }
+  const reused = await exchangeBrowserCookieCandidates(renewalOptions, now, options.fetch ?? fetch, options.exchangeTimeoutMs ?? 30_000);
+  if (reused) return reused;
   throw authError("No active OnTrack browser session was found. Run `ontrack auth login` to sign in.");
 }
 
 export async function loginAuthenticatedSession(
   options: LoginAuthenticatedSessionOptions,
 ): Promise<AuthenticatedSession> {
+  if (options.signal?.aborted) throw new CliError("cancellation", "Authentication cancelled.");
+  const mode = options.mode ?? "browser";
+  if (mode === "browser") return browserSession(options, false);
+  if (mode === "paste") {
+    const raw = options.pastedCredentials ?? await options.readSecret?.();
+    if (raw === undefined) throw authError("Paste login requires credentials from stdin or a terminal prompt.");
+    return authenticateWithPastedCredentials(raw, options);
+  }
   const now = currentTime(options);
   const fetchImplementation = options.fetch ?? fetch;
   const exchangeTimeoutMs = options.exchangeTimeoutMs ?? 30_000;
-  const browserSession = await exchangeBrowserCookieCandidates(
-    options,
-    now,
-    fetchImplementation,
-    exchangeTimeoutMs,
-  );
-  if (browserSession) return browserSession;
+  if (mode === "reuse") {
+    try {
+      const reused = await exchangeBrowserCookieCandidates(options, now, fetchImplementation, exchangeTimeoutMs);
+      if (reused) return reused;
+    } catch (error) {
+      if (!(error instanceof BrowserCookieReadError)) throw error;
+      options.onWarning?.("Browser cookie reuse is unavailable. Continuing with manual browser sign-in.");
+    }
+  }
   const loginUrl = await discoverLoginUrl(
     options.baseUrl,
     fetchImplementation,
@@ -544,6 +714,82 @@ export async function loginAuthenticatedSession(
     provenance: "browser",
     user: null,
   };
-  await saveStoredSession(options.sessionFile, session);
-  return session;
+  return saveStoredSession(options, session);
+}
+
+export function parsePastedCookies(raw: string, baseUrl: string, username?: string): BrowserCookie[] {
+  const text = raw.trim();
+  if (!text || text.length > 65_536) return [];
+  if (/^curl(?:\.exe)?\s/iu.test(text)) {
+    const target = text.match(/https?:\/\/[^\s'"<>]+/iu)?.[0];
+    if (!target) return [];
+    try { if (new URL(target).origin !== new URL(baseUrl).origin) return []; }
+    catch { return []; }
+  }
+  const pairs = [...text.matchAll(/\b(username|refresh_token)=([^;\s'"\\]+)/gu)];
+  const values = new Map(pairs.map((match) => [match[1]!, match[2]!]));
+  if (!pairs.length && !/[\s=;"'\\]/u.test(text)) values.set("refresh_token", text);
+  if (!values.has("username") && username) values.set("username", username);
+  if (!values.get("username") || !values.get("refresh_token")) return [];
+  const domain = new URL(baseUrl).hostname;
+  return [...values].map(([name, value]) => ({ name, value, domain, path: "/api/auth" }));
+}
+
+export async function authenticateWithPastedCredentials(raw: string, options: LoginAuthenticatedSessionOptions): Promise<AuthenticatedSession> {
+  if (raw.length > 65_536) throw authError("The pasted credentials are too large.");
+  if (raw.trimStart().startsWith("{")) {
+    let value: unknown;
+    try { value = JSON.parse(raw); }
+    catch { throw authError("The pasted sign-in response is invalid JSON."); }
+    if (typeof value !== "object" || value === null || Array.isArray(value)) throw authError("The pasted sign-in response is invalid.");
+    const data = value as Record<string, unknown>;
+    const user = typeof data.user === "object" && data.user !== null && !Array.isArray(data.user) ? data.user as Record<string, unknown> : undefined;
+    if (typeof data.auth_token !== "string" || !data.auth_token || typeof data.auth_token_expiry !== "string"
+      || !isFuture(data.auth_token_expiry, currentTime(options)) || typeof user?.username !== "string" || !user.username) {
+      throw authError("The pasted sign-in response has no valid token, expiry, and username.");
+    }
+    const session: AuthenticatedSession = {
+      baseUrl: options.baseUrl, username: user.username, accessToken: data.auth_token,
+      authTokenExpiry: new Date(data.auth_token_expiry).toISOString(), provenance: "browser", user: safeUserView(user, user.username),
+    };
+    const http = new HttpClient({
+      baseUrl: options.baseUrl, credentials: { username: session.username, accessToken: session.accessToken },
+      ...(options.fetch ? { fetch: options.fetch } : {}),
+      ...(options.signal ? { signal: options.signal } : {}),
+      timeoutMs: options.exchangeTimeoutMs ?? 30_000,
+    });
+    if (!Array.isArray(await http.request("api/projects", { query: { include_inactive: false } }))) {
+      throw new CliError("upstream_contract", "The pasted token did not return a valid project list.");
+    }
+    return saveStoredSession(options, session);
+  }
+  const cookies = applicableCookies(parsePastedCookies(raw, options.baseUrl, options.pasteUsername), options.baseUrl, currentTime(options));
+  if (!cookies.length) throw new CliError("auth", "The paste does not contain OnTrack renewal credentials.", undefined,
+    "Copy the Cookie header or cURL command for this site's /api/auth/access-token request. A bare refresh cookie also needs --username. Use --manual for the DevTools snippet.");
+  try {
+    const session = await exchangeCookies(options.baseUrl, cookies, options.fetch ?? fetch, currentTime(options), options.exchangeTimeoutMs ?? 30_000, options.signal);
+    return await saveStoredSession(options, session);
+  } catch (error) {
+    if (error instanceof RejectedBrowserCookieCandidate) throw authError("The pasted renewal cookie did not authenticate. Sign in on the site and copy it again.");
+    throw error;
+  }
+}
+
+export async function localAuthStatus(options: ResolveAuthenticatedSessionOptions): Promise<Record<string, unknown>> {
+  const explicit = resolveCredentialSource(options.env, options.config ?? {});
+  const record = await readSessionCache(options.sessionFile, options);
+  const cached = readStoredSession(record?.value, options.baseUrl);
+  const profile = Boolean(options.browserProfileDir && await access(options.browserProfileDir).then(() => true, () => false));
+  const cookies = cached?.refresh_cookies ? applicableCookies(cached.refresh_cookies, options.baseUrl, currentTime(options)) : [];
+  return {
+    base_url: options.baseUrl,
+    credential_source: explicit?.provenance ?? (cached ? "session_cache" : "none"),
+    cache_present: Boolean(cached), cache_encrypted: Boolean(record?.encrypted), key_storage: record?.keyBackend ?? null,
+    username: explicit?.username ?? cached?.username ?? null,
+    auth_token_expiry: cached?.auth_token_expiry ?? null,
+    access_token_valid: Boolean(cached && !cached.access_token_invalidated && isFuture(cached.auth_token_expiry, currentTime(options))),
+    access_token_invalidated: cached?.access_token_invalidated === true,
+    browser_profile: profile,
+    renewal: explicit ? "explicit_credentials" : cookies.some((cookie) => cookie.name === "refresh_token") ? "refresh_cookie" : profile ? "browser" : "sign_in",
+  };
 }

@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
-  loginAuthenticatedSession,
+  loginAuthenticatedSession as loginAuthenticatedSessionWithRuntime,
+  type LoginAuthenticatedSessionOptions,
   nodeLoopbackListener,
   resolveAuthenticatedSession as resolveAuthenticatedSessionWithRuntime,
   type ResolveAuthenticatedSessionOptions,
@@ -13,12 +14,24 @@ import type { BrowserCookie, BrowserCookieCandidate } from "../src/browser-cooki
 import { loadConfig, resolveConfigPaths, resolveCredentialSource } from "../src/config.js";
 import { CliError } from "../src/errors.js";
 
+import { readSessionCache } from "../src/session-cache.js";
+
+const cacheOptions = { encryptionKey: async () => Buffer.alloc(32, 17) };
+
+async function readStoredTestSession(path: string): Promise<Record<string, unknown>> {
+  return (await readSessionCache(path, cacheOptions))?.value as Record<string, unknown>;
+}
+
 async function temporaryDirectory(): Promise<string> {
   return mkdtemp(join(tmpdir(), "ontrack-auth-test-"));
 }
 
+function loginAuthenticatedSession(options: LoginAuthenticatedSessionOptions) {
+  return loginAuthenticatedSessionWithRuntime({ ...cacheOptions, mode: "reuse", ...options });
+}
+
 function resolveAuthenticatedSession(options: ResolveAuthenticatedSessionOptions) {
-  return resolveAuthenticatedSessionWithRuntime(options);
+  return resolveAuthenticatedSessionWithRuntime({ ...cacheOptions, ...options });
 }
 
 function browserCandidate(cookies: readonly BrowserCookie[]): readonly BrowserCookieCandidate[] {
@@ -178,7 +191,7 @@ export async function test_valid_cached_session_is_reused_and_expired_session_is
   const sessionFile = join(directory, "session.json");
   await writeFile(sessionFile, JSON.stringify({
     base_url: "https://school.example.edu",
-    username: "cached-user",
+    username: "alice",
     access_token: "cached-token",
     auth_token_expiry: "2030-01-01T00:00:00.000Z",
     provenance: "okta",
@@ -193,6 +206,9 @@ export async function test_valid_cached_session_is_reused_and_expired_session_is
   assert.equal(cached.provenance, "session_cache");
   assert.equal(cached.accessToken, "cached-token");
   assert.equal(cached.user, null);
+  const migrated = await readFile(sessionFile, "utf8");
+  assert.equal(JSON.parse(migrated).version, 2);
+  assert.doesNotMatch(migrated, /cached-token|cached-user/u);
 
   const refreshed = await resolveAuthenticatedSession({
     baseUrl: "https://school.example.edu",
@@ -210,7 +226,7 @@ export async function test_valid_cached_session_is_reused_and_expired_session_is
   assert.equal(refreshed.accessToken, "new-access-token");
   if (process.platform !== "win32") assert.equal((await stat(sessionFile)).mode & 0o777, 0o600);
   const storedText = await readFile(sessionFile, "utf8");
-  assert.equal(JSON.parse(storedText).access_token, "new-access-token");
+  assert.equal((await readStoredTestSession(sessionFile)).access_token, "new-access-token");
   assert.doesNotMatch(storedText, /refresh-secret/u);
 }
 
@@ -315,7 +331,7 @@ export async function test_interactive_browser_login_completes_via_loopback_call
     "wait:45000",
   ]);
 
-  const persisted = JSON.parse(await readFile(sessionFile, "utf8")) as Record<string, unknown>;
+  const persisted = await readStoredTestSession(sessionFile);
   assert.equal(persisted.access_token, "access-secret");
   assert.equal(persisted.provenance, "browser");
 }
@@ -394,31 +410,24 @@ export async function test_loopback_listener_cancels_on_abort(): Promise<void> {
   }), (error) => error instanceof CliError && error.category === "cancellation");
 }
 
-export async function test_browser_cookie_permission_error_stops_before_interactive_login(): Promise<void> {
+export async function test_browser_cookie_permission_error_falls_back_to_manual_login(): Promise<void> {
   const directory = await temporaryDirectory();
-  const permissionError = new CliError(
-    "auth",
-    "Chrome cookie access is disabled for this terminal.",
-    undefined,
-    "Enable Chrome in System Settings > Privacy & Security > Files & Folders, then retry.",
-  );
-  let requestedLoginUrl = false;
-  let prompted = false;
-
-  await assert.rejects(loginAuthenticatedSession({
+  const warnings: string[] = [];
+  const session = await loginAuthenticatedSession({
     baseUrl: "https://school.example.edu",
     sessionFile: join(directory, "session.json"),
-    browserCookieProvider: async () => { throw permissionError; },
-    promptEnter: async () => { prompted = true; },
-    openBrowser: async () => { throw new Error("must not open"); },
-    fetch: async () => {
-      requestedLoginUrl = true;
-      throw new Error("must not fetch");
+    browserCookieProvider: async () => { throw new CliError("auth", "Browser data is denied."); },
+    onWarning: (message) => warnings.push(message),
+    promptEnter: async () => {},
+    openBrowser: async () => {},
+    loopbackLoginListener: async ({ onListening }) => {
+      await onListening(45678);
+      return { token: "test-token", expiry: "2030-01-01T00:00:00Z", username: "alice" };
     },
-  }), (error) => error === permissionError);
-
-  assert.equal(requestedLoginUrl, false);
-  assert.equal(prompted, false);
+    fetch: async () => Response.json({ method: "saml", redirect_to: "https://identity.example.edu/saml" }),
+  });
+  assert.equal(session.username, "alice");
+  assert.equal(warnings.length, 1);
 }
 
 export async function test_interactive_browser_login_rejects_invalid_redirects_before_prompting(): Promise<void> {
@@ -572,7 +581,7 @@ export async function test_cookie_exchange_surfaces_rate_limits_and_server_failu
       browserCookieProvider: async () => browserCandidate(validCookies()),
       fetch: async () => new Response(null, { status }),
     }), (error) => error instanceof CliError
-      && error.category === "auth"
+      && error.category === "upstream_api"
       && error.message.includes(`HTTP ${status}`));
   }
 }
@@ -588,16 +597,14 @@ export async function test_cookie_exchange_has_its_own_timeout(): Promise<void> 
     fetch: async (_input, init) => new Promise<Response>((_resolve, reject) => {
       init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
     }),
-  }), (error) => error instanceof CliError && error.category === "auth" && /timed out after 5ms/u.test(error.message));
+  }), (error) => error instanceof CliError && error.category === "network" && /timed out after 5ms/u.test(error.message));
 }
 
 export async function test_cookie_exchange_reports_session_cache_write_failure(): Promise<void> {
   const directory = await temporaryDirectory();
-  await assert.rejects(resolveAuthenticatedSession({
+  await assert.rejects(loginAuthenticatedSession({
     baseUrl: "https://school.example.edu",
     sessionFile: directory,
-    env: {},
-    skipCache: true,
     browserCookieProvider: async () => browserCandidate(validCookies()),
     fetch: exchangeResponse({
       auth_token: "access-secret",
@@ -612,7 +619,7 @@ export async function test_skip_cache_bypasses_a_rejected_unexpired_session(): P
   const sessionFile = join(directory, "session.json");
   await writeFile(sessionFile, JSON.stringify({
     base_url: "https://school.example.edu",
-    username: "rejected-user",
+    username: "alice",
     access_token: "rejected-token",
     auth_token_expiry: "2030-01-01T00:00:00.000Z",
     provenance: "browser",
@@ -632,4 +639,278 @@ export async function test_skip_cache_bypasses_a_rejected_unexpired_session(): P
   });
   assert.equal(session.accessToken, "replacement-token");
   assert.equal("authentication_token" in (session.user ?? {}), false);
+}
+
+export async function test_cli_browser_login_validates_cookies_before_saving(): Promise<void> {
+  const directory = await temporaryDirectory();
+  const sessionFile = join(directory, "session.json");
+  let storeReads = 0;
+  let exchanges = 0;
+  const session = await loginAuthenticatedSessionWithRuntime({
+    ...cacheOptions,
+    baseUrl: "https://school.example.edu", sessionFile,
+    browserCookieProvider: async () => { storeReads += 1; return []; },
+    now: () => new Date("2029-01-01T00:00:00Z"),
+    cdpLogin: async (options) => {
+      assert.equal(options.headless, false);
+      assert.equal(options.url, "https://identity.example.edu/saml");
+      assert.equal(await options.isDone([{ name: "refresh_token", value: "wrong-site", domain: "other.example.edu" }]), false);
+      assert.equal(await options.isDone([{ name: "refresh_token", value: "anonymous", domain: "school.example.edu" }]), false);
+      const cookies = [{ name: "refresh_token", value: "live-cookie", domain: "school.example.edu" }];
+      assert.equal(await options.isDone(cookies), true);
+      return { cookies, browserName: "Test Chrome" };
+    },
+    fetch: async (input, init) => {
+      const request = new Request(input, init);
+      if (request.url.endsWith("/method")) return Response.json({ method: "saml", redirect_to: "https://identity.example.edu/saml" });
+      exchanges += 1;
+      assert.equal(request.redirect, "error");
+      assert.equal(await request.text(), '{"delete_auth_token":false}');
+      if (request.headers.get("Cookie")?.includes("anonymous")) return Response.json(null);
+      return Response.json({ auth_token: "test-access", auth_token_expiry: "2030-01-01T00:00:00Z", user: { username: "alice" } });
+    },
+  });
+  assert.equal(storeReads, 0);
+  assert.equal(exchanges, 2);
+  assert.equal(session.username, "alice");
+  assert.equal((await readStoredTestSession(sessionFile)).access_token, "test-access");
+}
+
+export async function test_stalled_cookie_store_does_not_block_manual_login(): Promise<void> {
+  const directory = await temporaryDirectory();
+  const session = await loginAuthenticatedSession({
+    baseUrl: "https://school.example.edu", sessionFile: join(directory, "session.json"), cookieStoreTimeoutMs: 5,
+    browserCookieProvider: () => new Promise(() => {}),
+    promptEnter: async () => {}, openBrowser: async () => {},
+    loopbackLoginListener: async ({ onListening }) => {
+      await onListening(45678);
+      return { token: "test-access", expiry: "2030-01-01T00:00:00Z", username: "alice" };
+    },
+    fetch: async () => Response.json({ method: "saml", redirect_to: "https://identity.example.edu/saml" }),
+  });
+  assert.equal(session.username, "alice");
+}
+
+export async function test_cookie_store_wait_can_be_cancelled(): Promise<void> {
+  const directory = await temporaryDirectory();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 5);
+  try {
+    await assert.rejects(resolveAuthenticatedSession({
+      baseUrl: "https://school.example.edu", sessionFile: join(directory, "session.json"), env: {}, signal: controller.signal,
+      browserCookieProvider: () => new Promise(() => {}),
+    }), (error) => error instanceof CliError && error.category === "cancellation");
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function test_manual_login_skips_the_cookie_store_and_cli_browser(): Promise<void> {
+  const directory = await temporaryDirectory();
+  const session = await loginAuthenticatedSessionWithRuntime({
+    ...cacheOptions,
+    mode: "manual", baseUrl: "https://school.example.edu", sessionFile: join(directory, "session.json"),
+    browserCookieProvider: async () => { throw new Error("must not read browser files"); },
+    cdpLogin: async () => { throw new Error("must not launch a CLI browser"); },
+    promptEnter: async () => {}, openBrowser: async () => {},
+    loopbackLoginListener: async ({ onListening }) => {
+      await onListening(45678);
+      return { token: "test-access", expiry: "2030-01-01T00:00:00Z", username: "alice" };
+    },
+    fetch: async () => Response.json({ method: "saml", redirect_to: "https://identity.example.edu/saml" }),
+  });
+  assert.equal(session.username, "alice");
+}
+
+export async function test_expired_session_renews_in_the_private_browser_before_reading_browser_files(): Promise<void> {
+  const directory = await temporaryDirectory();
+  let storeReads = 0;
+  const session = await resolveAuthenticatedSession({
+    baseUrl: "https://school.example.edu", sessionFile: join(directory, "session.json"), env: {}, browserProfileDir: directory,
+    cdpLogin: async (options) => {
+      assert.equal(options.headless, true);
+      assert.equal(options.url, "https://identity.example.edu/saml");
+      const cookies = [{ name: "refresh_token", value: "test-cookie", domain: "school.example.edu" }];
+      assert.equal(await options.isDone(cookies), true);
+      return { cookies, browserName: "Test Chrome" };
+    },
+    browserCookieProvider: async () => { storeReads += 1; return []; },
+    fetch: async (input) => String(input).endsWith("/method")
+      ? Response.json({ method: "saml", redirect_to: "https://identity.example.edu/saml" })
+      : Response.json({ auth_token: "new-access", auth_token_expiry: "2030-01-01T00:00:00Z", user: { username: "alice" } }),
+  });
+  assert.equal(session.accessToken, "new-access");
+  assert.equal(storeReads, 0);
+}
+
+async function seedRenewalSession(sessionFile: string): Promise<void> {
+  const { writeSessionCache } = await import("../src/session-cache.js");
+  await writeSessionCache(sessionFile, {
+    base_url: "https://school.example.edu", username: "alice", access_token: "old-access",
+    auth_token_expiry: "2020-01-01T00:00:00Z", provenance: "browser", refresh_cookies: validCookies(),
+  }, cacheOptions);
+}
+
+export async function test_durable_cookie_renews_without_a_browser(): Promise<void> {
+  const directory = await temporaryDirectory();
+  const sessionFile = join(directory, "session.json");
+  await seedRenewalSession(sessionFile);
+  const session = await resolveAuthenticatedSession({
+    baseUrl: "https://school.example.edu", sessionFile, env: {},
+    browserCookieProvider: async () => { throw new Error("must not read browser files"); },
+    cdpLogin: async () => { throw new Error("must not launch a browser"); },
+    fetch: exchangeResponse({ auth_token: "renewed-access", auth_token_expiry: "2030-01-01T00:00:00Z", user: { username: "alice" } }),
+  });
+  assert.equal(session.accessToken, "renewed-access");
+  const stored = await readStoredTestSession(sessionFile);
+  assert.equal(stored.access_token, "renewed-access");
+  assert.equal((stored.refresh_cookies as BrowserCookie[])[1]?.value, "refresh-secret");
+  assert.doesNotMatch(await readFile(sessionFile, "utf8"), /refresh-secret|renewed-access/u);
+}
+
+export async function test_transient_renewal_failures_keep_durable_credentials(): Promise<void> {
+  const directory = await temporaryDirectory();
+  for (const status of [429, 500]) {
+    const sessionFile = join(directory, `${status}.json`);
+    await seedRenewalSession(sessionFile);
+    const before = await readFile(sessionFile, "utf8");
+    await assert.rejects(resolveAuthenticatedSession({
+      baseUrl: "https://school.example.edu", sessionFile, env: {}, fetch: async () => new Response(null, { status }),
+    }), (error) => error instanceof CliError && error.category === "upstream_api");
+    assert.equal(await readFile(sessionFile, "utf8"), before);
+  }
+}
+
+export async function test_rejected_refresh_cookie_is_removed_and_the_access_token_stays_invalidated(): Promise<void> {
+  const directory = await temporaryDirectory();
+  const sessionFile = join(directory, "session.json");
+  await seedRenewalSession(sessionFile);
+  await assert.rejects(resolveAuthenticatedSession({
+    baseUrl: "https://school.example.edu", sessionFile, env: {}, fetch: async () => new Response(null, { status: 401 }),
+  }), CliError);
+  const stored = await readStoredTestSession(sessionFile);
+  assert.equal(stored.refresh_cookies, undefined);
+  assert.equal(stored.access_token_invalidated, true);
+  assert.equal(stored.access_token, "old-access");
+}
+
+export async function test_renewal_cannot_switch_the_cached_account(): Promise<void> {
+  const directory = await temporaryDirectory();
+  const sessionFile = join(directory, "session.json");
+  await seedRenewalSession(sessionFile);
+  const before = await readFile(sessionFile, "utf8");
+  await assert.rejects(resolveAuthenticatedSession({
+    baseUrl: "https://school.example.edu", sessionFile, env: {},
+    fetch: exchangeResponse({ auth_token: "other-access", auth_token_expiry: "2030-01-01T00:00:00Z", user: { username: "bob" } }),
+  }), (error) => error instanceof CliError && /different account/u.test(error.message));
+  assert.equal(await readFile(sessionFile, "utf8"), before);
+}
+
+export async function test_a_late_renewal_cannot_replace_a_newer_session(): Promise<void> {
+  const { writeSessionCache } = await import("../src/session-cache.js");
+  const directory = await temporaryDirectory();
+  const sessionFile = join(directory, "session.json");
+  await seedRenewalSession(sessionFile);
+  const result = await resolveAuthenticatedSession({
+    baseUrl: "https://school.example.edu", sessionFile, env: {},
+    fetch: async () => {
+      await writeSessionCache(sessionFile, {
+        base_url: "https://school.example.edu", username: "alice", access_token: "newer-access",
+        auth_token_expiry: "2030-01-01T00:00:00Z", provenance: "browser", refresh_cookies: validCookies(),
+      }, cacheOptions);
+      return Response.json({ auth_token: "late-access", auth_token_expiry: "2030-01-01T00:00:00Z", user: { username: "alice" } });
+    },
+  });
+  assert.equal(result.accessToken, "newer-access");
+  assert.equal((await readStoredTestSession(sessionFile)).access_token, "newer-access");
+}
+
+export async function test_a_failed_recovery_does_not_reuse_a_rejected_unexpired_token(): Promise<void> {
+  const { writeSessionCache } = await import("../src/session-cache.js");
+  const directory = await temporaryDirectory();
+  const sessionFile = join(directory, "session.json");
+  await writeSessionCache(sessionFile, {
+    base_url: "https://school.example.edu", username: "alice", access_token: "rejected-access",
+    auth_token_expiry: "2030-01-01T00:00:00Z", provenance: "browser", refresh_cookies: validCookies(),
+  }, cacheOptions);
+  await assert.rejects(resolveAuthenticatedSession({
+    baseUrl: "https://school.example.edu", sessionFile, env: {}, rejectedAccessToken: "rejected-access", skipCache: true,
+    fetch: async () => new Response(null, { status: 500 }),
+  }), CliError);
+  const stored = await readStoredTestSession(sessionFile);
+  assert.equal(stored.access_token_invalidated, true);
+  assert.ok(stored.refresh_cookies);
+  await assert.rejects(resolveAuthenticatedSession({
+    baseUrl: "https://school.example.edu", sessionFile, env: {},
+    fetch: async () => new Response(null, { status: 500 }),
+  }), (error) => error instanceof CliError && error.category === "upstream_api");
+}
+
+export async function test_paste_login_accepts_curl_cookie_headers_and_bare_refresh_cookies(): Promise<void> {
+  const { parsePastedCookies } = await import("../src/auth.js");
+  const root = "https://school.example.edu";
+  for (const raw of [
+    "Cookie: username=alice; refresh_token=test-refresh",
+    "curl 'https://school.example.edu/api/auth/access-token' \\\n-H 'Cookie: username=alice; refresh_token=test-refresh'",
+  ]) {
+    assert.deepEqual(parsePastedCookies(raw, root).map(({ name, value }) => [name, value]), [["username", "alice"], ["refresh_token", "test-refresh"]]);
+  }
+  assert.equal(parsePastedCookies("test-refresh", root, "alice").length, 2);
+  assert.equal(parsePastedCookies("test-refresh", root).length, 0);
+  assert.equal(parsePastedCookies("curl 'https://other.example.edu/' -H 'Cookie: username=alice; refresh_token=test-refresh'", root).length, 0);
+}
+
+export async function test_pasted_cookie_is_validated_and_encrypted_without_launching_a_browser(): Promise<void> {
+  const directory = await temporaryDirectory();
+  const sessionFile = join(directory, "session.json");
+  const session = await loginAuthenticatedSessionWithRuntime({
+    ...cacheOptions, mode: "paste", baseUrl: "https://school.example.edu", sessionFile,
+    pastedCredentials: "Cookie: username=alice; refresh_token=test-refresh",
+    cdpLogin: async () => { throw new Error("must not launch a browser"); },
+    browserCookieProvider: async () => { throw new Error("must not read browser files"); },
+    fetch: exchangeResponse({ auth_token: "pasted-access", auth_token_expiry: "2030-01-01T00:00:00Z", user: { username: "alice" } }),
+  });
+  assert.equal(session.accessToken, "pasted-access");
+  assert.doesNotMatch(await readFile(sessionFile, "utf8"), /pasted-access|test-refresh/u);
+  assert.ok((await readStoredTestSession(sessionFile)).refresh_cookies);
+}
+
+export async function test_pasted_signin_json_requires_protected_endpoint_validation(): Promise<void> {
+  const directory = await temporaryDirectory();
+  const raw = JSON.stringify({ auth_token: "test-access", auth_token_expiry: "2030-01-01T00:00:00Z", user: { username: "alice", authentication_token: "strip-this" } });
+  let protectedChecks = 0;
+  const result = await loginAuthenticatedSessionWithRuntime({
+    ...cacheOptions, mode: "paste", baseUrl: "https://school.example.edu", sessionFile: join(directory, "valid.json"), pastedCredentials: raw,
+    fetch: async (input, init) => {
+      assert.equal(String(input), "https://school.example.edu/api/projects?include_inactive=false");
+      assert.equal(new Headers(init?.headers).get("Auth-Token"), "test-access");
+      protectedChecks += 1;
+      return Response.json([]);
+    },
+  });
+  assert.equal(protectedChecks, 1);
+  assert.equal("authentication_token" in result.user!, false);
+  const refused = join(directory, "refused.json");
+  await assert.rejects(loginAuthenticatedSessionWithRuntime({
+    ...cacheOptions, mode: "paste", baseUrl: "https://school.example.edu", sessionFile: refused, pastedCredentials: raw,
+    fetch: async () => new Response(null, { status: 401 }),
+  }), CliError);
+  assert.equal(await readSessionCache(refused, cacheOptions), undefined);
+}
+
+export async function test_cli_browser_supports_native_doubtfire_signin_without_saml(): Promise<void> {
+  const directory = await temporaryDirectory();
+  const session = await loginAuthenticatedSessionWithRuntime({
+    ...cacheOptions, baseUrl: "https://school.example.edu", sessionFile: join(directory, "session.json"),
+    cdpLogin: async (options) => {
+      assert.equal(options.url, "https://school.example.edu/sign_in");
+      const cookies = [{ name: "refresh_token", value: "native-cookie", domain: "school.example.edu" }];
+      assert.equal(await options.isDone(cookies), true);
+      return { cookies, browserName: "Test Chrome" };
+    },
+    fetch: async (input) => String(input).endsWith("/method")
+      ? Response.json({ method: "database", redirect_to: null })
+      : Response.json({ auth_token: "native-access", auth_token_expiry: "2030-01-01T00:00:00Z", user: { username: "alice" } }),
+  });
+  assert.equal(session.accessToken, "native-access");
 }

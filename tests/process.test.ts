@@ -11,14 +11,32 @@ interface ProcessResult {
   readonly stderr: string;
 }
 
-async function run(executable: string, args: readonly string[]): Promise<ProcessResult> {
-  const child = spawn(executable, [...args], { stdio: ["ignore", "pipe", "pipe"] });
+async function run(executable: string, args: readonly string[], options: { input?: string; env?: NodeJS.ProcessEnv } = {}): Promise<ProcessResult> {
+  const child = spawn(executable, [...args], { stdio: [options.input === undefined ? "ignore" : "pipe", "pipe", "pipe"], env: options.env ?? process.env });
+  if (options.input !== undefined) child.stdin?.end(options.input);
+  assert.ok(child.stdout && child.stderr);
   let stdout = "";
   let stderr = "";
   child.stdout.setEncoding("utf8").on("data", (chunk: string) => { stdout += chunk; });
   child.stderr.setEncoding("utf8").on("data", (chunk: string) => { stderr += chunk; });
   const [code] = await once(child, "exit") as [number | null];
   return { code, stdout, stderr };
+}
+
+export async function test_paste_credentials_from_stdin_are_not_echoed_in_node_or_bun(): Promise<void> {
+  const directory = await mkdtemp(join(tmpdir(), "ontrack-paste-process-"));
+  try {
+    for (const executable of [process.execPath, "bun"]) {
+      const result = await run(executable, [resolve("dist/cli.js"), "auth", "login", "--paste", "--json"], {
+        input: "private-paste-marker\n",
+        env: { ...process.env, ONTRACK_BASE_URL: "https://school.example.edu", ONTRACK_CONFIG: join(directory, "config.yaml") },
+      });
+      assert.equal(result.code, 3, result.stderr);
+      assert.equal(result.stdout, "");
+      assert.equal(JSON.parse(result.stderr).error.code, "auth");
+      assert.doesNotMatch(result.stderr, /private-paste-marker/);
+    }
+  } finally { await rm(directory, { recursive: true, force: true }); }
 }
 
 export async function test_distribution_help_version_and_description_run_in_node_and_bun(): Promise<void> {
