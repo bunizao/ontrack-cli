@@ -66,6 +66,8 @@ interface BrowserSessionOptions extends SessionCacheOptions {
   readonly cdpLogin?: (options: CdpLoginOptions) => Promise<CdpLoginResult>;
   readonly expectedUsername?: string;
   readonly expectedAccessToken?: string;
+  /** Called once before a headless browser renewal starts, so the CLI can say why it is waiting. */
+  readonly onRenewing?: (method: string) => void;
 }
 
 export interface ResolveAuthenticatedSessionOptions extends BrowserSessionOptions {
@@ -659,6 +661,7 @@ async function renewSession(options: ResolveAuthenticatedSessionOptions, stored:
     }
   }
   if (options.browserProfileDir && await access(options.browserProfileDir).then(() => true, () => false)) {
+    options.onRenewing?.("background browser");
     try { return await browserSession(renewalOptions, true); }
     catch (error) {
       if (!(error instanceof CliError) || error.category !== "auth") throw error;

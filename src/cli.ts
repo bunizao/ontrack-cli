@@ -220,6 +220,10 @@ async function probeBrowserCookies(baseUrl: string, signal: AbortSignal): Promis
   return { profiles: candidates.length, warnings: [...warnings] };
 }
 
+function announceRenewal(method: string): void {
+  process.stderr.write(`Renewing the OnTrack session in a ${method}...\n`);
+}
+
 async function createApplication(signal: AbortSignal, env: Environment, platform: NodeJS.Platform, renew = false): Promise<OnTrackApplication> {
   const paths = configPaths(env, platform);
   const config = loadConfig(paths);
@@ -231,6 +235,7 @@ async function createApplication(signal: AbortSignal, env: Environment, platform
     config,
     signal,
     browserProfileDir: browserProfileForSite(paths.configDir, baseUrl),
+    onRenewing: announceRenewal,
     ...(renew ? { skipCache: true } : {}),
     browserCookieProvider: () => authenticationCookieCandidates(baseUrl, { signal: AbortSignal.any([signal, AbortSignal.timeout(8_000)]) }),
   });
@@ -253,6 +258,7 @@ async function createApplication(signal: AbortSignal, env: Environment, platform
         signal: refreshSignal,
         browserProfileDir: browserProfileForSite(paths.configDir, baseUrl),
         skipCache: true,
+        onRenewing: announceRenewal,
         rejectedAccessToken: rejected.accessToken,
         browserCookieProvider: () => authenticationCookieCandidates(baseUrl, { signal: AbortSignal.any([refreshSignal, AbortSignal.timeout(8_000)]) }),
       });

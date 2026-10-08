@@ -150,3 +150,19 @@ export async function test_cdp_escalates_when_a_browser_ignores_termination(): P
     await rm(profileDir, { recursive: true, force: true });
   }
 }
+
+export async function test_cdp_headless_renewal_gives_up_after_fifteen_seconds(): Promise<void> {
+  const profileDir = await mkdtemp(join(tmpdir(), "ontrack-cdp-headless-"));
+  const browser = fakeChrome();
+  let clock = 0;
+  try {
+    await assert.rejects(loginWithCdp({
+      url: "https://school.example.edu", profileDir, browserPath: "/test/chrome", spawn: browser.spawn, headless: true,
+      closeTimeoutMs: 5, now: () => clock, sleep: async (ms) => { clock += ms; }, isDone: () => false,
+    }), (error) => error instanceof CdpError && /Timed out renewing/u.test(error.message));
+    assert.equal(clock, 15_000);
+    assert.ok(browser.flags[0]?.includes("--headless=new"));
+  } finally {
+    await rm(profileDir, { recursive: true, force: true });
+  }
+}

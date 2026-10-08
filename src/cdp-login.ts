@@ -76,7 +76,7 @@ export const NO_CHROMIUM_HINT =
   "Install Google Chrome, Microsoft Edge, Brave, or Chromium, or run `ontrack auth login --paste` to hand over the cookie yourself.";
 
 const DEFAULT_INTERACTIVE_TIMEOUT_MS = 300_000;
-const DEFAULT_HEADLESS_TIMEOUT_MS = 45_000;
+const DEFAULT_HEADLESS_TIMEOUT_MS = 15_000;
 const HANDSHAKE_TIMEOUT_MS = 15_000;
 // A single CDP request must not outlive an unresponsive browser; cookie polls
 // and Browser.close both go through this bound.

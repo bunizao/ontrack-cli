@@ -846,6 +846,28 @@ export async function test_a_failed_recovery_does_not_reuse_a_rejected_unexpired
   }), (error) => error instanceof CliError && error.category === "upstream_api");
 }
 
+export async function test_headless_renewal_is_announced_once_and_cookie_renewal_is_silent(): Promise<void> {
+  const directory = await temporaryDirectory();
+  const announced: string[] = [];
+  const base = { baseUrl: "https://school.example.edu", env: {}, browserProfileDir: directory, onRenewing: (method: string) => { announced.push(method); } };
+  const fetchSession = async (input: Parameters<typeof fetch>[0]) => String(input).endsWith("/method")
+    ? Response.json({ method: "saml", redirect_to: "https://identity.example.edu/saml" })
+    : Response.json({ auth_token: "new-access", auth_token_expiry: "2030-01-01T00:00:00Z", user: { username: "alice" } });
+  const sessionFile = join(directory, "session.json");
+  await seedRenewalSession(sessionFile);
+  await resolveAuthenticatedSession({ ...base, sessionFile, fetch: fetchSession });
+  assert.deepEqual(announced, []);
+  await resolveAuthenticatedSession({
+    ...base, sessionFile: join(directory, "empty.json"), fetch: fetchSession,
+    cdpLogin: async (login) => {
+      const cookies = [{ name: "refresh_token", value: "test-cookie", domain: "school.example.edu" }];
+      await login.isDone(cookies);
+      return { cookies, browserName: "Test Chrome" };
+    },
+  });
+  assert.deepEqual(announced, ["background browser"]);
+}
+
 export async function test_parallel_renewals_share_one_headless_browser_and_one_exchange(): Promise<void> {
   const { writeSessionCache } = await import("../src/session-cache.js");
   const directory = await temporaryDirectory();
