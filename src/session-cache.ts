@@ -190,17 +190,22 @@ function keyId(sessionFile: string): string {
   return createHash("sha256").update(resolve(sessionFile)).digest("hex").slice(0, 24);
 }
 
-async function withFileLock<T>(lock: string, options: SessionCacheOptions, action: () => Promise<T>): Promise<T> {
+export async function withFileLock<T>(
+  lock: string,
+  options: SessionCacheOptions,
+  action: () => Promise<T>,
+  { waitMs = 20_000, staleMs = 60_000 } = {},
+): Promise<T> {
   const directory = dirname(lock);
   await mkdir(directory, { recursive: true, mode: 0o700 });
-  const deadline = Date.now() + 20_000;
+  const deadline = Date.now() + waitMs;
   for (;;) {
     if (options.signal?.aborted) throw new CliError("cancellation", "Authentication cancelled.");
     try { await mkdir(lock, { mode: 0o700 }); break; }
     catch (error) {
       if (!(typeof error === "object" && error !== null && "code" in error && error.code === "EEXIST")) throw error;
       const age = await stat(lock).then((value) => Date.now() - value.mtimeMs, () => 0);
-      if (age > 60_000) { await rm(lock, { recursive: true, force: true }); continue; }
+      if (age > staleMs) { await rm(lock, { recursive: true, force: true }); continue; }
       if (Date.now() > deadline) throw cacheError("Timed out waiting for the session cache lock.");
       await new Promise((resolveWait) => setTimeout(resolveWait, 50));
     }

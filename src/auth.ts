@@ -11,7 +11,7 @@ import type { UserView } from "./types.js";
 import { safeUserView } from "./user.js";
 import { CdpError, loginWithCdp, type CdpLoginOptions, type CdpLoginResult } from "./cdp-login.js";
 
-import { readSessionCache, writeSessionCache, type SessionCacheOptions } from "./session-cache.js";
+import { readSessionCache, withFileLock, writeSessionCache, type SessionCacheOptions } from "./session-cache.js";
 import { HttpClient } from "./http.js";
 
 export type LoginMode = "browser" | "reuse" | "paste" | "manual";
@@ -612,8 +612,18 @@ export async function resolveAuthenticatedSession(
   // Another command may already have recovered the rejected token.
   if (options.rejectedAccessToken && cached && cached.access_token !== options.rejectedAccessToken
     && !cached.access_token_invalidated && isFresh(cached.auth_token_expiry, now)) return cachedAuth(cached);
-  try { return await renewSession(options, cached); }
-  catch (error) {
+  // Renewal may launch the shared headless browser profile, so only one process renews at a time.
+  // The wait covers a full headless renewal; a lock from a crashed process goes stale after two minutes.
+  const seen = cached;
+  try {
+    return await withFileLock(`${options.sessionFile}.renew.lock`, options, async () => {
+      // Whoever held the lock may have produced a fresh token for this account already.
+      const latest = await loadStoredSession(options);
+      if (latest && latest.access_token !== seen?.access_token && !latest.access_token_invalidated
+        && isFresh(latest.auth_token_expiry, currentTime(options)) && (!seen || latest.username === seen.username)) return cachedAuth(latest);
+      return renewSession(options, latest);
+    }, { waitMs: 60_000, staleMs: 120_000 });
+  } catch (error) {
     // Renewal inside the margin is opportunistic: a token that still has time left keeps working.
     if (!options.skipCache && cached && !cached.access_token_invalidated && isFuture(cached.auth_token_expiry, currentTime(options))
       && !(error instanceof CliError && error.category === "cancellation")) return cachedAuth(cached);

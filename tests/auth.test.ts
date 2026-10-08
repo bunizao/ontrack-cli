@@ -846,6 +846,39 @@ export async function test_a_failed_recovery_does_not_reuse_a_rejected_unexpired
   }), (error) => error instanceof CliError && error.category === "upstream_api");
 }
 
+export async function test_parallel_renewals_share_one_headless_browser_and_one_exchange(): Promise<void> {
+  const { writeSessionCache } = await import("../src/session-cache.js");
+  const directory = await temporaryDirectory();
+  const sessionFile = join(directory, "session.json");
+  await writeSessionCache(sessionFile, {
+    base_url: "https://school.example.edu", username: "alice", access_token: "old-access",
+    auth_token_expiry: "2020-01-01T00:00:00Z", provenance: "browser",
+  }, cacheOptions);
+  let launches = 0;
+  let active = 0;
+  let overlapped = false;
+  const options: ResolveAuthenticatedSessionOptions = {
+    baseUrl: "https://school.example.edu", sessionFile, env: {}, browserProfileDir: directory,
+    cdpLogin: async (login) => {
+      launches += 1;
+      if (++active > 1) overlapped = true;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const cookies = [{ name: "refresh_token", value: "test-cookie", domain: "school.example.edu" }];
+      assert.equal(await login.isDone(cookies), true);
+      active -= 1;
+      return { cookies, browserName: "Test Chrome" };
+    },
+    fetch: async (input) => String(input).endsWith("/method")
+      ? Response.json({ method: "saml", redirect_to: "https://identity.example.edu/saml" })
+      : Response.json({ auth_token: "new-access", auth_token_expiry: "2030-01-01T00:00:00Z", user: { username: "alice" } }),
+  };
+  const sessions = await Promise.all([resolveAuthenticatedSession(options), resolveAuthenticatedSession(options), resolveAuthenticatedSession(options)]);
+  assert.deepEqual(sessions.map((session) => session.accessToken), ["new-access", "new-access", "new-access"]);
+  assert.equal(launches, 1);
+  assert.equal(overlapped, false);
+  await assert.rejects(stat(`${sessionFile}.renew.lock`), { code: "ENOENT" });
+}
+
 async function seedExpiringSession(sessionFile: string, expiry: string): Promise<void> {
   const { writeSessionCache } = await import("../src/session-cache.js");
   await writeSessionCache(sessionFile, {
