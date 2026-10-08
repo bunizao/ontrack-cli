@@ -8,7 +8,7 @@ import { appendFile, mkdir, rm, unlink } from "node:fs/promises";
 import { colorEnabled, createTheme, createUi, detectAudience, formatFromArgv, writeOutput, type Theme, type Ui } from "@bunizao/cli-kit";
 
 import { OnTrackApplication } from "./application.js";
-import { browserProfileForSite, localAuthStatus, loginAuthenticatedSession, resolveAuthenticatedSession, type LoginMode } from "./auth.js";
+import { browserProfileForSite, localAuthStatus, loginAuthenticatedSession, resolveAuthenticatedSession, revokeStoredSession, type LoginMode } from "./auth.js";
 import { openSystemBrowser } from "./browser.js";
 import { authenticationCookieCandidates } from "./browser-cookies.js";
 import { executeCli, type ChatSendConfirmation } from "./cli-app.js";
@@ -75,13 +75,16 @@ function confirmMutation(summary: string, signal: AbortSignal): Promise<boolean>
   return askToContinue(summary, "Mutation requires an interactive terminal or --yes.", signal);
 }
 
-async function authLogout(env: Environment, platform: NodeJS.Platform): Promise<unknown> {
+async function authLogout(signal: AbortSignal, env: Environment, platform: NodeJS.Platform): Promise<unknown> {
   const paths = configPaths(env, platform);
+  // Ending the session upstream is a courtesy; a missing site config or a network failure must not block logout.
+  let serverRevoked = false;
+  try { serverRevoked = await revokeStoredSession(authOptions(signal, env, platform)); } catch { /* local logout still proceeds */ }
   await unlink(paths.sessionFile).catch((error: NodeJS.ErrnoException) => {
     if (error.code !== "ENOENT") throw error;
   });
   await rm(join(paths.configDir, "browser"), { recursive: true, force: true });
-  return { logged_out: true };
+  return { logged_out: true, server_revoked: serverRevoked };
 }
 
 function configPaths(env: Environment, platform: NodeJS.Platform): ConfigPaths {
@@ -288,7 +291,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     const result = await executeCli(argv, {
       application: applicationResolver(controller.signal, env, platform, ui),
       authLogin: (mode, username) => authLogin(controller.signal, env, platform, ui, mode, username),
-      authLogout: () => authLogout(env, platform),
+      authLogout: () => authLogout(controller.signal, env, platform),
       authLocalStatus: () => localAuthStatus(authOptions(controller.signal, env, platform)),
       authRenew: async () => (await createApplication(controller.signal, env, platform, true)).authCheck(),
       doctor: (live, cookies) => diagnoseAuth({

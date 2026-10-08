@@ -943,6 +943,37 @@ export async function test_failed_renewal_inside_the_margin_falls_back_to_the_un
   assert.equal((await readStoredTestSession(sessionFile)).refresh_cookies, undefined);
 }
 
+export async function test_logout_revokes_the_session_upstream_with_its_refresh_cookies(): Promise<void> {
+  const { revokeStoredSession } = await import("../src/auth.js");
+  const directory = await temporaryDirectory();
+  const sessionFile = join(directory, "session.json");
+  await seedExpiringSession(sessionFile, "2030-01-01T00:00:00Z");
+  const requests: { url: string; init: RequestInit }[] = [];
+  const options = { ...cacheOptions, baseUrl: "https://school.example.edu", sessionFile, env: {},
+    fetch: (async (url: string, init: RequestInit) => { requests.push({ url, init }); return new Response(null, { status: 200 }); }) as unknown as typeof fetch };
+  assert.equal(await revokeStoredSession(options), true);
+  const [{ url, init }] = requests as [typeof requests[number]];
+  const headers = init.headers as Record<string, string>;
+  assert.equal(url, "https://school.example.edu/api/auth");
+  assert.equal(init.method, "DELETE");
+  assert.equal(init.redirect, "error");
+  assert.deepEqual([headers.Username, headers["Auth-Token"], headers.Cookie], ["alice", "expiring-access", "username=alice; refresh_token=refresh-secret"]);
+  assert.equal(await revokeStoredSession({ ...options, fetch: async () => new Response(null, { status: 401 }) }), false);
+  assert.equal(await revokeStoredSession({ ...options, fetch: async () => { throw new Error("offline"); } }), false);
+}
+
+export async function test_logout_skips_the_upstream_request_without_a_cached_session_or_with_explicit_credentials(): Promise<void> {
+  const { revokeStoredSession } = await import("../src/auth.js");
+  const directory = await temporaryDirectory();
+  const sessionFile = join(directory, "session.json");
+  const options = { ...cacheOptions, baseUrl: "https://school.example.edu", sessionFile,
+    fetch: (async () => { throw new Error("must not call upstream"); }) as unknown as typeof fetch };
+  assert.equal(await revokeStoredSession({ ...options, env: {} }), false);
+  await seedExpiringSession(sessionFile, "2030-01-01T00:00:00Z");
+  assert.equal(await revokeStoredSession({ ...options, env: { ONTRACK_USERNAME: "alice", ONTRACK_TOKEN: "explicit" } }), false);
+  assert.equal(await revokeStoredSession({ ...options, env: {}, encryptionKey: async () => Buffer.alloc(32, 99) }), false);
+}
+
 export async function test_paste_login_accepts_curl_cookie_headers_and_bare_refresh_cookies(): Promise<void> {
   const { parsePastedCookies } = await import("../src/auth.js");
   const root = "https://school.example.edu";

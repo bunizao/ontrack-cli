@@ -809,6 +809,27 @@ export async function authenticateWithPastedCredentials(raw: string, options: Lo
   }
 }
 
+/** Best-effort server-side sign-out. Logout removes the local files whatever this returns. */
+export async function revokeStoredSession(options: ResolveAuthenticatedSessionOptions): Promise<boolean> {
+  if (resolveCredentialSource(options.env, options.config ?? {})) return false;
+  try {
+    const cached = readStoredSession((await readSessionCache(options.sessionFile, options))?.value, options.baseUrl);
+    if (!cached) return false;
+    const cookies = applicableCookies(cached.refresh_cookies ?? [], options.baseUrl, currentTime(options));
+    const timeout = AbortSignal.timeout(5_000);
+    const response = await (options.fetch ?? fetch)(`${options.baseUrl}/api/auth`, {
+      method: "DELETE",
+      headers: {
+        Accept: "application/json", Username: cached.username, "Auth-Token": cached.access_token,
+        ...(cookies.length ? { Cookie: cookieHeader(cookies) } : {}),
+      },
+      redirect: "error",
+      signal: options.signal ? AbortSignal.any([options.signal, timeout]) : timeout,
+    });
+    return response.ok;
+  } catch { return false; }
+}
+
 export async function localAuthStatus(options: ResolveAuthenticatedSessionOptions): Promise<Record<string, unknown>> {
   const explicit = resolveCredentialSource(options.env, options.config ?? {});
   const record = await readSessionCache(options.sessionFile, options);
