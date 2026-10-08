@@ -41,6 +41,8 @@ interface StoredSession {
   readonly provenance: "browser" | "okta";
   readonly refresh_cookies?: readonly BrowserCookie[];
   readonly access_token_invalidated?: boolean;
+  /** When the everyday browser was last probed for a newer renewal cookie. */
+  readonly browser_checked_at?: string;
   readonly user?: UserView;
 }
 
@@ -164,6 +166,7 @@ function readStoredSession(value: unknown, baseUrl: string): StoredSession | und
     provenance: data.provenance,
     ...(cookies.length ? { refresh_cookies: cookies } : {}),
     ...(data.access_token_invalidated === true ? { access_token_invalidated: true } : {}),
+    ...(typeof data.browser_checked_at === "string" && !Number.isNaN(Date.parse(data.browser_checked_at)) ? { browser_checked_at: data.browser_checked_at } : {}),
     ...(typeof data.user === "object" && data.user !== null && !Array.isArray(data.user) ? { user: safeUserView(data.user as Record<string, unknown>, data.username) } : {}),
   };
 }
@@ -199,10 +202,12 @@ async function saveStoredSession(options: BrowserSessionOptions, session: Authen
   catch (error) { if (error instanceof CliError && error.category === "cancellation") throw error; }
   const retained = previous?.username === session.username ? previous.refresh_cookies : undefined;
   const cookies = session.renewalCookies ?? retained;
+  const browserCheckedAt = previous?.username === session.username ? previous.browser_checked_at : undefined;
   const stored: StoredSession = {
     base_url: session.baseUrl, username: session.username, access_token: session.accessToken,
     auth_token_expiry: session.authTokenExpiry, provenance: session.provenance,
     ...(cookies ? { refresh_cookies: cookies } : {}),
+    ...(browserCheckedAt ? { browser_checked_at: browserCheckedAt } : {}),
     ...(session.user ? { user: session.user } : {}),
   };
   const chosen = await writeSessionCache(options.sessionFile, stored, options,
@@ -646,6 +651,42 @@ export async function resolveAuthenticatedSession(
   }
 }
 
+// The renewal cookie is not extended by renewing, only by a full sign-in. When the stored one is close to lapsing,
+// the everyday browser may already hold a newer one from the user's own sign-in.
+const BROWSER_PROBE_WINDOW_MS = 48 * 60 * 60 * 1_000;
+const BROWSER_PROBE_INTERVAL_MS = 6 * 60 * 60 * 1_000;
+
+function browserProbeDue(options: BrowserSessionOptions, stored: StoredSession, now: Date): boolean {
+  const expiry = renewalCookieExpiry(stored);
+  if (!options.browserCookieProvider || !expiry || expiry.valueOf() - now.valueOf() >= BROWSER_PROBE_WINDOW_MS) return false;
+  const age = now.valueOf() - Date.parse(stored.browser_checked_at ?? "");
+  return !(age >= 0 && age < BROWSER_PROBE_INTERVAL_MS);
+}
+
+/** Adopts a browser refresh cookie for the same account that outlives the stored one. Failures are silent. */
+async function adoptNewerBrowserCookie(options: BrowserSessionOptions, stored: StoredSession, now: Date): Promise<AuthenticatedSession | undefined> {
+  const refresh = stored.refresh_cookies?.find((cookie) => cookie.name === "refresh_token");
+  const expiry = renewalCookieExpiry(stored);
+  if (!refresh || !expiry) return undefined;
+  try {
+    for (const candidate of await readBrowserCookies(options)) {
+      const cookies = applicableCookies(candidate.cookies, options.baseUrl, now);
+      const found = cookies.find((cookie) => cookie.name === "refresh_token");
+      const foundExpiry = cookieExpiry(found?.expires);
+      if (!found || found.value === refresh.value || !foundExpiry || foundExpiry.valueOf() <= expiry.valueOf()) continue;
+      try {
+        const session = await exchangeCookies(options.baseUrl, cookies, options.fetch ?? fetch, now, options.exchangeTimeoutMs ?? 30_000, options.signal);
+        if (session.username === stored.username) return await saveStoredSession(options, session);
+      } catch (error) {
+        if (error instanceof CliError && error.category === "cancellation") throw error;
+      }
+    }
+  } catch (error) {
+    if (error instanceof CliError && error.category === "cancellation") throw error;
+  }
+  return undefined;
+}
+
 async function renewSession(options: ResolveAuthenticatedSessionOptions, stored: StoredSession | undefined): Promise<AuthenticatedSession> {
   let cached = stored;
   const now = currentTime(options);
@@ -653,6 +694,14 @@ async function renewSession(options: ResolveAuthenticatedSessionOptions, stored:
     ...options,
     ...(cached ? { expectedUsername: cached.username, expectedAccessToken: cached.access_token } : {}),
   };
+  if (cached && browserProbeDue(renewalOptions, cached, now)) {
+    // Stamp first, so a slow or failing probe is not repeated by every command.
+    const chosen = await writeSessionCache(options.sessionFile, { ...cached, browser_checked_at: now.toISOString() }, options,
+      (value) => cacheMatches(value, options, cached!.access_token));
+    cached = readStoredSession(chosen, options.baseUrl) ?? cached;
+    const adopted = await adoptNewerBrowserCookie(renewalOptions, cached, now);
+    if (adopted) return adopted;
+  }
   if (cached?.refresh_cookies) {
     const cookies = applicableCookies(cached.refresh_cookies, options.baseUrl, now);
     try {
@@ -887,6 +936,7 @@ export async function localAuthStatus(options: ResolveAuthenticatedSessionOption
     browser_profile: profile,
     renewal: explicit ? "explicit_credentials" : cookies.some((cookie) => cookie.name === "refresh_token") ? "refresh_cookie" : profile ? "browser" : "sign_in",
     renewal_expires_at: renewalExpiry?.toISOString() ?? null,
+    browser_checked_at: cached?.browser_checked_at ?? null,
     ...(warnings.length ? { warnings } : {}),
   };
 }

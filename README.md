@@ -78,6 +78,8 @@ The private browser profile is stored under `~/.config/ontrack-cli/browser/`, se
 
 OnTrack issues the renewal cookie only for remembered sign-ins, so tick "Remember me" on the sign-in page. Renewing does not extend that cookie. `auth status --local` and `doctor` report `renewal_expires_at` and warn when it is under 24 hours away. Ordinary commands print one stderr line (never stdout or JSON) when the cookie of a cached session is that close to lapsing; sign in on the OnTrack website or run `auth login` to renew it. Explicit credentials and an unknown expiry never warn.
 
+Renewing never extends that cookie, but signing in to OnTrack in your everyday browser issues a new one. When the stored cookie has under 48 hours left (or has lapsed) and a token needs renewing, the CLI looks in that browser, at most once every 6 hours, and adopts a different, later-expiring cookie for the same account. A failed lookup is silent and renewal carries on with the stored cookie. `auth status --local` shows `browser_checked_at`. Monash sign-in needs MFA, so no unattended job can do this for you: sign in once a week, with `auth login` or just by using OnTrack in your browser.
+
 ### Inspect or renew authentication
 
 ```bash
