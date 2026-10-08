@@ -262,3 +262,19 @@ export async function test_local_status_renewal_and_doctor_do_not_enter_interact
   assert.deepEqual(used, ["local", "renew", "renew", "doctor:false:false", "doctor:true:true"]);
   assert.equal(calls.length, 0);
 }
+
+export async function test_doctor_prints_its_report_and_exits_with_the_auth_code_when_a_check_fails(): Promise<void> {
+  const { app } = fakeApplication();
+  const failing: unknown[] = [
+    { site: { reachable: false }, auth: { cache_present: true } },
+    { site: { reachable: true }, auth: { error: { code: "auth" } } },
+    { site: { reachable: true }, auth: { cache_present: true }, live_session: { authenticated: false } },
+  ];
+  for (const report of failing) {
+    const result = await executeCli(["doctor", "--json"], dependencies(app, { version: "1.0.0", doctor: async () => report }));
+    assert.equal(result.exitCode, 3);
+    assert.deepEqual(JSON.parse(result.stdout), report);
+  }
+  const healthy = { site: { reachable: true }, auth: { cache_present: false }, live_session: { authenticated: true } };
+  assert.equal((await executeCli(["doctor", "--json"], dependencies(app, { version: "1.0.0", doctor: async () => healthy }))).exitCode, 0);
+}

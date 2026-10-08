@@ -118,6 +118,8 @@ interface InvocationResult {
   readonly markdown?: string;
   readonly diagnostic?: string;
   readonly dryRun?: string;
+  /** Overrides the success exit code; the output is still printed. */
+  readonly exitCode?: number;
 }
 
 interface GlobalOptions {
@@ -277,6 +279,12 @@ async function requireConfirmation(
   return undefined;
 }
 
+// A failed check still prints the full report; the exit code is what a script acts on.
+function doctorFailed(report: unknown): boolean {
+  const { site, auth, live_session: live } = (report ?? {}) as Record<string, Record<string, unknown> | undefined>;
+  return site?.reachable === false || Boolean(auth?.error) || live?.authenticated === false;
+}
+
 function fields(options: GlobalOptions): readonly string[] | undefined {
   if (options.fields === undefined) return undefined;
   const values = options.fields.split(",").map((field) => field.trim()).filter(Boolean);
@@ -345,6 +353,7 @@ export async function executeCli(argv: readonly string[], dependencies: Dependen
       }
       setResult({ value: await (await application()).authCheck() });
     });
+    // cli-kit's auth contract names this action "keepalive"; "renew" is the spelling the docs lead with.
     auth.command("keepalive").alias("renew").description("Renew and verify the session once without an interactive sign-in").action(async () => {
       if (!dependencies.authRenew) throw new CliError("config", "Session renewal is unavailable.");
       setResult({ value: await dependencies.authRenew() });
@@ -358,7 +367,8 @@ export async function executeCli(argv: readonly string[], dependencies: Dependen
       .option("--cookies", "Also probe existing browser cookies and report access problems")
       .action(async (options: { live?: boolean; cookies?: boolean }) => {
         if (!dependencies.doctor) throw new CliError("config", "Authentication diagnostics are unavailable.");
-        setResult({ value: await dependencies.doctor(options.live === true, options.cookies === true) });
+        const report = await dependencies.doctor(options.live === true, options.cookies === true);
+        setResult({ value: report, ...(doctorFailed(report) ? { exitCode: 3 } : {}) });
       });
 
     const units = program.command("units").aliases(["courses", "projects"]).description("Enrolled units");
@@ -529,7 +539,7 @@ export async function executeCli(argv: readonly string[], dependencies: Dependen
     }
     if (result?.diagnostic) stderr += result.diagnostic;
     return {
-      exitCode: 0,
+      exitCode: result?.exitCode ?? 0,
       stdout: redact(stdout, sensitiveValues),
       stderr: redact(stderr, sensitiveValues),
       ...(options.output ? { output: options.output } : {}),
