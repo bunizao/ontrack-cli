@@ -74,7 +74,9 @@ ontrack auth login --paste
 
 The CLI encrypts the access token and renewal cookies in `~/.config/ontrack-cli/session.json` with AES-256-GCM and owner-only permissions. Existing plaintext caches migrate when authentication loads them. The key uses macOS Keychain, Windows DPAPI, or Linux Secret Service. Linux systems without Secret Service use a private key file under `~/.config/ontrack-cli/keys/`; that fallback relies on your filesystem permissions for protection.
 
-The private browser profile is stored under `~/.config/ontrack-cli/browser/`, separately for each site. When an access token expires or a read request rejects it, the CLI first uses the encrypted renewal cookie, then tries the private profile in a background browser. Temporary network failures preserve renewal credentials. Automatic renewal must return the same account; an explicit `auth login` can switch accounts. If both the renewal cookie and institution SSO session have expired, run `auth login` again. `auth logout` removes both the session cache and the CLI browser profiles.
+The private browser profile is stored under `~/.config/ontrack-cli/browser/`, separately for each site. When an access token expires or a read request rejects it, the CLI first uses the encrypted renewal cookie, then tries the private profile in a background browser. Temporary network failures preserve renewal credentials. Automatic renewal must return the same account; an explicit `auth login` can switch accounts. If both the renewal cookie and institution SSO session have expired, run `auth login` again. A token with under two minutes left is renewed before use, and parallel commands take turns renewing, so they never fight over the browser profile. A background browser renewal prints one line to stderr and gives up after 15 seconds. `auth logout` ends the session on the OnTrack server when it can (`server_revoked` in the result), then removes the session cache and the CLI browser profiles; a failed server request never blocks the local logout.
+
+OnTrack issues the renewal cookie only for remembered sign-ins, so tick "Remember me" on the sign-in page. Renewing does not extend that cookie. `auth status --local` and `doctor` report `renewal_expires_at` and warn when it is under seven days away; run `auth login` before it lapses.
 
 ### Inspect or renew authentication
 
@@ -85,7 +87,7 @@ ontrack doctor
 ontrack doctor --live --cookies
 ```
 
-Local status makes no network requests. `auth renew` (also `auth keepalive`) renews and verifies once without an interactive sign-in. `doctor` checks cache protection, the renewal path, the installed browser, and site sign-in discovery. `--live` verifies protected endpoints; `--cookies` also probes browser stores and can prompt for OS access. Diagnostics never print tokens or cookie values. Explicit environment or config credentials override the cache; remove an invalid override before using browser sign-in.
+Local status makes no network requests. `auth renew` (also `auth keepalive`) renews and verifies once without an interactive sign-in. `doctor` checks cache protection, the renewal path, the installed browser, and site sign-in discovery; it prints the full report and exits with code 3 when the site is unreachable, the cache cannot be read, or the live check fails. `--live` verifies protected endpoints; `--cookies` also probes browser stores and can prompt for OS access. Diagnostics never print tokens or cookie values. Explicit environment or config credentials override the cache; remove an invalid override before using browser sign-in.
 
 ## Command model
 
