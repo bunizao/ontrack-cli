@@ -974,6 +974,32 @@ export async function test_logout_skips_the_upstream_request_without_a_cached_se
   assert.equal(await revokeStoredSession({ ...options, env: {}, encryptionKey: async () => Buffer.alloc(32, 99) }), false);
 }
 
+export async function test_local_status_reports_the_renewal_cookie_expiry_and_warns_before_it_lapses(): Promise<void> {
+  const { localAuthStatus } = await import("../src/auth.js");
+  const { writeSessionCache } = await import("../src/session-cache.js");
+  const directory = await temporaryDirectory();
+  const now = () => new Date("2029-01-01T00:00:00Z");
+  const status = async (name: string, expires: string | number | undefined) => {
+    const sessionFile = join(directory, `${name}.json`);
+    const [username, refresh] = validCookies() as [BrowserCookie, BrowserCookie];
+    await writeSessionCache(sessionFile, {
+      base_url: "https://school.example.edu", username: "alice", access_token: "access",
+      auth_token_expiry: "2030-01-01T00:00:00Z", provenance: "browser",
+      refresh_cookies: [username, { ...refresh, ...(expires === undefined ? {} : { expires }) }],
+    }, cacheOptions);
+    return localAuthStatus({ ...cacheOptions, baseUrl: "https://school.example.edu", sessionFile, env: {}, now });
+  };
+  const soon = await status("soon", Date.parse("2029-01-04T00:00:00Z") / 1_000);
+  assert.equal(soon.renewal_expires_at, "2029-01-04T00:00:00.000Z");
+  assert.match(String((soon.warnings as string[])[0]), /expires on 2029-01-04.*ontrack auth login/u);
+  const later = await status("later", "2029-03-01T00:00:00Z");
+  assert.equal(later.renewal_expires_at, "2029-03-01T00:00:00.000Z");
+  assert.equal("warnings" in later, false);
+  const unknown = await status("unknown", undefined);
+  assert.equal(unknown.renewal_expires_at, null);
+  assert.equal("warnings" in unknown, false);
+}
+
 export async function test_paste_login_accepts_curl_cookie_headers_and_bare_refresh_cookies(): Promise<void> {
   const { parsePastedCookies } = await import("../src/auth.js");
   const root = "https://school.example.edu";

@@ -809,6 +809,15 @@ export async function authenticateWithPastedCredentials(raw: string, options: Lo
   }
 }
 
+// The refresh cookie's own expiry; unknown for pasted cookies and for session cookies.
+function cookieExpiry(value: string | number | undefined): Date | null {
+  if (value === undefined || value === "" || value === 0) return null;
+  const expiry = typeof value === "number" ? new Date(value * 1_000) : new Date(value);
+  return Number.isNaN(expiry.valueOf()) ? null : expiry;
+}
+
+const RENEWAL_WARNING_MS = 7 * 24 * 60 * 60 * 1_000;
+
 /** Best-effort server-side sign-out. Logout removes the local files whatever this returns. */
 export async function revokeStoredSession(options: ResolveAuthenticatedSessionOptions): Promise<boolean> {
   if (resolveCredentialSource(options.env, options.config ?? {})) return false;
@@ -835,7 +844,11 @@ export async function localAuthStatus(options: ResolveAuthenticatedSessionOption
   const record = await readSessionCache(options.sessionFile, options);
   const cached = readStoredSession(record?.value, options.baseUrl);
   const profile = Boolean(options.browserProfileDir && await access(options.browserProfileDir).then(() => true, () => false));
-  const cookies = cached?.refresh_cookies ? applicableCookies(cached.refresh_cookies, options.baseUrl, currentTime(options)) : [];
+  const now = currentTime(options);
+  const cookies = cached?.refresh_cookies ? applicableCookies(cached.refresh_cookies, options.baseUrl, now) : [];
+  const renewalExpiry = cookieExpiry(cached?.refresh_cookies?.find((cookie) => cookie.name === "refresh_token")?.expires);
+  const warnings = renewalExpiry && renewalExpiry.valueOf() - now.valueOf() < RENEWAL_WARNING_MS
+    ? [`The renewal cookie ${renewalExpiry.valueOf() > now.valueOf() ? "expires" : "expired"} on ${renewalExpiry.toISOString()}. Run \`ontrack auth login\` before it lapses.`] : [];
   return {
     base_url: options.baseUrl,
     credential_source: explicit?.provenance ?? (cached ? "session_cache" : "none"),
@@ -846,5 +859,7 @@ export async function localAuthStatus(options: ResolveAuthenticatedSessionOption
     access_token_invalidated: cached?.access_token_invalidated === true,
     browser_profile: profile,
     renewal: explicit ? "explicit_credentials" : cookies.some((cookie) => cookie.name === "refresh_token") ? "refresh_cookie" : profile ? "browser" : "sign_in",
+    renewal_expires_at: renewalExpiry?.toISOString() ?? null,
+    ...(warnings.length ? { warnings } : {}),
   };
 }
