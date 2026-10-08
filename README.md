@@ -1,3 +1,5 @@
+<p align="center"><a href="https://unicorn.tuuhub.com"><img src=".github/assets/hero.jpg" alt="ontrack: OnTrack and Doubtfire from your terminal, scripts and AI agent, part of unicorn" width="100%"></a></p>
+
 # ontrack
 
 CLI access to OnTrack and Doubtfire for students, teaching staff, scripts, and agents. Runs on Node.js 22.5+ and Bun.
@@ -6,6 +8,8 @@ CLI access to OnTrack and Doubtfire for students, teaching staff, scripts, and a
 [![CI](https://github.com/bunizao/ontrack-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/bunizao/ontrack-cli/actions/workflows/ci.yml)
 [![Node.js 22.5+](https://img.shields.io/badge/Node.js-22.5%2B-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+> The live layer of [unicorn](https://unicorn.tuuhub.com): live tools answer what is there now, unicorn answers what changed. `ontrack` is CLI only; it has no MCP server. Docs: [unicorn.tuuhub.com/docs/ontrack](https://unicorn.tuuhub.com/docs/ontrack).
 
 ## Install
 
@@ -127,6 +131,20 @@ ontrack skills generate
 ```
 
 The tracked [SKILL.md](SKILL.md) comes from `ontrack commands --json`. The package uses the shared [`@bunizao/cli-kit`](https://www.npmjs.com/package/@bunizao/cli-kit) command contract.
+
+## Part of unicorn
+
+unicorn is one project in two layers. The live tools answer what is there now; unicorn answers what changed.
+
+| Project | Layer | What it does | Repo |
+| --- | --- | --- | --- |
+| unicorn | Memory | A Cloudflare Worker on your own account. Reads Moodle, Ed, Canvas, Gmail and feeds every hour, remembers what each said, and tells your AI agent what changed. | [TuuHub/unicorn](https://github.com/TuuHub/unicorn) |
+| moodle-cli | Live | Moodle from the terminal and MCP: units, deadlines, grades, forums, files, submissions. | [bunizao/moodle-cli](https://github.com/bunizao/moodle-cli) |
+| edstem-cli | Live | Ed Discussion from the terminal and MCP: units, threads, lessons, files, posting. | [bunizao/edstem-cli](https://github.com/bunizao/edstem-cli) |
+| **ontrack** (you are here) | **Live** | **OnTrack / Doubtfire from the terminal: units, tasks, chats, submissions. CLI only, no MCP server.** | [bunizao/ontrack-cli](https://github.com/bunizao/ontrack-cli) |
+
+The three live tools share one command contract through [@bunizao/cli-kit](https://github.com/bunizao/cli-kit).
+Docs for everything: [unicorn.tuuhub.com/docs](https://unicorn.tuuhub.com/docs). This project: [unicorn.tuuhub.com/docs/ontrack](https://unicorn.tuuhub.com/docs/ontrack). CLIs overview: [unicorn.tuuhub.com/cli](https://unicorn.tuuhub.com/cli).
 
 ## License
 
