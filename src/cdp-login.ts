@@ -66,7 +66,7 @@ export interface CdpLoginResult {
 }
 
 export class CdpError extends Error {
-  constructor(message: string, readonly hint?: string) {
+  constructor(message: string, readonly hint?: string, readonly timedOut = false) {
     super(message);
     this.name = "CdpError";
   }
@@ -231,6 +231,7 @@ export async function loginWithCdp(options: CdpLoginOptions): Promise<CdpLoginRe
     throw new CdpError(
       headless ? "Timed out renewing the session in the background browser." : "Timed out waiting for sign-in.",
       headless ? "Run `ontrack auth login` to sign in again." : "Complete the sign-in in the browser window, then retry.",
+      true,
     );
   } finally {
     options.signal?.removeEventListener("abort", onAbort);

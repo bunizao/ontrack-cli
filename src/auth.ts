@@ -465,6 +465,7 @@ async function browserSession(options: LoginAuthenticatedSessionOptions, headles
   let session: AuthenticatedSession | undefined;
   let lastCookies = "";
   let lastChecked = 0;
+  let sawRefreshCookie = false;
   try {
     await runCdp({
       url: loginUrl,
@@ -478,6 +479,7 @@ async function browserSession(options: LoginAuthenticatedSessionOptions, headles
         const cookies = applicableCookies(records, options.baseUrl, now)
           .filter((cookie) => cookie.name === "username" || cookie.name === "refresh_token");
         if (!cookies.some((cookie) => cookie.name === "refresh_token")) return false;
+        sawRefreshCookie = true;
         const fingerprint = cookieHeader(cookies);
         // Retry a rejected cookie after a short pause; SSO can finish without changing it.
         if (fingerprint === lastCookies && now.valueOf() - lastChecked < 5_000) return false;
@@ -497,7 +499,12 @@ async function browserSession(options: LoginAuthenticatedSessionOptions, headles
     });
   } catch (error) {
     if (options.signal?.aborted) throw new CliError("cancellation", "Authentication cancelled.");
-    if (error instanceof CdpError) throw new CliError("auth", error.message, undefined, error.hint);
+    if (error instanceof CdpError) {
+      // OnTrack only issues the refresh cookie for remembered sign-ins; an interactive timeout without one usually means it was unticked.
+      const remember = error.timedOut && !headless && !sawRefreshCookie
+        ? ` OnTrack only issues the renewal cookie when "Remember me" is ticked on its sign-in page; tick it and sign in again.` : "";
+      throw new CliError("auth", error.message, undefined, error.hint ? `${error.hint}${remember}` : error.hint);
+    }
     throw error;
   }
   if (!session) throw authError("The browser did not return an authenticated OnTrack session.");

@@ -676,6 +676,24 @@ export async function test_cli_browser_login_validates_cookies_before_saving(): 
   assert.equal((await readStoredTestSession(sessionFile)).access_token, "test-access");
 }
 
+export async function test_interactive_browser_timeout_without_a_refresh_cookie_suggests_remember_me(): Promise<void> {
+  const { CdpError } = await import("../src/cdp-login.js");
+  const directory = await temporaryDirectory();
+  const login = (seeCookie: boolean) => loginAuthenticatedSessionWithRuntime({
+    ...cacheOptions, baseUrl: "https://school.example.edu", sessionFile: join(directory, "session.json"),
+    cdpLogin: async (options) => {
+      if (seeCookie) await options.isDone([{ name: "refresh_token", value: "anonymous", domain: "school.example.edu" }]);
+      throw new CdpError("Timed out waiting for sign-in.", "Complete the sign-in in the browser window, then retry.", true);
+    },
+    fetch: async (input) => String(input).endsWith("/method")
+      ? Response.json({ method: "saml", redirect_to: "https://identity.example.edu/saml" })
+      : Response.json(null),
+  });
+  await assert.rejects(login(false), (error) => error instanceof CliError && /Remember me/u.test(error.hint ?? "")
+    && /Complete the sign-in/u.test(error.hint ?? ""));
+  await assert.rejects(login(true), (error) => error instanceof CliError && !/Remember me/u.test(error.hint ?? ""));
+}
+
 export async function test_stalled_cookie_store_does_not_block_manual_login(): Promise<void> {
   const directory = await temporaryDirectory();
   const session = await loginAuthenticatedSession({
