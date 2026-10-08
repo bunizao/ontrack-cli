@@ -603,6 +603,14 @@ export const nodeLoopbackListener: LoopbackLoginListener = ({ state, timeoutMs, 
 export async function resolveAuthenticatedSession(
   options: ResolveAuthenticatedSessionOptions,
 ): Promise<AuthenticatedSession> {
+  const session = await resolveSession(options);
+  // Checked on whatever is returned: with ten-minute access tokens most commands renew before they run.
+  const expiry = cookieExpiry(session.renewalCookies?.find((cookie) => cookie.name === "refresh_token")?.expires);
+  if (expiry && expiry.valueOf() - currentTime(options).valueOf() < RENEWAL_WARNING_MS) options.onRenewalExpiring?.(expiry);
+  return session;
+}
+
+async function resolveSession(options: ResolveAuthenticatedSessionOptions): Promise<AuthenticatedSession> {
   const config = options.config ?? {};
   const explicit = resolveCredentialSource(options.env, config);
   if (explicit) {
@@ -624,11 +632,7 @@ export async function resolveAuthenticatedSession(
       (value) => cacheMatches(value, options, options.rejectedAccessToken!));
     cached = readStoredSession(chosen, options.baseUrl);
   }
-  if (!options.skipCache && cached && !cached.access_token_invalidated && isFresh(cached.auth_token_expiry, now)) {
-    const expiry = renewalCookieExpiry(cached);
-    if (expiry && expiry.valueOf() - now.valueOf() < RENEWAL_WARNING_MS) options.onRenewalExpiring?.(expiry);
-    return cachedAuth(cached);
-  }
+  if (!options.skipCache && cached && !cached.access_token_invalidated && isFresh(cached.auth_token_expiry, now)) return cachedAuth(cached);
   // Another command may already have recovered the rejected token.
   if (options.rejectedAccessToken && cached && cached.access_token !== options.rejectedAccessToken
     && !cached.access_token_invalidated && isFresh(cached.auth_token_expiry, now)) return cachedAuth(cached);

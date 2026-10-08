@@ -1051,6 +1051,17 @@ export async function test_cached_session_reports_a_renewal_cookie_that_lapses_w
   assert.equal(reported.length, 0);
 }
 
+export async function test_a_renewed_session_still_reports_a_renewal_cookie_that_lapses_within_a_day(): Promise<void> {
+  const directory = await temporaryDirectory();
+  const sessionFile = join(directory, "session.json");
+  await seedProbeSession(sessionFile, "2029-01-01T05:00:00Z", { browser_checked_at: "2029-01-01T00:00:00Z" });
+  const { options } = probeEnvironment([]);
+  const reported: Date[] = [];
+  const session = await resolveAuthenticatedSession({ ...options, sessionFile, onRenewalExpiring: (expiresAt) => reported.push(expiresAt) });
+  assert.equal(session.accessToken, "stored-access");
+  assert.deepEqual(reported, [new Date("2029-01-01T05:00:00Z")]);
+}
+
 export function test_renewal_expiry_notice_names_the_time_left_or_that_it_has_lapsed(): void {
   const now = new Date("2029-01-01T00:00:00Z");
   const notice = (iso: string) => renewalExpiryNotice(new Date(iso), now);
