@@ -846,6 +846,48 @@ export async function test_a_failed_recovery_does_not_reuse_a_rejected_unexpired
   }), (error) => error instanceof CliError && error.category === "upstream_api");
 }
 
+async function seedExpiringSession(sessionFile: string, expiry: string): Promise<void> {
+  const { writeSessionCache } = await import("../src/session-cache.js");
+  await writeSessionCache(sessionFile, {
+    base_url: "https://school.example.edu", username: "alice", access_token: "expiring-access",
+    auth_token_expiry: expiry, provenance: "browser", refresh_cookies: validCookies(),
+  }, cacheOptions);
+}
+
+export async function test_token_inside_the_expiry_margin_is_renewed_before_use(): Promise<void> {
+  const directory = await temporaryDirectory();
+  const sessionFile = join(directory, "session.json");
+  const now = () => new Date("2029-01-01T00:00:00Z");
+  await seedExpiringSession(sessionFile, "2029-01-01T00:01:00Z");
+  const renewed = await resolveAuthenticatedSession({
+    baseUrl: "https://school.example.edu", sessionFile, env: {}, now,
+    fetch: exchangeResponse({ auth_token: "renewed-access", auth_token_expiry: "2029-01-01T01:00:00Z", user: { username: "alice" } }),
+  });
+  assert.equal(renewed.accessToken, "renewed-access");
+  await seedExpiringSession(sessionFile, "2029-01-01T00:10:00Z");
+  const reused = await resolveAuthenticatedSession({
+    baseUrl: "https://school.example.edu", sessionFile, env: {}, now,
+    fetch: async () => { throw new Error("a token outside the margin must not be renewed"); },
+  });
+  assert.equal(reused.accessToken, "expiring-access");
+}
+
+export async function test_failed_renewal_inside_the_margin_falls_back_to_the_unexpired_token(): Promise<void> {
+  const directory = await temporaryDirectory();
+  const sessionFile = join(directory, "session.json");
+  const options = { baseUrl: "https://school.example.edu", sessionFile, env: {}, now: () => new Date("2029-01-01T00:00:00Z"),
+    fetch: async () => new Response(null, { status: 500 }) };
+  await seedExpiringSession(sessionFile, "2029-01-01T00:01:00Z");
+  assert.equal((await resolveAuthenticatedSession(options)).accessToken, "expiring-access");
+  await assert.rejects(resolveAuthenticatedSession({ ...options, now: () => new Date("2029-01-01T00:02:00Z") }), CliError);
+  await assert.rejects(resolveAuthenticatedSession({ ...options, skipCache: true }), CliError);
+  // A refused cookie drops the cookie but leaves a token with time left usable.
+  await seedExpiringSession(sessionFile, "2029-01-01T00:01:00Z");
+  const refused = await resolveAuthenticatedSession({ ...options, fetch: async () => new Response(null, { status: 401 }) });
+  assert.equal(refused.accessToken, "expiring-access");
+  assert.equal((await readStoredTestSession(sessionFile)).refresh_cookies, undefined);
+}
+
 export async function test_paste_login_accepts_curl_cookie_headers_and_bare_refresh_cookies(): Promise<void> {
   const { parsePastedCookies } = await import("../src/auth.js");
   const root = "https://school.example.edu";

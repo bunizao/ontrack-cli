@@ -119,9 +119,16 @@ function currentTime(options: BrowserSessionOptions): Date {
   return options.now?.() ?? new Date();
 }
 
+// A cached token this close to expiry is renewed first, so a command's read phase and its write cannot straddle it.
+const RENEW_BEFORE_EXPIRY_MS = 120_000;
+
 function isFuture(value: string, now: Date): boolean {
   const expiry = new Date(value);
   return !Number.isNaN(expiry.valueOf()) && expiry.valueOf() > now.valueOf();
+}
+
+function isFresh(value: string, now: Date): boolean {
+  return isFuture(value, new Date(now.valueOf() + RENEW_BEFORE_EXPIRY_MS));
 }
 
 function readStoredSession(value: unknown, baseUrl: string): StoredSession | undefined {
@@ -601,10 +608,22 @@ export async function resolveAuthenticatedSession(
       (value) => cacheMatches(value, options, options.rejectedAccessToken!));
     cached = readStoredSession(chosen, options.baseUrl);
   }
-  if (!options.skipCache && cached && !cached.access_token_invalidated && isFuture(cached.auth_token_expiry, now)) return cachedAuth(cached);
+  if (!options.skipCache && cached && !cached.access_token_invalidated && isFresh(cached.auth_token_expiry, now)) return cachedAuth(cached);
   // Another command may already have recovered the rejected token.
   if (options.rejectedAccessToken && cached && cached.access_token !== options.rejectedAccessToken
-    && !cached.access_token_invalidated && isFuture(cached.auth_token_expiry, now)) return cachedAuth(cached);
+    && !cached.access_token_invalidated && isFresh(cached.auth_token_expiry, now)) return cachedAuth(cached);
+  try { return await renewSession(options, cached); }
+  catch (error) {
+    // Renewal inside the margin is opportunistic: a token that still has time left keeps working.
+    if (!options.skipCache && cached && !cached.access_token_invalidated && isFuture(cached.auth_token_expiry, currentTime(options))
+      && !(error instanceof CliError && error.category === "cancellation")) return cachedAuth(cached);
+    throw error;
+  }
+}
+
+async function renewSession(options: ResolveAuthenticatedSessionOptions, stored: StoredSession | undefined): Promise<AuthenticatedSession> {
+  let cached = stored;
+  const now = currentTime(options);
   const renewalOptions: BrowserSessionOptions = {
     ...options,
     ...(cached ? { expectedUsername: cached.username, expectedAccessToken: cached.access_token } : {}),
@@ -619,12 +638,14 @@ export async function resolveAuthenticatedSession(
     } catch (error) {
       if (!(error instanceof RejectedBrowserCookieCandidate)) throw error;
       // Only an upstream refusal discards the durable cookie. Network failures keep it.
+      // A token with time left stays usable; an expired or rejected one stays invalidated.
       const { refresh_cookies: _refused, ...remaining } = cached;
-      const chosen = await writeSessionCache(options.sessionFile, { ...remaining, access_token_invalidated: true }, options,
+      const stillValid = !cached.access_token_invalidated && isFuture(cached.auth_token_expiry, now);
+      const chosen = await writeSessionCache(options.sessionFile, { ...remaining, ...(stillValid ? {} : { access_token_invalidated: true }) }, options,
         (value) => cacheMatches(value, options, cached!.access_token));
       cached = readStoredSession(chosen, options.baseUrl);
       if (cached && cached.access_token !== renewalOptions.expectedAccessToken && !cached.access_token_invalidated
-        && isFuture(cached.auth_token_expiry, currentTime(options))) return cachedAuth(cached);
+        && isFresh(cached.auth_token_expiry, currentTime(options))) return cachedAuth(cached);
     }
   }
   if (options.browserProfileDir && await access(options.browserProfileDir).then(() => true, () => false)) {
