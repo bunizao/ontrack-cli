@@ -4,7 +4,9 @@
 
 **Give your AI agent access to OnTrack.**
 
-Let it check task status, read task sheets, download unit resources, follow up in task chats, and submit work when you ask. Built for students, teaching staff, scripts and agents on OnTrack and Doubtfire. It is a CLI only for now: there is no MCP server, so web AI cannot connect to it directly.
+Check task status, read task sheets, download resources, follow up in task chats, and submit work. Works with OnTrack and Doubtfire, for students and teaching staff.
+
+It is a CLI only for now. There is no MCP server, so web AI cannot connect to it directly.
 
 [![npm version](https://img.shields.io/npm/v/ontrack?logo=npm)](https://www.npmjs.com/package/ontrack)
 [![CI](https://github.com/bunizao/ontrack-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/bunizao/ontrack-cli/actions/workflows/ci.yml)
@@ -12,11 +14,19 @@ Let it check task status, read task sheets, download unit resources, follow up i
 [![Bun](https://img.shields.io/badge/Bun-supported-fbf0df?logo=bun&logoColor=black)](https://bun.sh/)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> 🦄 **Part of [unicorn](https://unicorn.tuuhub.com).** Live tools answer what is there now; unicorn answers what changed.
+> 🦄 Part of [unicorn](https://unicorn.tuuhub.com). Live tools answer what is there now; unicorn answers what changed.
 >
-> 📖 **[Read the docs → unicorn.tuuhub.com/docs/ontrack](https://unicorn.tuuhub.com/docs/ontrack)**
+> 📖 **[Read the docs](https://unicorn.tuuhub.com/docs/ontrack)**
 
-## Quick start
+## Set up
+
+Ask your agent (Claude Code, Codex, or anything with a terminal):
+
+```text
+Read https://unicorn.tuuhub.com/docs/ontrack/agent-setup.md and set up ontrack for me.
+```
+
+Or by hand:
 
 ```bash
 npm install -g ontrack
@@ -25,149 +35,51 @@ ontrack auth login
 ontrack units
 ```
 
-## Quick links
-
-- [Install and sign in](#install-and-sign-in)
-- [Study Boooooooooost](#study-boooooooooost)
-- [Developer and agent reference](#for-developers-and-agents)
-
-## Install and sign in
-
-### Install
-
-```bash
-npm install -g ontrack
-bun add -g ontrack
-
-# No global install
-bunx --bun ontrack --version
-```
-
-Point it at your institution's OnTrack site with `ONTRACK_BASE_URL`, or save it in `~/.config/ontrack-cli/config.yaml`:
-
-```yaml
-base_url: https://ontrack.example.edu
-```
-
-### Sign in
-
-```bash
-ontrack auth login
-ontrack auth status
-```
-
-`auth login` reuses an active Firefox or Chrome session when it can. Otherwise it opens your SAML sign-in page and prints a one-time snippet: sign in, then paste the snippet into the OnTrack tab's DevTools console. The session is saved to `~/.config/ontrack-cli/session.json`, and this fallback needs no browser file permissions.
+Set `ONTRACK_BASE_URL` to your institution's OnTrack site.
 
 ## Study Boooooooooost
 
-Ask your agent in plain language or run the matching command:
+Ask in plain language, or run the command yourself:
 
-| Student request | CLI command |
+| Ask your agent | Command |
 | --- | --- |
 | “What are my units?” | `ontrack units` |
 | “Where am I with the tasks in UNIT?” | `ontrack tasks UNIT` |
 | “Read me the task sheet for TASK.” | `ontrack tasks read UNIT TASK` |
-| “Download everything for UNIT.” | `ontrack units get UNIT --dest unit-resources.zip` |
-| “Mark TASK as working on it.” | `ontrack tasks set UNIT TASK working_on_it` |
+| “Any new tutor feedback?” | `ontrack chats UNIT` |
+| “Download everything for UNIT.” | `ontrack units get UNIT --dest unit.zip` |
+| “Submit my report for TASK.” | `ontrack tasks submit UNIT TASK --file report.pdf` |
 
-`UNIT` is a project ID, or the unit's code or name exactly as OnTrack shows it; a reference matching several units lists their project IDs. `TASK` is the abbreviation shown by `ontrack tasks UNIT`, or a task definition ID.
+`UNIT` is the unit's code or name as OnTrack shows it. `TASK` is the task abbreviation. Writes always show a plan and ask first.
 
-Commands follow `ontrack <noun> [verb] [args] [flags]`. `courses` and `projects` are aliases for `units`, and the verb can be left out when the arguments identify one command.
+## Learn more
 
-```bash
-ontrack units
-ontrack tasks UNIT TASK
-ontrack chats UNIT
-ontrack roles
-```
+- [Install](https://unicorn.tuuhub.com/docs/ontrack/install) and [sign in](https://unicorn.tuuhub.com/docs/ontrack/sign-in)
+- [Units and tasks](https://unicorn.tuuhub.com/docs/ontrack/units-and-tasks)
+- [Task workflow](https://unicorn.tuuhub.com/docs/ontrack/task-workflow)
+- [Chats](https://unicorn.tuuhub.com/docs/ontrack/chats)
+- [Downloads](https://unicorn.tuuhub.com/docs/ontrack/downloads)
+- [Teaching roles](https://unicorn.tuuhub.com/docs/ontrack/roles)
+- [Configuration](https://unicorn.tuuhub.com/docs/ontrack/configuration)
+- [Troubleshooting](https://unicorn.tuuhub.com/docs/ontrack/troubleshooting)
+- [Command reference](https://unicorn.tuuhub.com/docs/ontrack/reference)
 
-### Download files
-
-```bash
-ontrack units get UNIT --dest unit-resources.zip
-ontrack tasks get UNIT TASK --dest task-sheet.pdf
-ontrack tasks get UNIT TASK --resources
-```
-
-Downloads never replace an existing file unless you pass `--force`. Use `--dest` for downloads; global `-o/--output` writes command output.
-
-### Write to OnTrack
-
-Every write prints a plan and asks `y/N`. Scripts pass `--yes`; `--dry-run` shows the target without sending anything. In a terminal, a missing unit or task is asked for with a picker.
-
-```bash
-ontrack tasks set UNIT TASK working_on_it --dry-run
-ontrack chats send UNIT TASK --message "Please review this." --yes
-ontrack tasks submit UNIT TASK --file report.pdf --yes
-```
-
-`chats read` also needs `--yes`: OnTrack's history endpoint marks non-discussion comments as read when it is fetched.
-
-```bash
-ontrack chats read UNIT TASK --yes
-```
-
-## For developers and agents
-
-### Command and output contract
-
-```bash
-ontrack commands --json
-```
-
-prints the full command tree, including aliases, positionals, options, enum values and which commands write.
-
-- Output is a table in a terminal and JSON in a pipe; force one with `--json`, `--yaml` or `--table`.
-- `--fields a,b` selects top-level fields; `--output FILE` writes to a file.
-- In a terminal, a missing unit or task asks with a picker; pipes, `--json` and agent shells get a usage error instead.
-
-| Exit code | Meaning |
-| --- | --- |
-| 0 | Success |
-| 1 | Configuration or network error |
-| 2 | Usage error |
-| 3 | Authentication error |
-| 4 | Unit or task not found |
-| 5 | OnTrack rejected the request |
-| 130 | Cancelled |
-
-### Agent skill
-
-```bash
-npx skills add https://github.com/bunizao/ontrack-cli
-```
-
-[`SKILL.md`](SKILL.md) is generated from `ontrack commands --json` with `ontrack skills generate`.
-
-### Configuration
-
-| Variable | Purpose |
-| --- | --- |
-| `ONTRACK_BASE_URL` | OnTrack site root. |
-| `ONTRACK_USERNAME` | Your username, when you supply a token. |
-| `ONTRACK_TOKEN` | An access token for automation. |
-| `ONTRACK_CONFIG` | Use another config file. |
-
-Set `ONTRACK_USERNAME` and `ONTRACK_TOKEN` together for automation; `ONTRACK_AUTH_TOKEN` still works for older setups, and the config file accepts `username` and `auth_token`. Keep session files, cookies, usernames and tokens out of logs, issues, fixtures and agent prompts.
-
-### Build from source
+## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## 🦄 Part of unicorn
 
-unicorn is one project in two layers. The live tools answer what is there now; unicorn answers what changed.
+Live tools answer what is there now; unicorn answers what changed.
 
 | Project | Layer | What it does |
 | --- | --- | --- |
-| [🦄 unicorn](https://github.com/TuuHub/unicorn) | Memory | A Cloudflare Worker on your own account. Reads Moodle, Ed, Canvas, Gmail and feeds every hour, remembers what each said, and tells your AI agent what changed. Remote MCP. |
-| [moodle-cli](https://github.com/bunizao/moodle-cli) | Live | Moodle: units, deadlines, grades, forums, files, submissions. CLI, local and remote MCP. |
-| [edstem-cli](https://github.com/bunizao/edstem-cli) | Live | Ed Discussion: units, threads, lessons, files, posting. CLI, local and remote MCP. |
-| **[ontrack](https://github.com/bunizao/ontrack-cli)** (you are here) | **Live** | **OnTrack / Doubtfire: units, tasks, chats, submissions. CLI only.** |
+| [🦄 unicorn](https://github.com/TuuHub/unicorn) | Memory | Remembers your campus sources and tells your agent what changed. Remote MCP. |
+| [moodle-cli](https://github.com/bunizao/moodle-cli) | Live | Moodle. CLI, local and remote MCP. |
+| [edstem-cli](https://github.com/bunizao/edstem-cli) | Live | Ed Discussion. CLI, local and remote MCP. |
+| **[ontrack](https://github.com/bunizao/ontrack-cli)** (you are here) | **Live** | **OnTrack and Doubtfire. CLI only.** |
 
-The three CLIs share one command contract through [@bunizao/cli-kit](https://github.com/bunizao/cli-kit).
-
-📖 **Docs:** [this project](https://unicorn.tuuhub.com/docs/ontrack) · [all projects](https://unicorn.tuuhub.com/docs) · [CLIs overview](https://unicorn.tuuhub.com/cli) · [MCP clients](https://unicorn.tuuhub.com/docs/mcp)
+📖 [All docs](https://unicorn.tuuhub.com/docs) · [CLIs overview](https://unicorn.tuuhub.com/cli) · [Connect an MCP client](https://unicorn.tuuhub.com/docs/mcp)
 
 ## License
 
