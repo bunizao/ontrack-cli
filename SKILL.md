@@ -1,68 +1,82 @@
 ---
 name: ontrack-cli
-description: Work with OnTrack tasks and chats from the command line.
+description: Read OnTrack and Doubtfire units, tasks, task sheets and tutor chats from the terminal; set task status, submit files and message tutors when asked.
 ---
 
 # OnTrack CLI
 
 Use `ontrack` to inspect and update OnTrack from a terminal. Start from what the user said, not from ids.
 
+`UNIT` is a project ID, or the unit's code or name exactly as OnTrack shows it; `ontrack courses` is the vocabulary for this site. `TASK` is the task abbreviation shown by `ontrack tasks UNIT`, or a task definition ID. Never assume what a code or abbreviation looks like; if a reference matches several units the CLI lists their project IDs, so pick one rather than guess.
+
 ## What the user says, and what to run
 
-`UNIT` is a project ID, or the unit's code or name exactly as OnTrack shows it; `ontrack units` is the vocabulary for this site. `TASK` is the task abbreviation shown by `ontrack tasks UNIT`, or a task definition ID. Never assume what a code or abbreviation looks like; if a reference matches several units the CLI lists their project IDs, so pick one rather than guess.
-
-| The user says | Run | Notes |
+| The user says | Run | Then |
 | --- | --- | --- |
-| which units am I in / how are units named here | `ontrack units` | `--include-inactive` for past units |
-| what's in UNIT / my target grade / overall progress | `ontrack units show UNIT` |  |
+| which units am I in / how are units named here | `ontrack courses` | `--include-inactive` for past units |
+| what's in UNIT / my target grade / overall progress | `ontrack courses show UNIT` |  |
 | which tasks / what's due / what needs work | `ontrack tasks UNIT` | `--status <status...>` to narrow |
-| what does task X say / the task sheet | `ontrack tasks read UNIT TASK` | Markdown; `tasks show` for status only |
-| download the task sheet / task resources | `ontrack tasks get UNIT TASK [--resources] --dest PATH` | `ontrack units get UNIT` for the whole unit |
-| any tutor feedback / unread messages | `ontrack chats UNIT` | unread counts per task |
-| read the tutor's comments on a task | `ontrack chats read UNIT TASK --yes` | marks them read upstream; tell the user first |
+| what does task X say / the task sheet | `ontrack tasks read UNIT TASK` | `tasks show` for status only |
+| download the task sheet / task resources | `ontrack tasks get UNIT TASK [--resources] --dest PATH` | `ontrack courses get UNIT` for the whole unit |
+| any tutor feedback / unread messages | `ontrack chats UNIT` |  |
+| read the tutor's comments on a task | `ontrack chats read UNIT TASK --yes` | tell the user before running it |
 | mark a task ready / working on it / need help (only when asked) | `ontrack tasks set UNIT TASK STATE --dry-run` | then repeat with `--yes` |
 | submit files for a task (only when asked) | `ontrack tasks submit UNIT TASK --file F --dry-run` | then repeat with `--yes` |
 | message the tutor on a task (only when asked) | `ontrack chats send UNIT TASK --message "..." --dry-run` | then repeat with `--yes` |
 | am I signed in / is it working | `ontrack auth status` | `ontrack auth login` to sign in |
 | my teaching roles | `ontrack roles` | `--all` includes inactive roles |
 
-## Contract
+## Rules
 
-- `units`, `courses`, and `projects` are interchangeable.
-- `ontrack commands --json` is the source of truth for this tool's command tree; the published `@bunizao/cli-kit` npm package (`^0.1.0`) defines the shared CLI contract.
-- Piped output defaults to JSON; terminal output defaults to a table.
-- Mutating commands require explicit user intent and an interactive y/N confirmation or `--yes`.
-- `chats read` is an upstream exception: it marks comments read and always requires `--yes`.
-- Use `--dry-run` before a mutation when the intended target is uncertain.
-- Never print or copy session tokens, browser cookies, or authentication files.
+- Run the narrowest command or tool that answers the request; one call per intent.
+- Piped output is JSON and a terminal gets a table. `--fields a,b` keeps only the listed top-level fields.
+- `read` prints Markdown and never changes anything upstream.
+- Run a mutating command only when the user asked for it. It needs a confirmation or `--yes`; `--dry-run` prints the plan first.
+- Never print, log or store tokens, cookies or session files.
+- `courses`, `units` and `projects` are interchangeable.
+- `chats read` is the exception to the `read` rule: it marks the comments read upstream and always requires `--yes`.
+- Sign in with `ontrack auth login`; `ontrack auth status` checks the saved session and `ontrack auth logout` removes it.
+- `ontrack commands --json` is the source of truth for the command tree.
+
+## Setup
+
+```bash
+npm install -g ontrack
+export ONTRACK_BASE_URL="https://ontrack.example.edu"  # your institution's OnTrack site
+ontrack auth login
+```
 
 ## Commands
 
-- `ontrack user` — Show the signed-in user
-- `ontrack auth` — Manage authentication
-- `ontrack auth login` — Sign in through OnTrack
-- `ontrack auth status` — Validate current credentials
-- `ontrack auth logout` — Remove the cached session
-- `ontrack units` (aliases: courses, projects) — Enrolled units
-- `ontrack units list` — List units
-- `ontrack units show <unit>` — Show one unit
-- `ontrack units get <unit>` — Download unit resources
-- `ontrack tasks` — Tasks in a unit: list, read, submit, set state
-- `ontrack tasks list <unit>` — List tasks
-- `ontrack tasks show <unit> <task>` — Show one task
-- `ontrack tasks read <unit> <task>` — Print a task sheet as Markdown
-- `ontrack tasks get <unit> <task>` — Download a task sheet or resources
-- `ontrack tasks set <unit> <task> <state>` — Change task workflow state [mutating; requires confirmation or --yes]
-- `ontrack tasks submit <unit> <task>` — Submit task files [mutating; requires confirmation or --yes]
-- `ontrack chats` — Read and send task chat messages
-- `ontrack chats list <unit>` — List unread chat counts
-- `ontrack chats read <unit> <task>` — Read task chat history and mark comments read [mutating; requires --yes]
-- `ontrack chats mark-read <unit> <task>` — Mark task chat comments read [mutating; requires confirmation or --yes]
-- `ontrack chats send <unit> <task>` — Send a task chat message [mutating; requires confirmation or --yes]
-- `ontrack roles` — Teaching roles you hold
-- `ontrack roles list` — List teaching roles
-- `ontrack commands` — Describe the complete command tree
-- `ontrack skills` — Generate the agent skill
-- `ontrack skills generate` — Generate SKILL.md from the command tree
+| Command | Description | Arguments | Options | Mutating |
+| --- | --- | --- | --- | --- |
+| `ontrack user` | Show the signed-in user |  |  | no |
+| `ontrack auth` | Manage authentication |  |  | no |
+| `ontrack auth login` | Sign in through OnTrack |  |  | no |
+| `ontrack auth status` | Validate current credentials |  |  | no |
+| `ontrack auth logout` | Remove the cached session |  |  | no |
+| `ontrack courses` | Enrolled units |  |  | no |
+| `ontrack courses list` | List units |  | --include-inactive | no |
+| `ontrack courses show` | Show one unit | <unit> |  | no |
+| `ontrack courses get` | Download unit resources | <unit> | --dest <path><br>--force | no |
+| `ontrack tasks` | Tasks in a unit: list, read, submit, set state |  |  | no |
+| `ontrack tasks list` | List tasks | <unit> | --status <status...> | no |
+| `ontrack tasks show` | Show one task | <unit> <task> |  | no |
+| `ontrack tasks read` | Print a task sheet as Markdown | <unit> <task> |  | no |
+| `ontrack tasks get` | Download a task sheet or resources | <unit> <task> | --resources<br>--dest <path><br>--force | no |
+| `ontrack tasks set` | Change task workflow state | <unit> <task> <state> |  | yes |
+| `ontrack tasks submit` | Submit task files | <unit> <task> | --file <path...><br>--type <type><br>--comment <text><br>--accept-tii-eula | yes |
+| `ontrack chats` | Read and send task chat messages |  |  | no |
+| `ontrack chats list` | List unread chat counts | <unit> |  | no |
+| `ontrack chats read` | Read task chat history and mark comments read | <unit> <task> |  | yes |
+| `ontrack chats mark-read` | Mark task chat comments read | <unit> <task> |  | yes |
+| `ontrack chats send` | Send a task chat message | <unit> <task> | --message <text> | yes |
+| `ontrack roles` | Teaching roles you hold |  |  | no |
+| `ontrack roles list` | List teaching roles |  | --all | no |
+| `ontrack commands` | Describe the complete command tree |  |  | no |
+| `ontrack skills` | Generate the agent skill |  |  | no |
+| `ontrack skills generate` | Write SKILL.md and the plugin files into the current directory |  |  | no |
 
-Run `ontrack commands --json` for options, enum values, aliases, and mutation metadata.
+## Errors
+
+Errors are printed once on stderr. Exit codes: 0 success, 2 usage, 3 auth, 1 config, 4 not_found, 5 upstream, 1 network, 130 cancelled, 1 unexpected.

@@ -1,98 +1,118 @@
-interface DescribedCommand {
-  readonly name: string;
-  readonly aliases?: readonly string[];
-  readonly description: string;
-  readonly positionals: readonly { readonly name: string; readonly required: boolean; readonly variadic: boolean }[];
-  readonly options: readonly { readonly flags: string }[];
-  readonly mutating: boolean;
-  readonly commands: readonly DescribedCommand[];
-}
-
-interface DescribedProgram {
-  readonly name: string;
-  readonly description: string;
-  readonly commands: readonly DescribedCommand[];
-}
+import { agentFiles, type Intent, type ProgramDescription } from "@bunizao/cli-kit";
 
 // What a person says, mapped to the one command that answers it.
 // UNIT and TASK are placeholders; the site's own lists are the vocabulary.
-const INTENTS: readonly (readonly [string, string, string])[] = [
-  ["which units am I in / how are units named here", "`ontrack units`", "`--include-inactive` for past units"],
-  ["what's in UNIT / my target grade / overall progress", "`ontrack units show UNIT`", ""],
-  ["which tasks / what's due / what needs work", "`ontrack tasks UNIT`", "`--status <status...>` to narrow"],
-  ["what does task X say / the task sheet", "`ontrack tasks read UNIT TASK`", "Markdown; `tasks show` for status only"],
-  ["download the task sheet / task resources", "`ontrack tasks get UNIT TASK [--resources] --dest PATH`", "`ontrack units get UNIT` for the whole unit"],
-  ["any tutor feedback / unread messages", "`ontrack chats UNIT`", "unread counts per task"],
-  ["read the tutor's comments on a task", "`ontrack chats read UNIT TASK --yes`", "marks them read upstream; tell the user first"],
-  ["mark a task ready / working on it / need help (only when asked)", "`ontrack tasks set UNIT TASK STATE --dry-run`", "then repeat with `--yes`"],
-  ["submit files for a task (only when asked)", "`ontrack tasks submit UNIT TASK --file F --dry-run`", "then repeat with `--yes`"],
-  ["message the tutor on a task (only when asked)", "`ontrack chats send UNIT TASK --message \"...\" --dry-run`", "then repeat with `--yes`"],
-  ["am I signed in / is it working", "`ontrack auth status`", "`ontrack auth login` to sign in"],
-  ["my teaching roles", "`ontrack roles`", "`--all` includes inactive roles"],
+export const INTENTS: readonly Intent[] = [
+  {
+    when: "which units am I in / how are units named here",
+    what: "Your enrolled units with project ID, code, name and target grade.",
+    command: "ontrack courses",
+    then: "`--include-inactive` for past units",
+  },
+  {
+    when: "what's in UNIT / my target grade / overall progress",
+    what: "One unit with your target grade and overall progress.",
+    command: "ontrack courses show UNIT",
+  },
+  {
+    when: "which tasks / what's due / what needs work",
+    what: "Every task in the unit with its status and due date.",
+    command: "ontrack tasks UNIT",
+    then: "`--status <status...>` to narrow",
+  },
+  {
+    when: "what does task X say / the task sheet",
+    what: "The task sheet as Markdown.",
+    command: "ontrack tasks read UNIT TASK",
+    then: "`tasks show` for status only",
+  },
+  {
+    when: "download the task sheet / task resources",
+    what: "The task sheet, or with `--resources` its linked files, saved to disk.",
+    command: "ontrack tasks get UNIT TASK [--resources] --dest PATH",
+    then: "`ontrack courses get UNIT` for the whole unit",
+  },
+  {
+    when: "any tutor feedback / unread messages",
+    what: "Unread chat comments per task.",
+    command: "ontrack chats UNIT",
+  },
+  {
+    when: "read the tutor's comments on a task",
+    what: "The task's chat history. It also marks the comments read upstream.",
+    command: "ontrack chats read UNIT TASK --yes",
+    then: "tell the user before running it",
+  },
+  {
+    when: "mark a task ready / working on it / need help (only when asked)",
+    what: "Sets the task's workflow state.",
+    command: "ontrack tasks set UNIT TASK STATE --dry-run",
+    then: "then repeat with `--yes`",
+  },
+  {
+    when: "submit files for a task (only when asked)",
+    what: "Uploads the files as the task's submission.",
+    command: "ontrack tasks submit UNIT TASK --file F --dry-run",
+    then: "then repeat with `--yes`",
+  },
+  {
+    when: "message the tutor on a task (only when asked)",
+    what: "Sends one chat message on the task.",
+    command: "ontrack chats send UNIT TASK --message \"...\" --dry-run",
+    then: "then repeat with `--yes`",
+  },
+  {
+    when: "am I signed in / is it working",
+    what: "Whether the saved session still works.",
+    command: "ontrack auth status",
+    then: "`ontrack auth login` to sign in",
+  },
+  {
+    when: "my teaching roles",
+    what: "The teaching roles you hold.",
+    command: "ontrack roles",
+    then: "`--all` includes inactive roles",
+  },
 ];
 
-function usage(command: DescribedCommand, parents: readonly string[]): string {
-  const path = [...parents, command.name];
-  const args = command.positionals.map((argument) => {
-    const name = argument.variadic ? `${argument.name}...` : argument.name;
-    return argument.required ? `<${name}>` : `[${name}]`;
+const DESCRIPTION =
+  "Read OnTrack and Doubtfire units, tasks, task sheets and tutor chats from the terminal; set task status, submit files and message tutors when asked.";
+
+/** Every generated agent file, keyed by path from the repository root. */
+export function skillFiles(program: ProgramDescription, version: string): Record<string, string> {
+  return agentFiles({
+    skill: {
+      name: "ontrack-cli",
+      description: DESCRIPTION,
+      title: "OnTrack CLI",
+      intro: [
+        "Use `ontrack` to inspect and update OnTrack from a terminal. Start from what the user said, not from ids.",
+        "`UNIT` is a project ID, or the unit's code or name exactly as OnTrack shows it; `ontrack courses` is the vocabulary for this site. `TASK` is the task abbreviation shown by `ontrack tasks UNIT`, or a task definition ID. Never assume what a code or abbreviation looks like; if a reference matches several units the CLI lists their project IDs, so pick one rather than guess.",
+      ].join("\n\n"),
+      intents: INTENTS,
+      rules: [
+        "`courses`, `units` and `projects` are interchangeable.",
+        "`chats read` is the exception to the `read` rule: it marks the comments read upstream and always requires `--yes`.",
+        "Sign in with `ontrack auth login`; `ontrack auth status` checks the saved session and `ontrack auth logout` removes it.",
+      ],
+      setup: [
+        "```bash",
+        "npm install -g ontrack",
+        "export ONTRACK_BASE_URL=\"https://ontrack.example.edu\"  # your institution's OnTrack site",
+        "ontrack auth login",
+        "```",
+      ].join("\n"),
+      program,
+    },
+    version,
+    repository: "https://github.com/bunizao/ontrack-cli",
+    author: { name: "bunizao", url: "https://github.com/bunizao" },
+    license: "MIT",
+    keywords: ["ontrack", "doubtfire", "university", "tasks", "cli"],
+    openai: {
+      displayName: "OnTrack CLI",
+      shortDescription: "Check OnTrack tasks, read task sheets, follow tutor chats and submit work",
+      defaultPrompt: "Use $ontrack-cli to check my OnTrack tasks, read a task sheet or tutor feedback, or submit a task with the narrowest relevant command.",
+    },
   });
-  return [...path, ...args].join(" ");
-}
-
-function commandLines(commands: readonly DescribedCommand[], parents: readonly string[]): string[] {
-  return commands.flatMap((command) => {
-    const aliases = command.aliases?.length ? ` (aliases: ${command.aliases.join(", ")})` : "";
-    const chatRead = command.name === "read" && parents.at(-1) === "chats";
-    const mutation = command.mutating
-      ? chatRead ? " [mutating; requires --yes]" : " [mutating; requires confirmation or --yes]"
-      : "";
-    const line = `- \`${usage(command, parents)}\`${aliases} — ${command.description || "No description."}${mutation}`;
-    return [line, ...commandLines(command.commands, [...parents, command.name])];
-  });
-}
-
-function intentTable(): string[] {
-  const escape = (value: string): string => value.replace(/\|/g, "\\|");
-  return [
-    "| The user says | Run | Notes |",
-    "| --- | --- | --- |",
-    ...INTENTS.map((row) => `| ${row.map(escape).join(" | ")} |`),
-  ];
-}
-
-export function renderSkill(program: DescribedProgram): string {
-  return [
-    "---",
-    "name: ontrack-cli",
-    `description: ${program.description}`,
-    "---",
-    "",
-    "# OnTrack CLI",
-    "",
-    "Use `ontrack` to inspect and update OnTrack from a terminal. Start from what the user said, not from ids.",
-    "",
-    "## What the user says, and what to run",
-    "",
-    "`UNIT` is a project ID, or the unit's code or name exactly as OnTrack shows it; `ontrack units` is the vocabulary for this site. `TASK` is the task abbreviation shown by `ontrack tasks UNIT`, or a task definition ID. Never assume what a code or abbreviation looks like; if a reference matches several units the CLI lists their project IDs, so pick one rather than guess.",
-    "",
-    ...intentTable(),
-    "",
-    "## Contract",
-    "",
-    "- `units`, `courses`, and `projects` are interchangeable.",
-    "- `ontrack commands --json` is the source of truth for this tool's command tree; the published `@bunizao/cli-kit` npm package (`^0.1.0`) defines the shared CLI contract.",
-    "- Piped output defaults to JSON; terminal output defaults to a table.",
-    "- Mutating commands require explicit user intent and an interactive y/N confirmation or `--yes`.",
-    "- `chats read` is an upstream exception: it marks comments read and always requires `--yes`.",
-    "- Use `--dry-run` before a mutation when the intended target is uncertain.",
-    "- Never print or copy session tokens, browser cookies, or authentication files.",
-    "",
-    "## Commands",
-    "",
-    ...commandLines(program.commands, [program.name]),
-    "",
-    "Run `ontrack commands --json` for options, enum values, aliases, and mutation metadata.",
-    "",
-  ].join("\n");
 }

@@ -14,6 +14,7 @@ import {
   render,
   reportError,
   resolveFormat,
+  writeAgentFiles,
   SHARED_NOUNS,
   type ArgumentFiller,
   type NounSpec,
@@ -23,7 +24,7 @@ import {
 
 import { CliError } from "./errors.js";
 import { assertSupportedRuntime } from "./runtime.js";
-import { renderSkill } from "./skill.js";
+import { skillFiles } from "./skill.js";
 import { submissionType, submissionTypes, type TaskSubmissionOptions, type TaskSubmissionPlan } from "./submission.js";
 import { STATUS_TONES, writableTaskState, writableTaskStates, type WritableTaskState } from "./status.js";
 import { ONTRACK_TAGLINE, ONTRACK_WORDMARK } from "./wordmark.js";
@@ -81,6 +82,8 @@ interface Dependencies {
   /** Terminal width tables have to fit into. Omitted means unlimited. */
   readonly stdoutColumns?: number;
   readonly runtime?: { readonly nodeVersion: string; readonly bunVersion?: string };
+  /** Receives each program the run builds; tests use it to check the command tree itself. */
+  readonly onProgram?: (program: ReturnType<typeof createProgram>) => void;
 }
 
 /**
@@ -456,8 +459,9 @@ export async function executeCli(argv: readonly string[], dependencies: Dependen
       setResult({ value: commandsJson(program) });
     });
     const skills = program.command("skills").description("Generate the agent skill");
-    skills.command("generate").description("Generate SKILL.md from the command tree").action(() => {
-      setResult({ markdown: renderSkill(commandsJson(program)) });
+    skills.command("generate").description("Write SKILL.md and the plugin files into the current directory").action(() => {
+      const written = writeAgentFiles(process.cwd(), skillFiles(commandsJson(program), dependencies.version));
+      setResult({ markdown: written.length ? written.map((path) => `Wrote ${path}`).join("\n") : "Agent files are up to date." });
     });
     describeArguments(program);
     for (const [title, names] of Object.entries(HELP_SECTIONS)) {
@@ -469,6 +473,7 @@ export async function executeCli(argv: readonly string[], dependencies: Dependen
       "ontrack tasks read UNIT 1.1  # the task sheet as Markdown",
       "ontrack tasks submit UNIT 1.1 report.pdf",
     ]);
+    dependencies.onProgram?.(program);
     return (current = program);
   };
 
