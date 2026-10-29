@@ -14,6 +14,8 @@ import {
   render,
   reportError,
   resolveFormat,
+  writeAgentFiles,
+  SHARED_NOUNS,
   type ArgumentFiller,
   type NounSpec,
   type OutputFormat,
@@ -22,7 +24,7 @@ import {
 
 import { CliError } from "./errors.js";
 import { assertSupportedRuntime } from "./runtime.js";
-import { renderSkill } from "./skill.js";
+import { skillFiles } from "./skill.js";
 import { submissionType, submissionTypes, type TaskSubmissionOptions, type TaskSubmissionPlan } from "./submission.js";
 import { STATUS_TONES, writableTaskState, writableTaskStates, type WritableTaskState } from "./status.js";
 import { ONTRACK_TAGLINE, ONTRACK_WORDMARK } from "./wordmark.js";
@@ -84,6 +86,8 @@ interface Dependencies {
   /** Terminal width tables have to fit into. Omitted means unlimited. */
   readonly stdoutColumns?: number;
   readonly runtime?: { readonly nodeVersion: string; readonly bunVersion?: string };
+  /** Receives each program the run builds; tests use it to check the command tree itself. */
+  readonly onProgram?: (program: ReturnType<typeof createProgram>) => void;
 }
 
 /**
@@ -92,7 +96,7 @@ interface Dependencies {
  * terminal, so the human format picks the few that identify the row.
  */
 const TABLE_COLUMNS: Readonly<Record<string, readonly [string, string][]>> = {
-  "units list": [["id", "project"], ["unit.code", "code"], ["unit.name", "name"], ["target_grade", "target"]],
+  "courses list": [["id", "project"], ["unit.code", "code"], ["unit.name", "name"], ["target_grade", "target"]],
   "tasks list": [["abbreviation", "task"], ["name", "name"], ["status_label", "status"], ["deadline", "due"], ["grade_label", "grade"]],
   "roles list": [["id", "id"], ["role", "role"], ["unit.code", "code"], ["unit.name", "name"]],
   "chats list": [["id", "id"], ["abbreviation", "task"], ["name", "name"], ["status_label", "status"]],
@@ -141,7 +145,7 @@ const taskNounSpec: NounSpec = {
 };
 
 export const nounSpecs: readonly NounSpec[] = [
-  { name: "units", aliases: ["courses", "projects"], verbs: ["list", "show", "get"], defaultByArity: { 0: "list", 1: "show" } },
+  SHARED_NOUNS.courses,
   taskNounSpec,
   { name: "chats", verbs: ["list", "read", "send", "mark-read"], defaultByArity: { 0: "list", 1: "list", 2: "read" } },
   { name: "roles", verbs: ["list"], defaultByArity: { 0: "list" } },
@@ -163,7 +167,7 @@ function describeArguments(command: ReturnType<typeof createProgram>): void {
 
 // Grouped the way `gh` does: what a person reaches for daily, then the rest, then what only an agent runs.
 const HELP_SECTIONS: Readonly<Record<string, readonly string[]>> = {
-  "Core commands": ["units", "tasks", "chats"],
+  "Core commands": ["courses", "tasks", "chats"],
   "Additional commands": ["user", "roles", "auth", "doctor"],
   "Agent commands": ["commands", "skills"],
 };
@@ -371,14 +375,14 @@ export async function executeCli(argv: readonly string[], dependencies: Dependen
         setResult({ value: report, ...(doctorFailed(report) ? { exitCode: 3 } : {}) });
       });
 
-    const units = program.command("units").aliases(["courses", "projects"]).description("Enrolled units");
-    units.command("list").description("List units").option("--include-inactive", "Include past units").action(async (options) => {
+    const courses = program.command(SHARED_NOUNS.courses.name).aliases([...SHARED_NOUNS.courses.aliases]).description("Enrolled units");
+    courses.command("list").description("List units").option("--include-inactive", "Include past units").action(async (options) => {
       setResult({ value: await (await application()).projects({ includeInactive: options.includeInactive === true }) });
     });
-    units.command("show <unit>").description("Show one unit").action(async (unit) => {
+    courses.command("show <unit>").description("Show one unit").action(async (unit) => {
       setResult({ value: await (await application()).project(await resolvedProjectId(unit, application)) });
     });
-    units.command("get <unit>").description("Download unit resources")
+    courses.command("get <unit>").description("Download unit resources")
       .option("--dest <path>", "Destination ZIP")
       .option("--force", "Replace an existing destination")
       .action(async (unit, options) => {
@@ -495,8 +499,9 @@ export async function executeCli(argv: readonly string[], dependencies: Dependen
       setResult({ value: commandsJson(program) });
     });
     const skills = program.command("skills").description("Generate the agent skill");
-    skills.command("generate").description("Generate SKILL.md from the command tree").action(() => {
-      setResult({ markdown: renderSkill(commandsJson(program)) });
+    skills.command("generate").description("Write the skill folder and plugin files into the current directory").action(() => {
+      const written = writeAgentFiles(process.cwd(), skillFiles(commandsJson(program), dependencies.version));
+      setResult({ markdown: written.length ? written.map((path) => `Wrote ${path}`).join("\n") : "Agent files are up to date." });
     });
     describeArguments(program);
     for (const [title, names] of Object.entries(HELP_SECTIONS)) {
@@ -508,6 +513,7 @@ export async function executeCli(argv: readonly string[], dependencies: Dependen
       "ontrack tasks read UNIT 1.1  # the task sheet as Markdown",
       "ontrack tasks submit UNIT 1.1 report.pdf",
     ]);
+    dependencies.onProgram?.(program);
     return (current = program);
   };
 

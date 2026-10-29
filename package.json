@@ -12,7 +12,7 @@
     "CONTRIBUTING.md",
     "docs/architecture.md",
     "scripts/apply-sweet-cookie-patch.mjs",
-    "SKILL.md",
+    "skills",
     "LICENSE"
   ],
   "bundleDependencies": [
@@ -33,7 +33,7 @@
     "verify:source": "node scripts/verify-source.mjs",
     "verify:live": "npm run build && node dist/cli.js auth status --json",
     "coverage:domain": "npm run build && tsc -p tsconfig.json && node scripts/check-domain-coverage.mjs",
-    "skill:generate": "npm run build && node dist/cli.js skills generate > SKILL.md",
+    "skill:generate": "npm run build && node dist/cli.js skills generate",
     "prepack": "npm run build"
   },
   "devDependencies": {
@@ -46,7 +46,7 @@
     "url": "git+https://github.com/bunizao/ontrack-cli.git"
   },
   "dependencies": {
-    "@bunizao/cli-kit": "^0.5.0",
+    "@bunizao/cli-kit": "^0.7.0",
     "@opendocsg/pdf2md": "0.2.7",
     "@steipete/sweet-cookie": "0.4.0"
   }
