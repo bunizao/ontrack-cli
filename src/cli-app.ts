@@ -26,6 +26,7 @@ import { renderSkill } from "./skill.js";
 import { submissionType, submissionTypes, type TaskSubmissionOptions, type TaskSubmissionPlan } from "./submission.js";
 import { STATUS_TONES, writableTaskState, writableTaskStates, type WritableTaskState } from "./status.js";
 import { ONTRACK_TAGLINE, ONTRACK_WORDMARK } from "./wordmark.js";
+import type { LoginMode } from "./auth.js";
 
 export interface CliApplication {
   resolveProject(reference: string): Promise<number>;
@@ -63,8 +64,11 @@ export interface CliExecution {
 
 interface Dependencies {
   readonly application: () => Promise<CliApplication>;
-  readonly authLogin?: () => Promise<unknown>;
+  readonly authLogin?: (mode?: LoginMode, username?: string) => Promise<unknown>;
   readonly authLogout?: () => Promise<unknown>;
+  readonly authLocalStatus?: () => Promise<unknown>;
+  readonly authRenew?: () => Promise<unknown>;
+  readonly doctor?: (live: boolean, cookies: boolean) => Promise<unknown>;
   readonly version: string;
   readonly sensitiveValues?: readonly string[];
   readonly onDiagnostic?: (message: string) => void;
@@ -114,6 +118,8 @@ interface InvocationResult {
   readonly markdown?: string;
   readonly diagnostic?: string;
   readonly dryRun?: string;
+  /** Overrides the success exit code; the output is still printed. */
+  readonly exitCode?: number;
 }
 
 interface GlobalOptions {
@@ -158,7 +164,7 @@ function describeArguments(command: ReturnType<typeof createProgram>): void {
 // Grouped the way `gh` does: what a person reaches for daily, then the rest, then what only an agent runs.
 const HELP_SECTIONS: Readonly<Record<string, readonly string[]>> = {
   "Core commands": ["units", "tasks", "chats"],
-  "Additional commands": ["user", "roles", "auth"],
+  "Additional commands": ["user", "roles", "auth", "doctor"],
   "Agent commands": ["commands", "skills"],
 };
 
@@ -273,6 +279,12 @@ async function requireConfirmation(
   return undefined;
 }
 
+// A failed check still prints the full report; the exit code is what a script acts on.
+function doctorFailed(report: unknown): boolean {
+  const { site, auth, live_session: live } = (report ?? {}) as Record<string, Record<string, unknown> | undefined>;
+  return site?.reachable === false || Boolean(auth?.error) || live?.authenticated === false;
+}
+
 function fields(options: GlobalOptions): readonly string[] | undefined {
   if (options.fields === undefined) return undefined;
   const values = options.fields.split(",").map((field) => field.trim()).filter(Boolean);
@@ -319,17 +331,45 @@ export async function executeCli(argv: readonly string[], dependencies: Dependen
     });
 
     const auth = program.command("auth").description("Manage authentication");
-    auth.command("login").description("Sign in through OnTrack").action(async () => {
+    auth.command("login").description("Sign in through OnTrack")
+      .option("--browser", "Sign in in a browser owned by the CLI")
+      .option("--reuse-browser", "Reuse cookies from your existing browser, or sign in manually")
+      .option("--paste", "Read renewal cookies, a cURL command, or a sign-in response securely")
+      .option("--manual", "Sign in using the manual DevTools snippet")
+      .option("--username <username>", "Username for a bare refresh cookie with --paste")
+      .action(async (options: { browser?: boolean; reuseBrowser?: boolean; paste?: boolean; manual?: boolean; username?: string }) => {
       if (!dependencies.authLogin) throw new CliError("config", "Interactive login is unavailable.");
-      setResult({ value: await dependencies.authLogin() });
+      if ([options.browser, options.reuseBrowser, options.paste, options.manual].filter(Boolean).length > 1) {
+        throw new CliError("usage", "Choose one of --browser, --reuse-browser, --paste, or --manual.");
+      }
+      if (options.username !== undefined && !options.paste) throw new CliError("usage", "--username requires --paste.");
+      const mode = options.browser ? "browser" : options.reuseBrowser ? "reuse" : options.paste ? "paste" : options.manual ? "manual" : undefined;
+      setResult({ value: await dependencies.authLogin(mode, options.username === undefined ? undefined : nonEmpty(options.username, "username")) });
     });
-    auth.command("status").description("Validate current credentials").action(async () => {
+    auth.command("status").description("Validate current credentials").option("--local", "Inspect cache and renewal state without network requests").action(async (options: { local?: boolean }) => {
+      if (options.local) {
+        if (!dependencies.authLocalStatus) throw new CliError("config", "Local authentication status is unavailable.");
+        return setResult({ value: await dependencies.authLocalStatus() });
+      }
       setResult({ value: await (await application()).authCheck() });
+    });
+    // cli-kit's auth contract names this action "keepalive"; "renew" is the spelling the docs lead with.
+    auth.command("keepalive").alias("renew").description("Renew and verify the session once without an interactive sign-in").action(async () => {
+      if (!dependencies.authRenew) throw new CliError("config", "Session renewal is unavailable.");
+      setResult({ value: await dependencies.authRenew() });
     });
     auth.command("logout").description("Remove the cached session").action(async () => {
       if (!dependencies.authLogout) throw new CliError("config", "Logout is unavailable.");
       setResult({ value: await dependencies.authLogout() });
     });
+    program.command("doctor").description("Diagnose authentication, cache, browser, and site discovery")
+      .option("--live", "Also verify a protected OnTrack endpoint")
+      .option("--cookies", "Also probe existing browser cookies and report access problems")
+      .action(async (options: { live?: boolean; cookies?: boolean }) => {
+        if (!dependencies.doctor) throw new CliError("config", "Authentication diagnostics are unavailable.");
+        const report = await dependencies.doctor(options.live === true, options.cookies === true);
+        setResult({ value: report, ...(doctorFailed(report) ? { exitCode: 3 } : {}) });
+      });
 
     const units = program.command("units").aliases(["courses", "projects"]).description("Enrolled units");
     units.command("list").description("List units").option("--include-inactive", "Include past units").action(async (options) => {
@@ -499,7 +539,7 @@ export async function executeCli(argv: readonly string[], dependencies: Dependen
     }
     if (result?.diagnostic) stderr += result.diagnostic;
     return {
-      exitCode: 0,
+      exitCode: result?.exitCode ?? 0,
       stdout: redact(stdout, sensitiveValues),
       stderr: redact(stderr, sensitiveValues),
       ...(options.output ? { output: options.output } : {}),
