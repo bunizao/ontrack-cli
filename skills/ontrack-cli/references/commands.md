@@ -29,4 +29,20 @@ Generated from `ontrack commands --json` for version 0.3.2.
 | `ontrack roles list` | List teaching roles |  | --all | no |
 | `ontrack commands` | Describe the complete command tree |  |  | no |
 | `ontrack skills` | Generate the agent skill |  |  | no |
-| `ontrack skills generate` | Write SKILL.md and the plugin files into the current directory |  |  | no |
+| `ontrack skills generate` | Write the skill folder and plugin files into the current directory |  |  | no |
+
+## Exit codes
+
+With `--json`, a failure is one `{ ok: false, error: { code, message, hint } }` object on stderr.
+
+| Exit | Error code |
+| --- | --- |
+| 0 | success |
+| 2 | usage |
+| 3 | auth |
+| 1 | config |
+| 4 | not_found |
+| 5 | upstream |
+| 1 | network |
+| 130 | cancelled |
+| 1 | unexpected |

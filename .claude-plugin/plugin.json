@@ -1,7 +1,7 @@
 {
   "name": "ontrack-cli",
   "version": "0.3.2",
-  "description": "Read OnTrack and Doubtfire units, tasks, task sheets and tutor chats from the terminal; set task status, submit files and message tutors when asked.",
+  "description": "Reads OnTrack and Doubtfire units, tasks, task sheets and tutor chats from the terminal; sets task status, submits files and messages tutors when asked",
   "author": {
     "name": "bunizao",
     "url": "https://github.com/bunizao"
@@ -15,6 +15,5 @@
     "university",
     "tasks",
     "cli"
-  ],
-  "skills": "./"
+  ]
 }

@@ -459,7 +459,7 @@ export async function executeCli(argv: readonly string[], dependencies: Dependen
       setResult({ value: commandsJson(program) });
     });
     const skills = program.command("skills").description("Generate the agent skill");
-    skills.command("generate").description("Write SKILL.md and the plugin files into the current directory").action(() => {
+    skills.command("generate").description("Write the skill folder and plugin files into the current directory").action(() => {
       const written = writeAgentFiles(process.cwd(), skillFiles(commandsJson(program), dependencies.version));
       setResult({ markdown: written.length ? written.map((path) => `Wrote ${path}`).join("\n") : "Agent files are up to date." });
     });

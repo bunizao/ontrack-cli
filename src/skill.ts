@@ -44,22 +44,19 @@ export const INTENTS: readonly Intent[] = [
     then: "tell the user before running it",
   },
   {
-    when: "mark a task ready / working on it / need help (only when asked)",
+    when: "mark a task ready / working on it / need help",
     what: "Sets the task's workflow state.",
-    command: "ontrack tasks set UNIT TASK STATE --dry-run",
-    then: "then repeat with `--yes`",
+    command: "ontrack tasks set UNIT TASK STATE",
   },
   {
-    when: "submit files for a task (only when asked)",
+    when: "submit files for a task",
     what: "Uploads the files as the task's submission.",
-    command: "ontrack tasks submit UNIT TASK --file F --dry-run",
-    then: "then repeat with `--yes`",
+    command: "ontrack tasks submit UNIT TASK --file F",
   },
   {
-    when: "message the tutor on a task (only when asked)",
+    when: "message the tutor on a task",
     what: "Sends one chat message on the task.",
-    command: "ontrack chats send UNIT TASK --message \"...\" --dry-run",
-    then: "then repeat with `--yes`",
+    command: "ontrack chats send UNIT TASK --message \"...\"",
   },
   {
     when: "am I signed in / is it working",
@@ -76,7 +73,11 @@ export const INTENTS: readonly Intent[] = [
 ];
 
 const DESCRIPTION =
-  "Read OnTrack and Doubtfire units, tasks, task sheets and tutor chats from the terminal; set task status, submit files and message tutors when asked.";
+  "Reads OnTrack and Doubtfire units, tasks, task sheets and tutor chats from the terminal; sets task status, submits files and messages tutors when asked";
+
+// Moodle and Ed Discussion skills sit next to this one, so name the overlap and send it there.
+const USE_WHEN =
+  'the user names OnTrack or Doubtfire, or asks about portfolio tasks, task sheets, task status, a target grade or tutor feedback on a task: "which tasks are overdue", "what does 3.1P ask for", "did my tutor reply", "mark 2.1P ready for feedback", "submit my pass task". Moodle assignments, quizzes and the gradebook belong to moodle-cli; Ed forum threads and lessons belong to edstem-cli';
 
 /** Every generated agent file, keyed by path from the repository root. */
 export function skillFiles(program: ProgramDescription, version: string): Record<string, string> {
@@ -84,6 +85,7 @@ export function skillFiles(program: ProgramDescription, version: string): Record
     skill: {
       name: "ontrack-cli",
       description: DESCRIPTION,
+      useWhen: USE_WHEN,
       title: "OnTrack CLI",
       intro: [
         "Use `ontrack` to inspect and update OnTrack from a terminal. Start from what the user said, not from ids.",
@@ -92,7 +94,7 @@ export function skillFiles(program: ProgramDescription, version: string): Record
       intents: INTENTS,
       rules: [
         "`courses`, `units` and `projects` are interchangeable.",
-        "`chats read` is the exception to the `read` rule: it marks the comments read upstream and always requires `--yes`.",
+        "`chats read` is the exception to the `read` rule: it marks the comments read upstream, so `ontrack chats` stops flagging them; it needs `--yes`.",
         "Sign in with `ontrack auth login`; `ontrack auth status` checks the saved session and `ontrack auth logout` removes it.",
       ],
       setup: [
