@@ -34,6 +34,8 @@ export interface BrowserCookieOptions {
   readonly keychainPromptTimeoutMs?: number;
   readonly onWarning?: (warning: string) => void;
   readonly platform?: NodeJS.Platform;
+  readonly signal?: AbortSignal;
+  readonly timeoutMs?: number;
 }
 
 const COOKIE_NAMES = ["username", "refresh_token"] as const;
@@ -57,13 +59,31 @@ export async function browserCookieCandidates(
   const getCookies = options.getCookies ?? extractCookies;
   const results: GetCookiesResult[] = [];
   const warnings = new Set<string>();
+  const deadline = Date.now() + (options.timeoutMs ?? options.keychainPromptTimeoutMs ?? 8_000);
   for (const browser of browsers) {
+    const remaining = deadline - Date.now();
+    if (options.signal?.aborted || remaining <= 0) break;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let timedOut = false;
     try {
-      const result = await getCookies(cookieRequest(requestUrl, browser, platform, options));
+      const request = cookieRequest(requestUrl, browser, platform, options);
+      request.timeoutMs = Math.min(request.timeoutMs ?? 5_000, remaining);
+      const result = await Promise.race([
+        getCookies(request),
+        new Promise<GetCookiesResult>((_resolve, reject) => {
+          timer = setTimeout(() => {
+            timedOut = true;
+            reject(Object.assign(new Error("Browser cookie read timed out"), { code: "TIMEOUT" }));
+          }, remaining);
+        }),
+      ]);
       results.push(result);
       for (const warning of result.warnings) warnings.add(normalizeWarning(browser, warning, platform));
     } catch (error) {
       warnings.add(extractorFailure(browser, error, platform));
+      if (timedOut) break;
+    } finally {
+      clearTimeout(timer);
     }
   }
   for (const warning of warnings) options.onWarning?.(warning);
@@ -106,7 +126,7 @@ function cookieRequest(
     edgeProfile: browser === "edge" ? profile : ALL_PROFILES,
     firefoxProfile: ALL_PROFILES,
     mode: "merge",
-    ...(options.keychainPromptTimeoutMs === undefined ? {} : { timeoutMs: options.keychainPromptTimeoutMs }),
+    timeoutMs: options.keychainPromptTimeoutMs ?? 5_000,
   };
 }
 

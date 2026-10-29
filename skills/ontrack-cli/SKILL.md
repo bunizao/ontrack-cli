@@ -23,7 +23,7 @@ Use `ontrack` to inspect and update OnTrack from a terminal. Start from what the
 | mark a task ready / working on it / need help | `ontrack tasks set UNIT TASK STATE` |  |
 | submit files for a task | `ontrack tasks submit UNIT TASK --file F` |  |
 | message the tutor on a task | `ontrack chats send UNIT TASK --message "..."` |  |
-| am I signed in / is it working | `ontrack auth status` | `ontrack auth login` to sign in |
+| am I signed in / is it working | `ontrack auth status` | `ontrack auth login` to sign in; `ontrack doctor --live --cookies` when access still fails |
 | my teaching roles | `ontrack roles` | `--all` includes inactive roles |
 
 ## Workflows
@@ -50,7 +50,8 @@ Copy the checklist into your reply and tick each step as it is done; the last st
 - A failure prints one error with a `hint` on stderr; follow the hint before retrying.
 - `courses`, `units` and `projects` are interchangeable.
 - `chats read` is the exception to the `read` rule: it marks the comments read upstream, so `ontrack chats` stops flagging them; it needs `--yes`.
-- Sign in with `ontrack auth login`; `ontrack auth status` checks the saved session and `ontrack auth logout` removes it.
+- Sign in with `ontrack auth login`: `--browser` opens a private CLI browser, `--reuse-browser` reuses the everyday browser's cookies, `--paste` reads credentials from stdin. `auth status --local` reads the cache without a network call, `auth renew` renews once, and `auth logout` ends the session and deletes the cache. Credentials set in the environment or config override the cache.
+- `auth status --local` and `doctor` report `renewal_expires_at`. Under 24 hours left, ask the user to sign in on the OnTrack website or run `auth login`, because renewal stops working once it lapses. `doctor` exits 3 when a check fails.
 - Every command, argument, option and exit code is in [references/commands.md](references/commands.md); `ontrack commands --json` is the source of truth.
 
 ## Setup

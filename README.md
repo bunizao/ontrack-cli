@@ -37,6 +37,8 @@ ontrack courses
 
 Set `ONTRACK_BASE_URL` to your institution's OnTrack site.
 
+Tick "Remember me" when you sign in. OnTrack only issues the renewal cookie then, and the CLI needs it to renew your session in the background.
+
 ## Study Boooooooooost
 
 Ask in plain language, or run the command yourself:

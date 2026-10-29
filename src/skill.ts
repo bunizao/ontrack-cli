@@ -62,7 +62,7 @@ export const INTENTS: readonly Intent[] = [
     when: "am I signed in / is it working",
     what: "Whether the saved session still works.",
     command: "ontrack auth status",
-    then: "`ontrack auth login` to sign in",
+    then: "`ontrack auth login` to sign in; `ontrack doctor --live --cookies` when access still fails",
   },
   {
     when: "my teaching roles",
@@ -95,7 +95,8 @@ export function skillFiles(program: ProgramDescription, version: string): Record
       rules: [
         "`courses`, `units` and `projects` are interchangeable.",
         "`chats read` is the exception to the `read` rule: it marks the comments read upstream, so `ontrack chats` stops flagging them; it needs `--yes`.",
-        "Sign in with `ontrack auth login`; `ontrack auth status` checks the saved session and `ontrack auth logout` removes it.",
+        "Sign in with `ontrack auth login`: `--browser` opens a private CLI browser, `--reuse-browser` reuses the everyday browser's cookies, `--paste` reads credentials from stdin. `auth status --local` reads the cache without a network call, `auth renew` renews once, and `auth logout` ends the session and deletes the cache. Credentials set in the environment or config override the cache.",
+        "`auth status --local` and `doctor` report `renewal_expires_at`. Under 24 hours left, ask the user to sign in on the OnTrack website or run `auth login`, because renewal stops working once it lapses. `doctor` exits 3 when a check fails.",
       ],
       setup: [
         "```bash",

@@ -227,3 +227,54 @@ export async function test_old_singular_command_groups_are_removed(): Promise<vo
     assert.equal(result.exitCode, 2);
   }
 }
+
+export async function test_auth_login_modes_are_explicit_and_mutually_exclusive(): Promise<void> {
+  const { app } = fakeApplication();
+  const modes: unknown[] = [];
+  const deps = dependencies(app, {
+    version: "1.0.0",
+    authLogin: async (mode) => { modes.push(mode); return { username: "student" }; },
+  });
+  for (const flag of ["--browser", "--reuse-browser", "--paste"]) {
+    const result = await executeCli(["auth", "login", flag, "--json"], deps);
+    assert.equal(result.exitCode, 0, result.stderr);
+  }
+  assert.deepEqual(modes, ["browser", "reuse", "paste"]);
+  const invalid = await executeCli(["auth", "login", "--browser", "--paste", "--json"], deps);
+  assert.equal(invalid.exitCode, 2);
+  assert.equal(modes.length, 3);
+}
+
+export async function test_local_status_renewal_and_doctor_do_not_enter_interactive_authentication(): Promise<void> {
+  const { app, calls } = fakeApplication();
+  const used: string[] = [];
+  const deps = dependencies(app, {
+    version: "1.0.0",
+    authLogin: async () => { throw new Error("must not sign in interactively"); },
+    authLocalStatus: async () => { used.push("local"); return { cache_encrypted: true }; },
+    authRenew: async () => { used.push("renew"); return { projects: 1 }; },
+    doctor: async (live, cookies) => { used.push(`doctor:${live}:${cookies}`); return { ok: true }; },
+  });
+  for (const argv of [["auth", "status", "--local"], ["auth", "renew"], ["auth", "keepalive"], ["doctor"], ["doctor", "--live", "--cookies"]]) {
+    const result = await executeCli([...argv, "--json"], deps);
+    assert.equal(result.exitCode, 0, result.stderr);
+  }
+  assert.deepEqual(used, ["local", "renew", "renew", "doctor:false:false", "doctor:true:true"]);
+  assert.equal(calls.length, 0);
+}
+
+export async function test_doctor_prints_its_report_and_exits_with_the_auth_code_when_a_check_fails(): Promise<void> {
+  const { app } = fakeApplication();
+  const failing: unknown[] = [
+    { site: { reachable: false }, auth: { cache_present: true } },
+    { site: { reachable: true }, auth: { error: { code: "auth" } } },
+    { site: { reachable: true }, auth: { cache_present: true }, live_session: { authenticated: false } },
+  ];
+  for (const report of failing) {
+    const result = await executeCli(["doctor", "--json"], dependencies(app, { version: "1.0.0", doctor: async () => report }));
+    assert.equal(result.exitCode, 3);
+    assert.deepEqual(JSON.parse(result.stdout), report);
+  }
+  const healthy = { site: { reachable: true }, auth: { cache_present: false }, live_session: { authenticated: true } };
+  assert.equal((await executeCli(["doctor", "--json"], dependencies(app, { version: "1.0.0", doctor: async () => healthy }))).exitCode, 0);
+}

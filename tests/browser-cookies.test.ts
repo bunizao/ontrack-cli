@@ -56,7 +56,7 @@ export async function test_interactive_cookie_discovery_forwards_the_keychain_pr
   });
 
   assert.equal(received.length, 4);
-  assert.ok(received.every((options) => options.timeoutMs === 120_000));
+  assert.ok(received.every((options) => (options.timeoutMs ?? 0) <= 120_000 && (options.timeoutMs ?? 0) > 0));
 }
 
 export async function test_macos_chromium_profiles_are_probed_without_reading_the_protected_root(): Promise<void> {
@@ -278,4 +278,21 @@ export async function test_browser_cookie_discovery_maps_url_only_cookies_to_the
       { name: "refresh_token", value: "refresh", domain: "ontrack.example.edu" },
     ],
   }]);
+}
+
+export async function test_browser_cookie_discovery_bounds_the_whole_probe(): Promise<void> {
+  let calls = 0;
+  const warnings: string[] = [];
+  const result = await browserCookieCandidates("https://ontrack.example.edu", {
+    timeoutMs: 5, platform: "linux",
+    getCookies: async (options) => {
+      calls += 1;
+      assert.ok((options.timeoutMs ?? 0) <= 5);
+      return new Promise(() => {});
+    },
+    onWarning: (warning) => warnings.push(warning),
+  });
+  assert.equal(result.length, 0);
+  assert.equal(calls, 1);
+  assert.ok(warnings.some((warning) => warning.includes("TIMEOUT")));
 }

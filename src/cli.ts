@@ -3,16 +3,18 @@
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { appendFile, mkdir, unlink } from "node:fs/promises";
+import { appendFile, mkdir, rm, unlink } from "node:fs/promises";
 
 import { colorEnabled, createTheme, createUi, detectAudience, formatFromArgv, writeOutput, type Theme, type Ui } from "@bunizao/cli-kit";
 
 import { OnTrackApplication } from "./application.js";
-import { loginAuthenticatedSession, resolveAuthenticatedSession } from "./auth.js";
+import { browserProfileForSite, localAuthStatus, loginAuthenticatedSession, renewalExpiryNotice, resolveAuthenticatedSession, revokeStoredSession, type LoginMode } from "./auth.js";
 import { openSystemBrowser } from "./browser.js";
 import { authenticationCookieCandidates } from "./browser-cookies.js";
 import { executeCli, type ChatSendConfirmation } from "./cli-app.js";
-import { configuredBaseUrl, loadConfig, resolveBaseUrl, resolveConfigPaths, type ConfigPaths, type Environment } from "./config.js";
+import { configuredBaseUrl, loadConfig, resolveBaseUrl, resolveConfigPaths, resolveCredentialSource, type ConfigPaths, type Environment } from "./config.js";
+import { diagnoseAuth } from "./doctor.js";
+import { readSecretLine } from "./secret-input.js";
 import { CliError } from "./errors.js";
 import { HttpClient } from "./http.js";
 import { OnTrackClient } from "./ontrack.js";
@@ -22,8 +24,6 @@ import { createClock } from "./time.js";
 import type { TaskSubmissionPlan } from "./submission.js";
 import { VERSION } from "./version.js";
 import { showWordmark } from "./wordmark.js";
-
-const INTERACTIVE_KEYCHAIN_PROMPT_TIMEOUT_MS = 120_000;
 
 async function promptForBrowserLogin(message: string, signal: AbortSignal): Promise<void> {
   const ui = createUi({ input: process.stdin, output: process.stderr, signal });
@@ -75,12 +75,16 @@ function confirmMutation(summary: string, signal: AbortSignal): Promise<boolean>
   return askToContinue(summary, "Mutation requires an interactive terminal or --yes.", signal);
 }
 
-async function authLogout(env: Environment, platform: NodeJS.Platform): Promise<unknown> {
+async function authLogout(signal: AbortSignal, env: Environment, platform: NodeJS.Platform): Promise<unknown> {
   const paths = configPaths(env, platform);
+  // Ending the session upstream is a courtesy; a missing site config or a network failure must not block logout.
+  let serverRevoked = false;
+  try { serverRevoked = await revokeStoredSession(authOptions(signal, env, platform)); } catch { /* local logout still proceeds */ }
   await unlink(paths.sessionFile).catch((error: NodeJS.ErrnoException) => {
     if (error.code !== "ENOENT") throw error;
   });
-  return { logged_out: true };
+  await rm(join(paths.configDir, "browser"), { recursive: true, force: true });
+  return { logged_out: true, server_revoked: serverRevoked };
 }
 
 function configPaths(env: Environment, platform: NodeJS.Platform): ConfigPaths {
@@ -122,24 +126,34 @@ function applicationResolver(signal: AbortSignal, env: Environment, platform: No
     application ??= ensureBaseUrl(env, platform, ui).then(() => createApplication(signal, env, platform)).catch(async (error: unknown) => {
       // A person with no session is walked through the browser sign-in once; an agent gets the auth error.
       if (!ui.interactive || !(error instanceof CliError) || error.category !== "auth") throw error;
+      if (resolveCredentialSource(env, loadConfig(configPaths(env, platform)))) {
+        throw new CliError("auth", error.message, error.statusCode, "Explicit credentials override the cache. Replace or remove the invalid environment/config credentials before signing in through a browser.");
+      }
       showWordmark(ui);
       ui.note(`${error.message}\nSign in once in your browser; later commands reuse that session.`, "One-time setup");
       if (!await ui.confirm("Sign in through the browser now?", { initial: true }).catch(rethrowAsOnTrack)) throw error;
-      await authLogin(signal, env, platform);
+      await authLogin(signal, env, platform, ui);
       return createApplication(signal, env, platform);
     });
     return application;
   };
 }
 
-async function authLogin(signal: AbortSignal, env: Environment, platform: NodeJS.Platform): Promise<unknown> {
+async function authLogin(signal: AbortSignal, env: Environment, platform: NodeJS.Platform, ui: Ui, requestedMode?: LoginMode, pasteUsername?: string): Promise<unknown> {
+  await ensureBaseUrl(env, platform, ui);
   const paths = configPaths(env, platform);
   const config = loadConfig(paths);
   const baseUrl = resolveBaseUrl(env, config);
+  const mode = requestedMode ?? (ui.interactive ? await ui.select<LoginMode>("How would you like to sign in?", [
+    { value: "browser", label: "CLI browser (recommended)", hint: "Sign in once; no browser file permissions needed" },
+    { value: "reuse", label: "Use my existing browser", hint: "Reuse its current session" },
+    { value: "paste", label: "Paste browser credentials", hint: "Cookie header, cURL command, or sign-in response; input is hidden" },
+  ]).catch(rethrowAsOnTrack) : "browser");
   const browserCookieProvider = async () => {
     const warnings: string[] = [];
     const candidates = await authenticationCookieCandidates(baseUrl, {
-      keychainPromptTimeoutMs: INTERACTIVE_KEYCHAIN_PROMPT_TIMEOUT_MS,
+      keychainPromptTimeoutMs: 8_000,
+      signal: AbortSignal.any([signal, AbortSignal.timeout(8_000)]),
       onWarning: (warning) => warnings.push(warning),
     });
     if (candidates.length > 0) return candidates;
@@ -153,8 +167,14 @@ async function authLogin(signal: AbortSignal, env: Environment, platform: NodeJS
   const session = await loginAuthenticatedSession({
     baseUrl,
     sessionFile: paths.sessionFile,
+    browserProfileDir: browserProfileForSite(paths.configDir, baseUrl),
+    mode,
     signal,
     browserCookieProvider,
+    ...(pasteUsername === undefined ? {} : { pasteUsername }),
+    readSecret: () => readSecretLine(process.stdin, process.stderr, signal),
+    onBrowserOpened: () => { process.stderr.write("Complete the OnTrack sign-in in the browser window. Press Ctrl-C to cancel.\n"); },
+    onWarning: (message) => { process.stderr.write(`${message}\n`); },
     onLoginUrl: (url) => { process.stderr.write(`Sign-in URL: ${url}\n`); },
     onConsoleSnippet: (snippet) => {
       process.stderr.write(
@@ -173,10 +193,45 @@ async function authLogin(signal: AbortSignal, env: Environment, platform: NodeJS
   return {
     username: session.username,
     auth_token_expiry: session.authTokenExpiry,
+    renewal: session.renewalCookies ? "refresh_cookie" : "sign_in",
   };
 }
 
-async function createApplication(signal: AbortSignal, env: Environment, platform: NodeJS.Platform): Promise<OnTrackApplication> {
+function authOptions(signal: AbortSignal, env: Environment, platform: NodeJS.Platform) {
+  const paths = configPaths(env, platform);
+  const config = loadConfig(paths);
+  const baseUrl = resolveBaseUrl(env, config);
+  return { baseUrl, sessionFile: paths.sessionFile, env, config, signal, platform,
+    browserProfileDir: browserProfileForSite(paths.configDir, baseUrl) };
+}
+
+async function probeBrowserCookies(baseUrl: string, signal: AbortSignal): Promise<{ profiles: number; warnings: string[] }> {
+  const warnings = new Set<string>();
+  const bounded = AbortSignal.any([signal, AbortSignal.timeout(8_000)]);
+  const candidates = await authenticationCookieCandidates(baseUrl, {
+    signal: bounded,
+    onWarning: (warning) => {
+      if (/database not found/i.test(warning)) return;
+      if (/EPERM|EACCES|Permission denied/i.test(warning)) warnings.add("Browser data access is denied for this terminal or app. Allow access or use `auth login --browser`.");
+      else if (/Keychain/i.test(warning)) warnings.add("Keychain did not authorize browser cookie decryption. Use `auth login --browser` to bypass the store.");
+      else if (/node:sqlite/i.test(warning)) warnings.add("Browser cookies need SQLite support. Use Node.js 22.13+ or Bun.");
+      else warnings.add("An existing browser's cookies could not be read.");
+    },
+  });
+  if (signal.aborted) throw new CliError("cancellation", "Authentication cancelled.");
+  if (bounded.aborted) warnings.add("Browser cookie probing timed out.");
+  return { profiles: candidates.length, warnings: [...warnings] };
+}
+
+function announceRenewal(method: string): void {
+  process.stderr.write(`Renewing the OnTrack session in a ${method}...\n`);
+}
+
+function announceRenewalExpiry(expiresAt: Date): void {
+  process.stderr.write(`${renewalExpiryNotice(expiresAt, new Date())}\n`);
+}
+
+async function createApplication(signal: AbortSignal, env: Environment, platform: NodeJS.Platform, renew = false): Promise<OnTrackApplication> {
   const paths = configPaths(env, platform);
   const config = loadConfig(paths);
   const baseUrl = resolveBaseUrl(env, config);
@@ -186,7 +241,11 @@ async function createApplication(signal: AbortSignal, env: Environment, platform
     env,
     config,
     signal,
-    browserCookieProvider: () => authenticationCookieCandidates(baseUrl),
+    browserProfileDir: browserProfileForSite(paths.configDir, baseUrl),
+    onRenewing: announceRenewal,
+    onRenewalExpiring: announceRenewalExpiry,
+    ...(renew ? { skipCache: true } : {}),
+    browserCookieProvider: () => authenticationCookieCandidates(baseUrl, { signal: AbortSignal.any([signal, AbortSignal.timeout(8_000)]) }),
   });
   const sessionState = { current: session };
   const http = new HttpClient({
@@ -198,15 +257,18 @@ async function createApplication(signal: AbortSignal, env: Environment, platform
     ...(process.argv.includes("--verbose")
       ? { trace: (entry) => process.stderr.write(`${entry.method} ${entry.url} ${entry.status} ${entry.ms}ms\n`) }
       : {}),
-    refresh: async (refreshSignal) => {
+    refresh: async (refreshSignal, rejected) => {
       session = await resolveAuthenticatedSession({
         baseUrl,
         sessionFile: paths.sessionFile,
         env,
         config,
         signal: refreshSignal,
+        browserProfileDir: browserProfileForSite(paths.configDir, baseUrl),
         skipCache: true,
-        browserCookieProvider: () => authenticationCookieCandidates(baseUrl),
+        onRenewing: announceRenewal,
+        rejectedAccessToken: rejected.accessToken,
+        browserCookieProvider: () => authenticationCookieCandidates(baseUrl, { signal: AbortSignal.any([refreshSignal, AbortSignal.timeout(8_000)]) }),
       });
       sessionState.current = session;
       return { username: session.username, accessToken: session.accessToken };
@@ -233,8 +295,16 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   try {
     const result = await executeCli(argv, {
       application: applicationResolver(controller.signal, env, platform, ui),
-      authLogin: () => authLogin(controller.signal, env, platform),
-      authLogout: () => authLogout(env, platform),
+      authLogin: (mode, username) => authLogin(controller.signal, env, platform, ui, mode, username),
+      authLogout: () => authLogout(controller.signal, env, platform),
+      authLocalStatus: () => localAuthStatus(authOptions(controller.signal, env, platform)),
+      authRenew: async () => (await createApplication(controller.signal, env, platform, true)).authCheck(),
+      doctor: (live, cookies) => diagnoseAuth({
+        ...authOptions(controller.signal, env, platform), nodeVersion: process.versions.node,
+        ...(Reflect.get(process.versions, "bun") ? { bunVersion: String(Reflect.get(process.versions, "bun")) } : {}),
+        ...(live ? { liveCheck: async () => (await createApplication(controller.signal, env, platform)).authCheck() } : {}),
+        ...(cookies ? { cookieProbe: () => probeBrowserCookies(resolveBaseUrl(env, loadConfig(configPaths(env, platform))), controller.signal) } : {}),
+      }),
       confirmChatSend: (details) => confirmChatSend(details, controller.signal),
       confirmTaskSubmit: (plan) => confirmTaskSubmit(plan, controller.signal),
       confirmMutation: (summary) => confirmMutation(summary, controller.signal),
