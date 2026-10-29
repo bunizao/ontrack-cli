@@ -1,6 +1,6 @@
 # Signing in
 
-The [README](../README.md#sign-in) has the short version. This page covers every sign-in path, where the session is kept, how renewal works, and the diagnostics.
+The [README](../README.md#set-up) has the short version. This page covers every sign-in path, where the session is kept, how renewal works, and the diagnostics.
 
 `auth login` offers three sign-in paths in a terminal. The recommended path opens Chrome, Edge, Brave, or Chromium with a private CLI profile. Complete your institution's sign-in in that window; the CLI captures and validates the OnTrack session automatically, without reading your normal browser's files or asking you to paste anything.
 
