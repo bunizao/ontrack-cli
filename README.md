@@ -32,7 +32,7 @@ Or by hand:
 npm install -g ontrack
 export ONTRACK_BASE_URL="https://ontrack.example.edu"
 ontrack auth login
-ontrack units
+ontrack courses
 ```
 
 Set `ONTRACK_BASE_URL` to your institution's OnTrack site.
@@ -43,14 +43,14 @@ Ask in plain language, or run the command yourself:
 
 | Ask your agent | Command |
 | --- | --- |
-| “What are my units?” | `ontrack units` |
+| “What are my units?” | `ontrack courses` |
 | “Where am I with the tasks in UNIT?” | `ontrack tasks UNIT` |
 | “Read me the task sheet for TASK.” | `ontrack tasks read UNIT TASK` |
 | “Any new tutor feedback?” | `ontrack chats UNIT` |
-| “Download everything for UNIT.” | `ontrack units get UNIT --dest unit.zip` |
+| “Download everything for UNIT.” | `ontrack courses get UNIT --dest unit.zip` |
 | “Submit my report for TASK.” | `ontrack tasks submit UNIT TASK --file report.pdf` |
 
-`UNIT` is the unit's code or name as OnTrack shows it. `TASK` is the task abbreviation. Writes always show a plan and ask first.
+`UNIT` is the unit's code or name as OnTrack shows it. `courses`, `units` and `projects` are interchangeable. `TASK` is the task abbreviation. Writes always show a plan and ask first.
 
 ## Learn more
 

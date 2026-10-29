@@ -187,7 +187,7 @@ export async function test_every_parser_command_has_a_golden_case(): Promise<voi
     readonly commands: readonly { readonly name: string; readonly commands: readonly { readonly name: string }[] }[];
   };
   const described = new Set(tree.commands.flatMap((noun) => noun.commands.map((command) => `${noun.name} ${command.name}`)));
-  for (const command of ["auth status", "units list", "units show", "tasks list", "chats list", "roles list"]) {
+  for (const command of ["auth status", "courses list", "courses show", "tasks list", "chats list", "roles list"]) {
     assert.ok(described.has(command), `${command} must remain in the normalized command tree`);
   }
 }
