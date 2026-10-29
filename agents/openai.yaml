@@ -1,5 +1,4 @@
 interface:
   display_name: OnTrack CLI
   short_description: Check OnTrack tasks, read task sheets, follow tutor chats and submit work
-  default_prompt: Use $ontrack-cli to check my OnTrack tasks, read a task sheet or
-    tutor feedback, or submit a task with the narrowest relevant command.
+  default_prompt: Use $ontrack-cli to check my OnTrack tasks, read a task sheet or tutor feedback, or submit a task with the narrowest relevant command.
