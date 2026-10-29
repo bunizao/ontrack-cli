@@ -1,6 +1,6 @@
 # ontrack commands
 
-Generated from `ontrack commands --json` for version 0.3.2.
+Generated from `ontrack commands --json` for version 0.4.0.
 
 | Command | Description | Arguments | Options | Mutating |
 | --- | --- | --- | --- | --- |
