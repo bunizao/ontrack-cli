@@ -44,6 +44,8 @@ export interface OktaAttemptOptions {
   readonly fetch?: Fetch;
   readonly now?: () => number;
   readonly onProgress?: Progress;
+  /** Aborting rejects with the signal's reason and records nothing in the state. */
+  readonly signal?: AbortSignal;
 }
 
 /** Re-sign in this long before the seven-day refresh cookie lapses. */
@@ -88,6 +90,7 @@ export async function attemptOktaSignIn(options: OktaAttemptOptions): Promise<Ok
       ...(options.fetch ? { fetch: options.fetch } : {}),
       now,
       ...(options.onProgress ? { onProgress: options.onProgress } : {}),
+      ...(options.signal ? { signal: options.signal } : {}),
     });
     const remembered = remember(state, session);
     if (options.expectedUsername && session.username !== options.expectedUsername) {
@@ -95,6 +98,8 @@ export async function attemptOktaSignIn(options: OktaAttemptOptions): Promise<Ok
     }
     return { outcome: "signed_in", state: { ...remembered, failures: 0, next_attempt_at: now() + MIN_ATTEMPT_INTERVAL_MS }, session };
   } catch (error) {
+    // A cancelled attempt says nothing about the credentials.
+    options.signal?.throwIfAborted();
     return { outcome: "failed", state: afterFailure(state, error, now()), error };
   }
 }

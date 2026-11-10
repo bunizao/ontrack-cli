@@ -32,6 +32,8 @@ export interface FakeOktaOptions {
   ontrackUser?: string;
   // Doubtfire's SAML callback lands somewhere without a one-time token.
   noAuthToken?: boolean;
+  // Doubtfire refuses every refresh cookie, as after a server-side sign-out.
+  refuseRefresh?: boolean;
 }
 
 export interface RecordedRequest {
@@ -50,6 +52,7 @@ export function fakeOkta(options: FakeOktaOptions) {
 
   async function fetch(input: string | URL | Request, init: RequestInit = {}): Promise<Response> {
     if (options.offline) throw new TypeError("fetch failed");
+    init.signal?.throwIfAborted();
     const request = {
       method: init.method ?? "GET",
       url: new URL(String(input)),
@@ -84,7 +87,7 @@ export function fakeOkta(options: FakeOktaOptions) {
       return new Response(JSON.stringify(session(user)), { status: 200, headers });
     }
     if (method === "POST" && url.pathname === "/api/auth/access-token") {
-      if (!cookies.get("refresh_token")?.startsWith("refresh-")) return Response.json(null, { status: 401 });
+      if (options.refuseRefresh || !cookies.get("refresh_token")?.startsWith("refresh-")) return Response.json(null, { status: 401 });
       return Response.json(session(cookies.get("username") ?? user));
     }
     return new Response("not found", { status: 404 });

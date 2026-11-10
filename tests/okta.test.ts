@@ -275,3 +275,34 @@ export function test_okta_export_parsing_needs_all_three_values(): void {
   assert.equal(parseOktaExport(JSON.stringify({ OKTA_USERNAME: "a", OKTA_PASSWORD: "p" })), null);
   assert.equal(parseOktaExport("not json"), null);
 }
+
+export async function test_renewal_falls_back_to_okta_in_the_same_command_when_the_refresh_cookie_is_refused(): Promise<void> {
+  const file = await sessionFile();
+  await loginAuthenticatedSession(loginOptions(file, fakeOkta({ now: () => NOW }).fetch, NOW));
+  // Five days left, so Okta is not due until Doubtfire refuses the cookie.
+  const later = NOW + 2 * 24 * HOUR;
+  const fake = fakeOkta({ now: () => later, refuseRefresh: true });
+  const session = await resolveAuthenticatedSession(resolveOptions(file, fake.fetch, later));
+  assert.equal(session.provenance, "okta");
+  assert.ok((await stored(file)).refresh_cookies.some((cookie: { name: string }) => cookie.name === "refresh_token"));
+}
+
+export async function test_cancelling_an_okta_sign_in_exits_as_cancelled_and_records_nothing(): Promise<void> {
+  const file = await sessionFile();
+  await loginAuthenticatedSession(loginOptions(file, fakeOkta({ now: () => NOW }).fetch, NOW));
+  const before = (await stored(file)).okta;
+
+  const sixDays = NOW + 6 * 24 * HOUR;
+  const controller = new AbortController();
+  const fake = fakeOkta({ now: () => sixDays });
+  const error = await resolveAuthenticatedSession(resolveOptions(file, fake.fetch, sixDays, {
+    signal: controller.signal,
+    onOktaProgress: (message) => { if (message.startsWith("Exchanging")) controller.abort(); },
+  })).then(() => assert.fail("expected a cancellation"), (caught: unknown) => caught);
+  assert.ok(error instanceof CliError);
+  assert.equal(error.category, "cancellation");
+  assert.ok(!fake.requests.some((request) => request.method === "POST" && request.url.pathname === "/api/auth"), "the one-time token is never spent");
+  const after = (await stored(file)).okta;
+  assert.equal(after.failures, before.failures);
+  assert.equal(after.blocked, undefined);
+}

@@ -21,11 +21,12 @@ ontrack auth login --paste
 If your site signs in through Okta (Monash does), `--okta` signs in with plain HTTP using the credentials [okta-auth](https://github.com/bunizao/okta-auth) holds, and renews by itself from then on:
 
 ```bash
-okta setup                 # once: username, password and TOTP secret, in the Keychain or 1Password
+okta-auth setup            # once: username, password and TOTP secret, in the Keychain or 1Password
+                           # (`okta setup` with the Python okta-auth-cli)
 ontrack auth login --okta
 ```
 
-The CLI runs `okta export --dangerously-print-password-and-totp-secret` into a pipe, signs in at the Okta app OnTrack names, and exchanges the one-time token OnTrack hands back for a remembered session, so the seven-day refresh cookie is issued. Nothing from Okta is printed except host names and steps. The password and TOTP secret are never written to the session cache; Okta's device token and session are, encrypted. `--okta` refuses to replace a cached session for a different OnTrack account; run `auth logout` first.
+The CLI runs `okta export --dangerously-print-password-and-totp-secret` (or `okta-auth export …` when only the npm package is installed) into a pipe, signs in at the Okta app OnTrack names, and exchanges the one-time token OnTrack hands back for a remembered session, so the seven-day refresh cookie is issued. Nothing from Okta is printed except host names and steps. The password and TOTP secret are never written to the session cache; Okta's device token and session are, encrypted. `--okta` refuses to replace a cached session for a different OnTrack account; run `auth logout` first.
 
 Doubtfire never extends the refresh cookie, so after an Okta sign-in the CLI signs in through Okta again whenever a token needs renewing and the refresh cookie is gone or has under 48 hours left. It prints one line to stderr. A rejected password, a rejected one-time code, a second factor other than TOTP, or a different OnTrack account stops automatic sign-in at once, and five failures in a row (with backoff from one minute) stop it too: repeated attempts can lock the Okta account. While stopped, commands keep using the refresh cookie until it lapses, `auth status --local` shows `okta_blocked`, and the password store is not read. Fix the cause, then run `auth login --okta` again.
 

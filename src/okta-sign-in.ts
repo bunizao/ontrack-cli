@@ -24,6 +24,8 @@ export interface OnTrackOktaSignInOptions {
   /** Milliseconds since the epoch. */
   readonly now?: () => number;
   readonly onProgress?: Progress;
+  /** Aborts every request, Okta's included. */
+  readonly signal?: AbortSignal;
 }
 
 /** Doubtfire's `username` and `refresh_token` cookies, as the session cache stores them. */
@@ -61,10 +63,14 @@ const REQUEST_TIMEOUT_MS = 30_000;
  */
 export async function signInToOnTrack(options: OnTrackOktaSignInOptions): Promise<OnTrackOktaSession> {
   const base = new URL(options.baseUrl);
-  const fetchImplementation: Fetch = options.fetch ?? ((input, init) => fetch(input, init));
+  const signal = options.signal;
+  const baseFetch: Fetch = options.fetch ?? ((input, init) => fetch(input, init));
+  const fetchImplementation: Fetch = signal
+    ? (input, init) => baseFetch(input, { ...init, signal: init.signal ? AbortSignal.any([init.signal, signal]) : signal })
+    : baseFetch;
   const now = options.now ?? Date.now;
   options.onProgress?.(`Finding the Okta app for ${base.hostname}`);
-  const appLink = await oktaAppLink(base, fetchImplementation);
+  const appLink = await oktaAppLink(base, fetchImplementation, signal);
 
   const signedIn = await signIn({
     url: appLink,
@@ -76,16 +82,21 @@ export async function signInToOnTrack(options: OnTrackOktaSignInOptions): Promis
     fetch: fetchImplementation,
     now,
     ...(options.onProgress ? { onProgress: options.onProgress } : {}),
+  }).catch((error: unknown) => {
+    // okta-auth reports an aborted request as a network error.
+    signal?.throwIfAborted();
+    throw error;
   });
+  signal?.throwIfAborted();
 
   const { username, authToken } = readLanding(signedIn.landingUrl, base);
   options.onProgress?.(`Exchanging the one-time token at ${base.hostname}`);
-  const session = await exchangeAuthToken(base, username, authToken, fetchImplementation, now());
+  const session = await exchangeAuthToken(base, username, authToken, fetchImplementation, now(), signal);
   return { ...session, deviceToken: signedIn.deviceToken, oktaSession: signedIn.oktaSession };
 }
 
-async function oktaAppLink(base: URL, fetchImplementation: Fetch): Promise<string> {
-  const response = await request(fetchImplementation, new URL("/api/auth/method", base), { method: "GET" });
+async function oktaAppLink(base: URL, fetchImplementation: Fetch, signal: AbortSignal | undefined): Promise<string> {
+  const response = await request(fetchImplementation, new URL("/api/auth/method", base), { method: "GET" }, signal);
   if (!response.ok) throw new OktaSignInError(`http_${response.status}`, `${base.hostname}/api/auth/method answered ${response.status}`);
   const body = await response.json().catch(() => null) as unknown;
   const redirectTo = isRecord(body) ? body.redirect_to : undefined;
@@ -114,12 +125,13 @@ async function exchangeAuthToken(
   authToken: string,
   fetchImplementation: Fetch,
   nowMs: number,
+  signal: AbortSignal | undefined,
 ): Promise<Omit<OnTrackOktaSession, "deviceToken" | "oktaSession">> {
   const response = await request(fetchImplementation, new URL("/api/auth", base), {
     method: "POST",
     headers: { Accept: "application/json", "Content-Type": "application/json" },
     body: JSON.stringify({ username, auth_token: authToken, remember: true }),
-  });
+  }, signal);
   if (response.status === 401 || response.status === 403) {
     throw new OktaSignInError("handoff_failed", `${base.hostname} refused the one-time token`);
   }
@@ -172,10 +184,12 @@ function readRenewalCookies(headers: Headers, host: string, nowMs: number): Rene
   });
 }
 
-async function request(fetchImplementation: Fetch, url: URL, init: RequestInit): Promise<Response> {
+// fetchImplementation adds the caller's signal; this adds the per-request timeout.
+async function request(fetchImplementation: Fetch, url: URL, init: RequestInit, signal: AbortSignal | undefined): Promise<Response> {
   try {
     return await fetchImplementation(url.href, { ...init, redirect: "manual", signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
   } catch {
+    signal?.throwIfAborted();
     throw new OktaSignInError("network", `${url.hostname}${url.pathname} could not be reached`);
   }
 }

@@ -12,6 +12,7 @@ import { safeUserView } from "./user.js";
 import { CdpError, loginWithCdp, type CdpLoginOptions, type CdpLoginResult } from "./cdp-login.js";
 import { attemptOktaSignIn, oktaRenewalDue, readOktaState, type OktaAttempt, type OktaState } from "./okta-renewal.js";
 import type { OktaCredentials, OnTrackOktaSession } from "./okta-sign-in.js";
+import { OKTA_SETUP } from "./okta-export.js";
 import { OktaSignInError } from "okta-auth-cli";
 
 import { readSessionCache, withFileLock, writeSessionCache, type SessionCacheOptions } from "./session-cache.js";
@@ -737,14 +738,17 @@ async function renewSession(options: ResolveAuthenticatedSessionOptions, stored:
   };
   // Okta first when configured: it is the only renewal that issues a new seven-day refresh cookie unattended.
   let oktaFailure: CliError | undefined;
-  if (cached?.okta) {
+  const tryOkta = async (): Promise<AuthenticatedSession | undefined> => {
+    if (!cached?.okta) return undefined;
     const outcome = await renewThroughOkta(renewalOptions, cached);
-    if (outcome && "session" in outcome) return outcome.session;
-    if (outcome) {
-      oktaFailure = outcome.failure;
-      cached = outcome.stored ?? cached;
-    }
-  }
+    if (!outcome) return undefined;
+    if ("session" in outcome) return outcome.session;
+    oktaFailure = outcome.failure;
+    cached = outcome.stored ?? cached;
+    return undefined;
+  };
+  const viaOkta = await tryOkta();
+  if (viaOkta) return viaOkta;
   if (cached && browserProbeDue(renewalOptions, cached, now)) {
     // Stamp first, so a slow or failing probe is not repeated by every command.
     const chosen = await writeSessionCache(options.sessionFile, { ...cached, browser_checked_at: now.toISOString() }, options,
@@ -771,6 +775,12 @@ async function renewSession(options: ResolveAuthenticatedSessionOptions, stored:
       cached = readStoredSession(chosen, options.baseUrl);
       if (cached && cached.access_token !== renewalOptions.expectedAccessToken && !cached.access_token_invalidated
         && isFresh(cached.auth_token_expiry, currentTime(options))) return cachedAuth(cached);
+      // With the cookie refused, Okta is due now: recover in this command rather than the next one.
+      // A first attempt that already ran (or failed) has set a backoff or a block, so this sends nothing twice.
+      if (!oktaFailure) {
+        const recovered = await tryOkta();
+        if (recovered) return recovered;
+      }
     }
   }
   if (options.browserProfileDir && await access(options.browserProfileDir).then(() => true, () => false)) {
@@ -814,12 +824,13 @@ async function renewThroughOkta(options: BrowserSessionOptions, cached: StoredSe
     return error instanceof CliError ? { failure: error, stored: cached } : undefined;
   }
   options.onRenewing?.("Okta");
-  const attempt = await attemptOktaSignIn({
+  const attempt = await cancellable(options.signal, () => attemptOktaSignIn({
     baseUrl: options.baseUrl, credentials, state, expectedUsername: cached.username,
     ...(options.fetch ? { fetch: options.fetch } : {}),
     now: () => currentTime(options).valueOf(),
     ...(options.onOktaProgress ? { onProgress: options.onOktaProgress } : {}),
-  });
+    ...(options.signal ? { signal: options.signal } : {}),
+  }));
   if (attempt.outcome === "signed_in") return { session: await saveStoredSession(options, oktaAuthenticated(options.baseUrl, attempt.session), attempt.state) };
   const chosen = await writeSessionCache(options.sessionFile, { ...cached, okta: attempt.state }, options,
     (value) => cacheMatches(value, options, cached.access_token));
@@ -833,12 +844,13 @@ async function oktaLogin(options: LoginAuthenticatedSessionOptions): Promise<Aut
   catch (error) { if (error instanceof CliError && error.category === "cancellation") throw error; }
   const credentials = await options.oktaCredentials();
   // A person asked: this lifts a block and the backoff, and keeps Okta's device token.
-  const attempt = await attemptOktaSignIn({
+  const attempt = await cancellable(options.signal, () => attemptOktaSignIn({
     baseUrl: options.baseUrl, credentials, state: previous?.okta, explicit: true,
     ...(options.fetch ? { fetch: options.fetch } : {}),
     now: () => currentTime(options).valueOf(),
     ...(options.onOktaProgress ? { onProgress: options.onOktaProgress } : {}),
-  });
+    ...(options.signal ? { signal: options.signal } : {}),
+  }));
   if (attempt.outcome !== "signed_in") {
     // Remember a refusal, so background renewals do not repeat it.
     if (previous) {
@@ -852,6 +864,18 @@ async function oktaLogin(options: LoginAuthenticatedSessionOptions): Promise<Aut
       "Run `ontrack auth logout` first to switch accounts.");
   }
   return saveStoredSession(options, oktaAuthenticated(options.baseUrl, attempt.session), attempt.state);
+}
+
+// Ctrl-C during an Okta sign-in exits as a cancellation, and nothing it produced is saved.
+async function cancellable<T>(signal: AbortSignal | undefined, run: () => Promise<T>): Promise<T> {
+  let result: T;
+  try { result = await run(); }
+  catch (error) {
+    if (signal?.aborted) throw new CliError("cancellation", "Authentication cancelled.");
+    throw error;
+  }
+  if (signal?.aborted) throw new CliError("cancellation", "Authentication cancelled.");
+  return result;
 }
 
 const OKTA_RELOGIN_HINT = "Fix it, then run `ontrack auth login --okta`. Background renewal does not retry this: repeated attempts can lock the account.";
@@ -868,10 +892,10 @@ function oktaAttemptError(attempt: Exclude<OktaAttempt, { outcome: "signed_in" }
 
 function oktaBlockError(state: OktaState, now: Date): CliError {
   switch (state.blocked) {
-    case "credentials_rejected": return new CliError("auth", "Okta rejected the username or password.", undefined, `Update them with \`okta setup\`. ${OKTA_RELOGIN_HINT}`);
-    case "passcode_rejected": return new CliError("auth", "Okta rejected the one-time code.", undefined, `Check the TOTP secret in \`okta setup\` and this machine's clock. ${OKTA_RELOGIN_HINT}`);
+    case "credentials_rejected": return new CliError("auth", "Okta rejected the username or password.", undefined, `Update them with ${OKTA_SETUP}. ${OKTA_RELOGIN_HINT}`);
+    case "passcode_rejected": return new CliError("auth", "Okta rejected the one-time code.", undefined, `Check the TOTP secret (${OKTA_SETUP}) and this machine's clock. ${OKTA_RELOGIN_HINT}`);
     case "mfa_unsupported": return new CliError("auth", "Okta asked for a second factor other than a TOTP code.", undefined, `Enroll Google Authenticator or another TOTP app in Okta. ${OKTA_RELOGIN_HINT}`);
-    case "invalid_secret": return new CliError("auth", "The Okta TOTP secret is not valid base32.", undefined, `Store it again with \`okta setup\`. ${OKTA_RELOGIN_HINT}`);
+    case "invalid_secret": return new CliError("auth", "The Okta TOTP secret is not valid base32.", undefined, `Store it again with ${OKTA_SETUP}. ${OKTA_RELOGIN_HINT}`);
     case "account_mismatch": return new CliError("auth", "Okta signed in to a different OnTrack account than the one this machine holds.", undefined, "Run `ontrack auth logout`, then `ontrack auth login --okta`.");
     case "retries_exhausted": return new CliError("auth", `Okta sign-in failed ${state.failures} times in a row and has stopped retrying.`, undefined, "Run `ontrack auth login --okta` to try again.");
     default: {
