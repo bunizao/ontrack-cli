@@ -138,7 +138,11 @@ function remember(state: OktaState, session: OnTrackOktaSession): OktaState {
 }
 
 function afterFailure(state: OktaState, error: unknown, nowMs: number): OktaState {
-  const { next_attempt_at: _next, ...rest } = state;
+  const { next_attempt_at: _next, ...kept } = state;
+  // A failed sign-in that reached Okta still names this device. The property is
+  // non-enumerable, so it is read directly.
+  const deviceToken = error instanceof OktaSignInError ? error.deviceToken : undefined;
+  const rest = deviceToken ? { ...kept, device_token: deviceToken } : kept;
   const permanent = permanentCode(error);
   if (permanent) return { ...rest, blocked: permanent };
   const failures = state.failures + 1;

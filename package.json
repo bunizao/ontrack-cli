@@ -49,6 +49,6 @@
     "@bunizao/cli-kit": "^0.7.0",
     "@opendocsg/pdf2md": "0.2.7",
     "@steipete/sweet-cookie": "0.4.0",
-    "okta-auth-cli": "0.3.0-rc.0"
+    "okta-auth-cli": "0.3.0"
   }
 }

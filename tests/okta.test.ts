@@ -73,6 +73,8 @@ export async function test_okta_attempt_blocks_on_a_rejected_password_until_the_
   const first = await attemptOktaSignIn({ baseUrl: BASE_URL, credentials: wrong, state: undefined, fetch: fake.fetch, now: () => NOW });
   assert.equal(first.outcome, "failed");
   assert.equal(first.state.blocked, "credentials_rejected");
+  // The rejection still reached Okta, which named this device.
+  assert.equal(first.state.device_token, "dt-1");
 
   clock = NOW + 24 * HOUR;
   const sent = fake.requests.length;
@@ -83,8 +85,8 @@ export async function test_okta_attempt_blocks_on_a_rejected_password_until_the_
   const fixed = await attemptOktaSignIn({ baseUrl: BASE_URL, credentials: CREDENTIALS, state: first.state, fetch: fake.fetch, now: () => NOW + 24 * HOUR });
   assert.equal(fixed.outcome, "signed_in");
   assert.equal(fixed.state.blocked, undefined);
-  // A failed sign-in returns nothing, so Okta's device token is first learned here.
-  assert.equal(fixed.state.device_token, "dt-2");
+  // The device token from the failure was sent back, so Okta minted no new one.
+  assert.equal(fixed.state.device_token, "dt-1");
 }
 
 export async function test_okta_attempt_blocks_on_unsupported_mfa(): Promise<void> {
