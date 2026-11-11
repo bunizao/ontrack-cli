@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -13,7 +13,7 @@ import {
   type ResolveAuthenticatedSessionOptions,
 } from "../src/auth.js";
 import { CliError } from "../src/errors.js";
-import { parseOktaExport } from "../src/okta-export.js";
+import { exportOktaCredentials, parseOktaExport } from "../src/okta-export.js";
 import { attemptOktaSignIn, MAX_TRANSIENT_FAILURES, type OktaState } from "../src/okta-renewal.js";
 import { signInToOnTrack } from "../src/okta-sign-in.js";
 import { readSessionCache, writeSessionCache } from "../src/session-cache.js";
@@ -276,6 +276,31 @@ export function test_okta_export_parsing_needs_all_three_values(): void {
     { username: "a@b", password: "p w", totpSecret: "JBSW" });
   assert.equal(parseOktaExport(JSON.stringify({ OKTA_USERNAME: "a", OKTA_PASSWORD: "p" })), null);
   assert.equal(parseOktaExport("not json"), null);
+}
+
+export async function test_okta_export_from_python_okta_before_0_3_asks_for_an_upgrade_and_skips_okta_auth(): Promise<void> {
+  // Python okta-auth-cli 0.2.x: `okta` has no export subcommand, argparse exits 1,
+  // and its `okta-auth` is the MCP server, which must not be started.
+  const bin = await mkdtemp(join(tmpdir(), "ontrack-okta-bin-"));
+  const marker = join(bin, "okta-auth-ran");
+  if (process.platform === "win32") {
+    await writeFile(join(bin, "okta.cmd"), "@echo usage: okta [-h] {login,check} 1>&2\r\n@exit /b 1\r\n");
+    await writeFile(join(bin, "okta-auth.cmd"), `@type nul > "${marker}"\r\n`);
+  } else {
+    await writeFile(join(bin, "okta"), "#!/bin/sh\necho 'usage: okta [-h] {login,check}' >&2\nexit 1\n", { mode: 0o755 });
+    await writeFile(join(bin, "okta-auth"), `#!/bin/sh\n: > '${marker}'\n`, { mode: 0o755 });
+  }
+  const path = process.env.PATH;
+  process.env.PATH = bin;
+  try {
+    const error = await exportOktaCredentials().then(() => assert.fail("expected a failure"), (caught: unknown) => caught);
+    assert.ok(error instanceof CliError);
+    assert.match(error.hint ?? "", /okta-auth-cli 0\.3\.0 or later/);
+    assert.match(error.hint ?? "", /uv tool upgrade okta-auth-cli/);
+    await assert.rejects(stat(marker), "okta-auth must not run after okta failed");
+  } finally {
+    process.env.PATH = path;
+  }
 }
 
 export async function test_renewal_falls_back_to_okta_in_the_same_command_when_the_refresh_cookie_is_refused(): Promise<void> {

@@ -20,13 +20,26 @@ export interface OktaExportOptions {
   readonly signal?: AbortSignal;
 }
 
-/** `okta` (Python okta-auth-cli) first, then `okta-auth` (the TypeScript one). */
+/**
+ * `okta` (Python okta-auth-cli) first, then `okta-auth` (the TypeScript one) only
+ * when `okta` is not installed: next to the Python package, `okta-auth` is its
+ * MCP server, not a CLI.
+ */
 export async function exportOktaCredentials(options: OktaExportOptions = {}): Promise<OktaCredentials> {
   let result = await run("okta", options);
+  const python = result !== "missing";
   if (result === "missing") result = await run("okta-auth", options);
   if (result === "missing") {
     throw new CliError("config", "Okta sign-in needs the okta command from okta-auth-cli.", undefined,
       `Install it (npm install -g okta-auth-cli), run ${OKTA_SETUP}, then try again.`);
+  }
+  // Python okta-auth-cli before 0.3.0 has no export: argparse exits 1, the same
+  // code as a missing credential, so the hint covers both.
+  if (python && result.code !== 0) {
+    throw new CliError("config", "okta export failed.", undefined,
+      "Okta sign-in needs okta-auth-cli 0.3.0 or later: run `uv tool upgrade okta-auth-cli`, "
+        + "or `uv tool uninstall okta-auth-cli` and `npm install -g okta-auth-cli`. "
+        + `Then run ${OKTA_SETUP} and try again.`);
   }
   const credentials = result.code === 0 ? parseOktaExport(result.stdout) : null;
   if (!credentials) {

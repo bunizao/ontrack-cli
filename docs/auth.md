@@ -20,6 +20,8 @@ ontrack auth login --paste
 
 If your site signs in through Okta (Monash does), `--okta` signs in with plain HTTP using the credentials [okta-auth](https://github.com/bunizao/okta-auth) holds, and renews by itself from then on:
 
+It needs okta-auth-cli 0.3.0 or later (`npm install -g okta-auth-cli`, or `uv tool upgrade okta-auth-cli` for the Python one); 0.2.x has no `export`.
+
 ```bash
 okta-auth setup            # once: username, password and TOTP secret, in the Keychain or 1Password
                            # (`okta setup` with the Python okta-auth-cli)
