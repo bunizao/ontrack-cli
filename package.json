@@ -23,7 +23,7 @@
   },
   "scripts": {
     "build": "node scripts/apply-sweet-cookie-patch.mjs && node scripts/clean-output.mjs && tsc -p tsconfig.build.json && node scripts/mark-cli-executable.mjs",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.core.json",
     "test": "npm run build && tsc -p tsconfig.json && node .build/tests/harness.js",
     "test:bun": "npm run build && tsc -p tsconfig.json && bun .build/tests/harness.js",
     "test:golden": "npm run build && tsc -p tsconfig.json && node scripts/golden-run.mjs",
@@ -48,6 +48,7 @@
   "dependencies": {
     "@bunizao/cli-kit": "^0.7.0",
     "@opendocsg/pdf2md": "0.2.7",
-    "@steipete/sweet-cookie": "0.4.0"
+    "@steipete/sweet-cookie": "0.4.0",
+    "okta-auth-cli": "0.3.0"
   }
 }

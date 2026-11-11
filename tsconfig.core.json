@@ -1,0 +1,10 @@
+{
+  // The Okta sign-in core must run in Node, Bun and Cloudflare Workers alike, so it
+  // is checked without Node's types: a node: import, Buffer or process fails here.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": [],
+    "noEmit": true
+  },
+  "include": ["src/okta-sign-in.ts", "src/okta-renewal.ts"]
+}

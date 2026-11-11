@@ -340,14 +340,15 @@ export async function executeCli(argv: readonly string[], dependencies: Dependen
       .option("--reuse-browser", "Reuse cookies from your existing browser, or sign in manually")
       .option("--paste", "Read renewal cookies, a cURL command, or a sign-in response securely")
       .option("--manual", "Sign in using the manual DevTools snippet")
+      .option("--okta", "Sign in through Okta with the credentials okta-auth holds; renews by itself")
       .option("--username <username>", "Username for a bare refresh cookie with --paste")
-      .action(async (options: { browser?: boolean; reuseBrowser?: boolean; paste?: boolean; manual?: boolean; username?: string }) => {
+      .action(async (options: { browser?: boolean; reuseBrowser?: boolean; paste?: boolean; manual?: boolean; okta?: boolean; username?: string }) => {
       if (!dependencies.authLogin) throw new CliError("config", "Interactive login is unavailable.");
-      if ([options.browser, options.reuseBrowser, options.paste, options.manual].filter(Boolean).length > 1) {
-        throw new CliError("usage", "Choose one of --browser, --reuse-browser, --paste, or --manual.");
+      if ([options.browser, options.reuseBrowser, options.paste, options.manual, options.okta].filter(Boolean).length > 1) {
+        throw new CliError("usage", "Choose one of --browser, --reuse-browser, --paste, --manual, or --okta.");
       }
       if (options.username !== undefined && !options.paste) throw new CliError("usage", "--username requires --paste.");
-      const mode = options.browser ? "browser" : options.reuseBrowser ? "reuse" : options.paste ? "paste" : options.manual ? "manual" : undefined;
+      const mode = options.browser ? "browser" : options.reuseBrowser ? "reuse" : options.paste ? "paste" : options.manual ? "manual" : options.okta ? "okta" : undefined;
       setResult({ value: await dependencies.authLogin(mode, options.username === undefined ? undefined : nonEmpty(options.username, "username")) });
     });
     auth.command("status").description("Validate current credentials").option("--local", "Inspect cache and renewal state without network requests").action(async (options: { local?: boolean }) => {
