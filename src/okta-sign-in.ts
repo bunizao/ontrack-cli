@@ -7,6 +7,11 @@ import { OktaSignInError, signIn, type Cookie, type Fetch, type Progress } from 
 // Doubtfire's SAML callback redirects to /sign_in?authToken=<one-time>&username=<user>.
 // That one-time token is exchanged here with `remember: true`, which is what makes
 // Doubtfire issue the refresh cookie (valid seven days, never extended).
+//
+// Doubtfire hands every remembered sign-in the user's latest refresh token, and mints
+// a new one only once that token is 12 hours past its expiry. Signing in again before
+// then gets the old, lapsing token back. So a held refresh token is revoked
+// (DELETE /api/auth, remember=false) after Okta lands and right before the exchange.
 
 export interface OktaCredentials {
   readonly username: string;
@@ -20,12 +25,20 @@ export interface OnTrackOktaSignInOptions {
   readonly credentials: OktaCredentials;
   readonly deviceToken?: string | undefined;
   readonly oktaSession?: readonly Cookie[] | undefined;
+  /** The refresh and username cookies already held. Revoked before the exchange if they belong to the same account. */
+  readonly revokeRenewalCookies?: readonly HeldCookie[] | undefined;
   readonly fetch?: Fetch;
   /** Milliseconds since the epoch. */
   readonly now?: () => number;
   readonly onProgress?: Progress;
   /** Aborts every request, Okta's included. */
   readonly signal?: AbortSignal;
+}
+
+/** A cookie already held; only its name and value are sent. */
+export interface HeldCookie {
+  readonly name: string;
+  readonly value: string;
 }
 
 /** Doubtfire's `username` and `refresh_token` cookies, as the session cache stores them. */
@@ -90,6 +103,7 @@ export async function signInToOnTrack(options: OnTrackOktaSignInOptions): Promis
   signal?.throwIfAborted();
 
   const { username, authToken } = readLanding(signedIn.landingUrl, base);
+  await revokeRefreshToken(base, username, options.revokeRenewalCookies, fetchImplementation, signal);
   options.onProgress?.(`Exchanging the one-time token at ${base.hostname}`);
   const session = await exchangeAuthToken(base, username, authToken, fetchImplementation, now(), signal);
   return { ...session, deviceToken: signedIn.deviceToken, oktaSession: signedIn.oktaSession };
@@ -117,6 +131,29 @@ function readLanding(landingUrl: string, base: URL): { username: string; authTok
     throw new OktaSignInError("handoff_failed", `The SAML post landed on ${landing.hostname}${landing.pathname}, not ${base.hostname}/sign_in with a one-time token`);
   }
   return { username, authToken };
+}
+
+// Best effort: if the revoke fails, the exchange hands back the old token and the next renewal tries again.
+async function revokeRefreshToken(
+  base: URL,
+  username: string,
+  cookies: readonly HeldCookie[] | undefined,
+  fetchImplementation: Fetch,
+  signal: AbortSignal | undefined,
+): Promise<void> {
+  const refresh = cookies?.find((cookie) => cookie.name === "refresh_token");
+  const owner = cookies?.find((cookie) => cookie.name === "username");
+  if (!refresh || owner?.value !== username) return;
+  const url = new URL("/api/auth", base);
+  url.searchParams.set("remember", "false");
+  try {
+    await request(fetchImplementation, url, {
+      method: "DELETE",
+      headers: { Accept: "application/json", Cookie: `username=${owner.value}; refresh_token=${refresh.value}` },
+    }, signal);
+  } catch {
+    signal?.throwIfAborted();
+  }
 }
 
 async function exchangeAuthToken(

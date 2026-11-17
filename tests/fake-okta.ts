@@ -34,6 +34,9 @@ export interface FakeOktaOptions {
   noAuthToken?: boolean;
   // Doubtfire refuses every refresh cookie, as after a server-side sign-out.
   refuseRefresh?: boolean;
+  // The refresh token Doubtfire already holds for the user. Like Doubtfire, a sign-in hands it
+  // back instead of a new one until it is destroyed or more than 12 hours past its expiry.
+  heldRefresh?: { value: string; expires: number };
 }
 
 export interface RecordedRequest {
@@ -49,6 +52,7 @@ export function fakeOkta(options: FakeOktaOptions) {
   let sessions = 0;
   let accessTokens = 0;
   let refreshTokens = 0;
+  const destroyed = new Set<string>();
 
   async function fetch(input: string | URL | Request, init: RequestInit = {}): Promise<Response> {
     if (options.offline) throw new TypeError("fetch failed");
@@ -80,11 +84,19 @@ export function fakeOkta(options: FakeOktaOptions) {
       if (json.auth_token !== AUTH_TOKEN || json.username !== user) return Response.json({ error: "invalid" }, { status: 401 });
       const headers = new Headers({ "content-type": "application/json" });
       if (json.remember === true) {
-        const expires = new Date(options.now() + REFRESH_LIFETIME_S * 1_000).toUTCString();
-        headers.append("set-cookie", `refresh_token=refresh-${++refreshTokens}; path=/api/auth; expires=${expires}; secure; HttpOnly; SameSite=Strict`);
+        const held = options.heldRefresh;
+        const reuse = held && !destroyed.has(held.value) && held.expires * 1_000 > options.now() - 12 * 60 * 60 * 1_000;
+        const value = reuse ? held.value : `refresh-${++refreshTokens}`;
+        const expires = new Date(reuse ? held.expires * 1_000 : options.now() + REFRESH_LIFETIME_S * 1_000).toUTCString();
+        headers.append("set-cookie", `refresh_token=${value}; path=/api/auth; expires=${expires}; secure; HttpOnly; SameSite=Strict`);
         headers.append("set-cookie", `username=${user}; path=/api/auth; expires=${expires}; secure; HttpOnly; SameSite=Strict`);
       }
       return new Response(JSON.stringify(session(user)), { status: 200, headers });
+    }
+    if (method === "DELETE" && url.pathname === "/api/auth") {
+      const refresh = cookies.get("refresh_token");
+      if (refresh && url.searchParams.get("remember") !== "true") destroyed.add(refresh);
+      return new Response(null, { status: 204 });
     }
     if (method === "POST" && url.pathname === "/api/auth/access-token") {
       if (options.refuseRefresh || !cookies.get("refresh_token")?.startsWith("refresh-")) return Response.json(null, { status: 401 });
@@ -134,7 +146,7 @@ export function fakeOkta(options: FakeOktaOptions) {
     return new Response("not found", { status: 404 });
   }
 
-  return { fetch, requests };
+  return { fetch, requests, destroyed };
 }
 
 // IdP-initiated: the form goes straight to Doubtfire's ACS, no RelayState.

@@ -738,9 +738,9 @@ async function renewSession(options: ResolveAuthenticatedSessionOptions, stored:
   };
   // Okta first when configured: it is the only renewal that issues a new seven-day refresh cookie unattended.
   let oktaFailure: CliError | undefined;
-  const tryOkta = async (): Promise<AuthenticatedSession | undefined> => {
+  const tryOkta = async (revoke = cached?.refresh_cookies): Promise<AuthenticatedSession | undefined> => {
     if (!cached?.okta) return undefined;
-    const outcome = await renewThroughOkta(renewalOptions, cached);
+    const outcome = await renewThroughOkta(renewalOptions, cached, revoke);
     if (!outcome) return undefined;
     if ("session" in outcome) return outcome.session;
     oktaFailure = outcome.failure;
@@ -768,7 +768,7 @@ async function renewSession(options: ResolveAuthenticatedSessionOptions, stored:
       if (!(error instanceof RejectedBrowserCookieCandidate)) throw error;
       // Only an upstream refusal discards the durable cookie. Network failures keep it.
       // A token with time left stays usable; an expired or rejected one stays invalidated.
-      const { refresh_cookies: _refused, ...remaining } = cached;
+      const { refresh_cookies: refused, ...remaining } = cached;
       const stillValid = !cached.access_token_invalidated && isFuture(cached.auth_token_expiry, now);
       const chosen = await writeSessionCache(options.sessionFile, { ...remaining, ...(stillValid ? {} : { access_token_invalidated: true }) }, options,
         (value) => cacheMatches(value, options, cached!.access_token));
@@ -778,7 +778,7 @@ async function renewSession(options: ResolveAuthenticatedSessionOptions, stored:
       // With the cookie refused, Okta is due now: recover in this command rather than the next one.
       // A first attempt that already ran (or failed) has set a backoff or a block, so this sends nothing twice.
       if (!oktaFailure) {
-        const recovered = await tryOkta();
+        const recovered = await tryOkta(refused);
         if (recovered) return recovered;
       }
     }
@@ -809,7 +809,7 @@ type OktaRenewal = { readonly session: AuthenticatedSession } | { readonly failu
  * A block (wrong password, unsupported MFA, too many failures) holds until `auth login --okta`,
  * and it is checked before okta export runs, so a blocked setup never reaches the password store.
  */
-async function renewThroughOkta(options: BrowserSessionOptions, cached: StoredSession): Promise<OktaRenewal | undefined> {
+async function renewThroughOkta(options: BrowserSessionOptions, cached: StoredSession, revoke: readonly BrowserCookie[] | undefined): Promise<OktaRenewal | undefined> {
   const state = cached.okta;
   const now = currentTime(options);
   if (!state || !options.oktaCredentials) return undefined;
@@ -825,7 +825,7 @@ async function renewThroughOkta(options: BrowserSessionOptions, cached: StoredSe
   }
   options.onRenewing?.("Okta");
   const attempt = await cancellable(options.signal, () => attemptOktaSignIn({
-    baseUrl: options.baseUrl, credentials, state, expectedUsername: cached.username,
+    baseUrl: options.baseUrl, credentials, state, expectedUsername: cached.username, revokeRenewalCookies: revoke,
     ...(options.fetch ? { fetch: options.fetch } : {}),
     now: () => currentTime(options).valueOf(),
     ...(options.onOktaProgress ? { onProgress: options.onOktaProgress } : {}),
@@ -845,7 +845,7 @@ async function oktaLogin(options: LoginAuthenticatedSessionOptions): Promise<Aut
   const credentials = await options.oktaCredentials();
   // A person asked: this lifts a block and the backoff, and keeps Okta's device token.
   const attempt = await cancellable(options.signal, () => attemptOktaSignIn({
-    baseUrl: options.baseUrl, credentials, state: previous?.okta, explicit: true,
+    baseUrl: options.baseUrl, credentials, state: previous?.okta, explicit: true, revokeRenewalCookies: previous?.refresh_cookies,
     ...(options.fetch ? { fetch: options.fetch } : {}),
     now: () => currentTime(options).valueOf(),
     ...(options.onOktaProgress ? { onProgress: options.onOktaProgress } : {}),

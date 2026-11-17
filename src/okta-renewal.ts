@@ -1,6 +1,6 @@
 import { OktaSignInError, type Cookie, type Fetch, type Progress } from "okta-auth-cli";
 
-import { signInToOnTrack, type OktaCredentials, type OnTrackOktaSession } from "./okta-sign-in.js";
+import { signInToOnTrack, type OktaCredentials, type HeldCookie, type OnTrackOktaSession } from "./okta-sign-in.js";
 
 // When an unattended caller (the CLI renewing in the background, or a Worker) may
 // sign in through Okta again, and what it remembers between attempts.
@@ -39,6 +39,8 @@ export interface OktaAttemptOptions {
   readonly state: OktaState | undefined;
   /** The OnTrack account already held. A different one is refused and blocks. */
   readonly expectedUsername?: string | undefined;
+  /** The refresh cookies held now, revoked before the exchange so Doubtfire issues a new one. */
+  readonly revokeRenewalCookies?: readonly HeldCookie[] | undefined;
   /** A person asked for this sign-in: lifts a block and the backoff. */
   readonly explicit?: boolean;
   readonly fetch?: Fetch;
@@ -87,6 +89,7 @@ export async function attemptOktaSignIn(options: OktaAttemptOptions): Promise<Ok
       credentials: options.credentials,
       deviceToken: state.device_token,
       oktaSession: state.okta_session,
+      revokeRenewalCookies: options.revokeRenewalCookies,
       ...(options.fetch ? { fetch: options.fetch } : {}),
       now,
       ...(options.onProgress ? { onProgress: options.onProgress } : {}),

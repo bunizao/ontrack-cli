@@ -157,6 +157,12 @@ async function stored(file: string): Promise<Record<string, any>> {
   return (await readSessionCache(file, cacheOptions))?.value as Record<string, any>;
 }
 
+/** The refresh token the cache holds, which Doubtfire also still holds and would hand back. */
+async function heldRefresh(file: string): Promise<{ value: string; expires: number }> {
+  const refresh = (await stored(file)).refresh_cookies.find((cookie: { name: string }) => cookie.name === "refresh_token");
+  return { value: refresh.value, expires: refresh.expires };
+}
+
 export async function test_auth_login_okta_saves_the_refresh_cookie_and_okta_state(): Promise<void> {
   const file = await sessionFile();
   const fake = fakeOkta({ now: () => NOW });
@@ -209,15 +215,34 @@ export async function test_renewal_signs_in_through_okta_when_the_refresh_cookie
   assert.equal(exports, 0, "okta export is not run while the refresh cookie has time left");
   assert.ok(!quiet.requests.some((request) => request.url.hostname !== ONTRACK));
 
-  // Six days in, under 48 hours remain: Okta signs in again and a new seven-day cookie replaces the old one.
+  // Six days in, under 48 hours remain: Okta signs in again, the held refresh token is revoked
+  // (Doubtfire would otherwise hand it back), and a new seven-day cookie replaces it.
   const sixDays = NOW + 6 * 24 * HOUR;
-  const fake = fakeOkta({ now: () => sixDays });
+  const held = await heldRefresh(file);
+  const fake = fakeOkta({ now: () => sixDays, heldRefresh: held });
   const announced: string[] = [];
   const session = await resolveAuthenticatedSession(resolveOptions(file, fake.fetch, sixDays, { onRenewing: (method) => announced.push(method) }));
   assert.equal(session.provenance, "okta");
   assert.deepEqual(announced, ["Okta"]);
   const refresh = (await stored(file)).refresh_cookies.find((cookie: { name: string }) => cookie.name === "refresh_token");
   assert.equal(refresh.expires, Math.floor((sixDays + 7 * 24 * HOUR) / 1_000));
+  assert.ok(fake.destroyed.has(held.value));
+  const revoke = fake.requests.findIndex((request) => request.method === "DELETE" && request.url.pathname === "/api/auth");
+  const exchange = fake.requests.findIndex((request) => request.method === "POST" && request.url.pathname === "/api/auth");
+  assert.ok(revoke >= 0 && revoke < exchange, "the held token is revoked right before the exchange");
+}
+
+export async function test_okta_sign_in_never_revokes_another_accounts_refresh_token(): Promise<void> {
+  const held = { value: "refresh-other", expires: Math.floor((NOW + 24 * HOUR) / 1_000) };
+  const fake = fakeOkta({ now: () => NOW, heldRefresh: held });
+  await signInToOnTrack({
+    baseUrl: BASE_URL, credentials: CREDENTIALS, fetch: fake.fetch, now: () => NOW,
+    revokeRenewalCookies: [
+      { name: "refresh_token", value: held.value },
+      { name: "username", value: "someone-else" },
+    ],
+  });
+  assert.ok(!fake.requests.some((request) => request.method === "DELETE"));
 }
 
 export async function test_renewal_signs_in_through_okta_when_the_refresh_cookie_is_gone(): Promise<void> {
@@ -308,10 +333,11 @@ export async function test_renewal_falls_back_to_okta_in_the_same_command_when_t
   await loginAuthenticatedSession(loginOptions(file, fakeOkta({ now: () => NOW }).fetch, NOW));
   // Five days left, so Okta is not due until Doubtfire refuses the cookie.
   const later = NOW + 2 * 24 * HOUR;
-  const fake = fakeOkta({ now: () => later, refuseRefresh: true });
+  const fake = fakeOkta({ now: () => later, refuseRefresh: true, heldRefresh: await heldRefresh(file) });
   const session = await resolveAuthenticatedSession(resolveOptions(file, fake.fetch, later));
   assert.equal(session.provenance, "okta");
-  assert.ok((await stored(file)).refresh_cookies.some((cookie: { name: string }) => cookie.name === "refresh_token"));
+  // The refused token is revoked too, so the sign-in gets a new one rather than the refused one back.
+  assert.equal((await heldRefresh(file)).expires, Math.floor((later + 7 * 24 * HOUR) / 1_000));
 }
 
 export async function test_cancelling_an_okta_sign_in_exits_as_cancelled_and_records_nothing(): Promise<void> {
