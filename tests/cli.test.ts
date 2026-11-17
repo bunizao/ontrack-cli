@@ -235,14 +235,16 @@ export async function test_auth_login_modes_are_explicit_and_mutually_exclusive(
     version: "1.0.0",
     authLogin: async (mode) => { modes.push(mode); return { username: "student" }; },
   });
-  for (const flag of ["--browser", "--reuse-browser", "--paste"]) {
+  for (const flag of ["--browser", "--reuse-browser", "--paste", "--okta"]) {
     const result = await executeCli(["auth", "login", flag, "--json"], deps);
     assert.equal(result.exitCode, 0, result.stderr);
   }
-  assert.deepEqual(modes, ["browser", "reuse", "paste"]);
+  assert.deepEqual(modes, ["browser", "reuse", "paste", "okta"]);
   const invalid = await executeCli(["auth", "login", "--browser", "--paste", "--json"], deps);
   assert.equal(invalid.exitCode, 2);
-  assert.equal(modes.length, 3);
+  const withOkta = await executeCli(["auth", "login", "--okta", "--paste", "--json"], deps);
+  assert.equal(withOkta.exitCode, 2);
+  assert.equal(modes.length, 4);
 }
 
 export async function test_local_status_renewal_and_doctor_do_not_enter_interactive_authentication(): Promise<void> {

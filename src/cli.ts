@@ -14,6 +14,7 @@ import { authenticationCookieCandidates } from "./browser-cookies.js";
 import { executeCli, type ChatSendConfirmation } from "./cli-app.js";
 import { configuredBaseUrl, loadConfig, resolveBaseUrl, resolveConfigPaths, resolveCredentialSource, type ConfigPaths, type Environment } from "./config.js";
 import { diagnoseAuth } from "./doctor.js";
+import { exportOktaCredentials } from "./okta-export.js";
 import { readSecretLine } from "./secret-input.js";
 import { CliError } from "./errors.js";
 import { HttpClient } from "./http.js";
@@ -189,11 +190,13 @@ async function authLogin(signal: AbortSignal, env: Environment, platform: NodeJS
     },
     promptEnter: (message) => promptForBrowserLogin(message, signal),
     openBrowser: (url) => openSystemBrowser(url, { platform }),
+    oktaCredentials: () => exportOktaCredentials({ showMessages: true, signal }),
+    onOktaProgress: announceOktaProgress,
   });
   return {
     username: session.username,
     auth_token_expiry: session.authTokenExpiry,
-    renewal: session.renewalCookies ? "refresh_cookie" : "sign_in",
+    renewal: mode === "okta" ? "okta" : session.renewalCookies ? "refresh_cookie" : "sign_in",
   };
 }
 
@@ -224,7 +227,12 @@ async function probeBrowserCookies(baseUrl: string, signal: AbortSignal): Promis
 }
 
 function announceRenewal(method: string): void {
-  process.stderr.write(`Renewing the OnTrack session in a ${method}...\n`);
+  process.stderr.write(`Renewing the OnTrack session ${method === "Okta" ? "through Okta" : `in a ${method}`}...\n`);
+}
+
+// okta-auth's progress names hosts and steps only, never credentials or the landing URL.
+function announceOktaProgress(message: string): void {
+  process.stderr.write(`${message}\n`);
 }
 
 function announceRenewalExpiry(expiresAt: Date): void {
@@ -244,6 +252,8 @@ async function createApplication(signal: AbortSignal, env: Environment, platform
     browserProfileDir: browserProfileForSite(paths.configDir, baseUrl),
     onRenewing: announceRenewal,
     onRenewalExpiring: announceRenewalExpiry,
+    // Runs only for a session signed in with `auth login --okta`, when it is due.
+    oktaCredentials: () => exportOktaCredentials({ signal }),
     ...(renew ? { skipCache: true } : {}),
     browserCookieProvider: () => authenticationCookieCandidates(baseUrl, { signal: AbortSignal.any([signal, AbortSignal.timeout(8_000)]) }),
   });
@@ -267,6 +277,7 @@ async function createApplication(signal: AbortSignal, env: Environment, platform
         browserProfileDir: browserProfileForSite(paths.configDir, baseUrl),
         skipCache: true,
         onRenewing: announceRenewal,
+        oktaCredentials: () => exportOktaCredentials({ signal: refreshSignal }),
         rejectedAccessToken: rejected.accessToken,
         browserCookieProvider: () => authenticationCookieCandidates(baseUrl, { signal: AbortSignal.any([refreshSignal, AbortSignal.timeout(8_000)]) }),
       });

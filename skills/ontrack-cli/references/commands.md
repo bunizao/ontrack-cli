@@ -6,7 +6,7 @@ Generated from `ontrack commands --json` for version 0.4.0.
 | --- | --- | --- | --- | --- |
 | `ontrack user` | Show the signed-in user |  |  | no |
 | `ontrack auth` | Manage authentication |  |  | no |
-| `ontrack auth login` | Sign in through OnTrack |  | --browser<br>--reuse-browser<br>--paste<br>--manual<br>--username <username> | no |
+| `ontrack auth login` | Sign in through OnTrack |  | --browser<br>--reuse-browser<br>--paste<br>--manual<br>--okta<br>--username <username> | no |
 | `ontrack auth status` | Validate current credentials |  | --local | no |
 | `ontrack auth keepalive` | Renew and verify the session once without an interactive sign-in |  |  | no |
 | `ontrack auth logout` | Remove the cached session |  |  | no |
