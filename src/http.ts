@@ -300,7 +300,9 @@ export class HttpClient {
       ? AbortSignal.any([externalSignal, timeoutController.signal])
       : timeoutController.signal;
     try {
-      const init: RequestInit = { method, headers, signal, redirect: "error" };
+      // Never follow a redirect with the credentials. "manual" hands the 3xx back as a
+      // failed response; Workers does not implement "error".
+      const init: RequestInit = { method, headers, signal, redirect: "manual" };
       if (options.body !== undefined) init.body = options.body;
       const response = await this.#fetch(url, init);
       if (!response.ok) {

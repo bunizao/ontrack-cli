@@ -665,7 +665,7 @@ export async function test_cli_browser_login_validates_cookies_before_saving(): 
       const request = new Request(input, init);
       if (request.url.endsWith("/method")) return Response.json({ method: "saml", redirect_to: "https://identity.example.edu/saml" });
       exchanges += 1;
-      assert.equal(request.redirect, "error");
+      assert.equal(request.redirect, "manual");
       assert.equal(await request.text(), '{"delete_auth_token":false}');
       if (request.headers.get("Cookie")?.includes("anonymous")) return Response.json(null);
       return Response.json({ auth_token: "test-access", auth_token_expiry: "2030-01-01T00:00:00Z", user: { username: "alice" } });

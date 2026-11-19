@@ -647,7 +647,7 @@ export async function test_get_401_recovers_once_and_reports_the_rejected_creden
       return { username: "alice", accessToken: "renewed" };
     },
     fetch: async (_input, init) => {
-      assert.equal(init?.redirect, "error");
+      assert.equal(init?.redirect, "manual");
       return new Headers(init?.headers).get("Auth-Token") === "initial"
         ? new Response(null, { status: 401 }) : Response.json({ ok: true });
     },
@@ -695,4 +695,13 @@ export async function test_http_client_calls_the_default_fetch_unbound(): Promis
   } finally {
     globalThis.fetch = original;
   }
+}
+
+export async function test_http_client_reports_a_redirect_instead_of_following_it(): Promise<void> {
+  const client = new HttpClient({
+    baseUrl: "https://school.example.edu", credentials: { username: "alice", accessToken: "secret" },
+    fetch: async () => new Response(null, { status: 302, headers: { Location: "https://elsewhere.example.com/" } }),
+  });
+  await assert.rejects(client.request("api/projects"),
+    (error: unknown) => error instanceof CliError && error.category === "upstream_api" && error.statusCode === 302);
 }

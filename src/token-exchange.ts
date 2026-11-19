@@ -54,7 +54,8 @@ export async function exchangeRefreshCookies(
         Cookie: cookieHeader(cookies),
       },
       body: JSON.stringify({ delete_auth_token: false }),
-      redirect: "error",
+      // A 3xx comes back as a failed response; Workers does not implement "error".
+      redirect: "manual",
       signal: requestSignal,
     });
   } catch {
