@@ -107,6 +107,12 @@ const TABLE_COLUMNS: Readonly<Record<string, readonly [string, string][]>> = {
   "chats list": [["id", "id"], ["abbreviation", "task"], ["name", "name"], ["status_label", "status"]],
 };
 
+/** The URL is long and fixed; a person checking the Worker wants to know when it renews. */
+const MCP_STATUS_COLUMNS: readonly [string, string][] = [
+  ["session.username", "user"], ["session.refresh_expires_at", "refresh until"],
+  ["session.next_alarm_at", "renews at"], ["session.okta_blocked", "okta blocked"],
+];
+
 function commandPath(command: { name(): string; parent?: unknown }): string {
   const names: string[] = [];
   for (let current = command; current?.parent; current = current.parent as typeof command) {
@@ -121,6 +127,8 @@ interface InvocationResult {
   readonly markdown?: string;
   readonly diagnostic?: string;
   readonly dryRun?: string;
+  /** Table columns for a command whose rows differ by argument; beats TABLE_COLUMNS. */
+  readonly columns?: readonly [string, string][];
   /** Overrides the success exit code; the output is still printed. */
   readonly exitCode?: number;
 }
@@ -502,7 +510,7 @@ export async function executeCli(argv: readonly string[], dependencies: Dependen
         const run = action === "deploy" ? dependencies.mcpDeploy : action === "status" ? dependencies.mcpStatus : undefined;
         if (action !== "deploy" && action !== "status") throw new CliError("usage", `Unknown mcp action ${JSON.stringify(action)}; use deploy or status.`);
         if (!run) throw new CliError("config", "The remote MCP commands are unavailable.");
-        setResult({ value: await run() });
+        setResult({ value: await run(), ...(action === "status" ? { columns: MCP_STATUS_COLUMNS } : {}) });
       });
 
     program.command("commands").description("Describe the complete command tree").action(() => {
@@ -548,7 +556,7 @@ export async function executeCli(argv: readonly string[], dependencies: Dependen
       stdout += render(sanitized(result.value), {
         format,
         ...(selectedFields ? { fields: selectedFields } : {}),
-        ...(!selectedFields && TABLE_COLUMNS[ranCommand] ? { columns: TABLE_COLUMNS[ranCommand] } : {}),
+        ...(!selectedFields && (result.columns ?? TABLE_COLUMNS[ranCommand]) ? { columns: result.columns ?? TABLE_COLUMNS[ranCommand] } : {}),
         ...(dependencies.stdoutColumns ? { width: dependencies.stdoutColumns } : {}),
         ...(theme ? { theme, tones: STATUS_TONES } : {}),
       });
