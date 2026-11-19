@@ -202,10 +202,11 @@ function oauthProvider(env: Env, origin: string): OAuthProvider<Env> {
 }
 
 const ACCESS = [
-  "Read your units, tasks, due dates and task sheets",
-  "Read a task's comments, which marks them read as the website does",
-  "Nothing is submitted or changed for you",
+  "See your units, tasks, due dates and task sheets",
+  "Read your tutors' comments, which marks them read, as the website does",
 ];
+const LIMITS = ["Submit work, change a task's status or message your tutor"];
+const PAIRING_HINT = "Each code works once, for 10 minutes. Get one on the computer you deployed from: `ontrack mcp pair`";
 
 async function handleAuthorize(request: Request, env: Env, helpers: OAuthHelpers): Promise<Response> {
   if (request.method === "GET") return consent(request, helpers);
@@ -225,8 +226,8 @@ async function handleAuthorize(request: Request, env: Env, helpers: OAuthHelpers
       // Show the page again for the same request, with a fresh consent handle.
       const again = new Request(new URL(`/authorize${String(form.get("request") ?? "")}`, request.url), { headers: request.headers });
       return consent(again, helpers, paired.attemptsLeft > 0
-        ? `That code is wrong. ${paired.attemptsLeft} ${paired.attemptsLeft === 1 ? "try" : "tries"} left.`
-        : "No pairing code is open. Run `ontrack mcp pair` and enter the new code.");
+        ? `That code didn't match. ${paired.attemptsLeft} ${paired.attemptsLeft === 1 ? "try" : "tries"} left.`
+        : "That code has expired or was used up. Get a new one: `ontrack mcp pair`");
     }
     const approved = await helpers.approveConsent(request, handle, { scope: [SCOPE] });
     const client = await helpers.lookupClient(approved.request.clientId);
@@ -259,9 +260,10 @@ async function consent(request: Request, helpers: OAuthHelpers, error?: string):
     client: client?.clientName?.trim() || authRequest.clientId,
     redirectUri: authRequest.redirectUri,
     access: ACCESS,
+    limits: LIMITS,
     action: "/authorize",
     fields: { handle, request: new URL(request.url).search },
-    secret: { name: "pairing_code", label: "Pairing code", kind: "code", hint: "Run `ontrack mcp pair` on your computer. A code lasts 10 minutes." },
+    secret: { name: "pairing_code", label: "Pairing code", kind: "code", placeholder: "ABCD 2345", hint: PAIRING_HINT },
     ...(error ? { error } : {}),
   });
   return withHeaders(html(page, error ? 400 : 200), headers);
