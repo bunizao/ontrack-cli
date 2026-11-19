@@ -38,6 +38,8 @@ export interface McpOptions {
   readonly fetch?: typeof fetch;
   readonly bundle?: string;
   readonly timeZone?: string;
+  /** Wait between checks while a new workers.dev hostname comes up. */
+  readonly retryDelayMs?: number;
   readonly onProgress?: (message: string) => void;
 }
 
@@ -84,7 +86,7 @@ export async function deployMcp(options: McpOptions): Promise<unknown> {
   await writeDeployment(options.configDir, { url: origin, owner_token: ownerToken });
 
   progress("Signing in to OnTrack from the Worker (Okta, about ten seconds)...");
-  const whoami = await callTool(origin, ownerToken, "whoami", options.fetch ?? fetch);
+  const whoami = await callTool(origin, ownerToken, "whoami", options.fetch ?? fetch, options.retryDelayMs ?? 3_000);
   return {
     url: `${origin}/mcp`,
     worker: WORKER_NAME,
@@ -130,18 +132,26 @@ export function workerOrigin(output: string): string | null {
   return new RegExp(`https://${WORKER_NAME}\\.[a-z0-9-]+\\.workers\\.dev`, "iu").exec(output)?.[0] ?? null;
 }
 
-async function callTool(origin: string, token: string, name: string, fetchImplementation: typeof fetch): Promise<unknown> {
-  let response: Response;
-  try {
-    response = await fetchImplementation(`${origin}/mcp`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}`, Accept: "application/json, text/event-stream", "Content-Type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: {} } }),
-      signal: AbortSignal.timeout(90_000),
-    });
-  } catch {
-    throw new CliError("network", `The Worker deployed but ${origin} could not be reached yet.`, undefined, "Run `ontrack mcp status` in a minute.");
+// A first deploy's workers.dev hostname answers 404 for a few seconds.
+const HOSTNAME_ATTEMPTS = 10;
+
+async function callTool(origin: string, token: string, name: string, fetchImplementation: typeof fetch, retryDelayMs: number): Promise<unknown> {
+  let response: Response | undefined;
+  for (let attempt = 1; attempt <= HOSTNAME_ATTEMPTS; attempt += 1) {
+    try {
+      response = await fetchImplementation(`${origin}/mcp`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, Accept: "application/json, text/event-stream", "Content-Type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: {} } }),
+        signal: AbortSignal.timeout(90_000),
+      });
+    } catch {
+      throw new CliError("network", `The Worker deployed but ${origin} could not be reached yet.`, undefined, "Run `ontrack mcp status` in a minute.");
+    }
+    if (response.status !== 404) break;
+    await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
   }
+  if (!response) throw new CliError("network", `${origin} did not answer.`);
   if (!response.ok) throw new CliError("upstream_api", `The Worker answered HTTP ${response.status}.`, response.status);
   const payload = await response.json() as { result?: { isError?: boolean; content?: Array<{ text?: string }> } };
   const text = payload.result?.content?.[0]?.text ?? "";

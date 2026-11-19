@@ -105,6 +105,21 @@ export async function test_mcp_deploy_reports_a_worker_that_cannot_sign_in(): Pr
   }
 }
 
+export async function test_mcp_deploy_waits_for_a_new_workers_dev_hostname(): Promise<void> {
+  const { dir, bundle, cleanup } = await workspace();
+  try {
+    let calls = 0;
+    const answer = worker({ text: JSON.stringify({ username: "student" }) });
+    const result = await deployMcp({ configDir: dir, baseUrl: "https://ontrack.example.edu", bundle, oktaCredentials: async () => OKTA,
+      run: runner([]), retryDelayMs: 0,
+      fetch: async (input, init) => (calls += 1) <= 2 ? new Response("There is nothing here yet", { status: 404 }) : answer(input, init) }) as { signed_in_as: string };
+    assert.equal(calls, 3);
+    assert.equal(result.signed_in_as, "student");
+  } finally {
+    await cleanup();
+  }
+}
+
 export async function test_mcp_status_reads_the_worker_with_the_owner_token(): Promise<void> {
   const { dir, cleanup } = await workspace();
   try {
