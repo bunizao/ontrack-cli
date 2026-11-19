@@ -44,12 +44,12 @@ export async function test_distribution_help_version_and_description_run_in_node
   for (const executable of [process.execPath, "bun"]) {
     const help = await run(executable, [entrypoint, "--help"]);
     assert.equal(help.code, 0, executable);
-    assert.match(help.stdout, /^ontrack v\d+\.\d+\.\d+\n/u, executable);
+    assert.match(help.stdout, /^ontrack v\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?\n/u, executable);
     assert.equal(help.stderr, "", executable);
 
     const version = await run(executable, [entrypoint, "-V"]);
     assert.equal(version.code, 0, executable);
-    assert.match(version.stdout, /^\d+\.\d+\.\d+\n$/u, executable);
+    assert.match(version.stdout, /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?\n$/u, executable);
     assert.equal(version.stderr, "", executable);
 
     const commands = await run(executable, [entrypoint, "commands", "--json"]);
