@@ -16,8 +16,10 @@ writeFileSync(config, JSON.stringify({
   compatibility_date: "2026-08-09",
 }));
 try {
-  const result = spawnSync(join(root, "node_modules", ".bin", "wrangler"),
-    ["deploy", "--dry-run", "--config", config, "--outdir", outdir], { stdio: ["ignore", "ignore", "inherit"] });
+  // Run wrangler's JS entry with this Node: node_modules/.bin/wrangler is a shell script on Windows.
+  const result = spawnSync(process.execPath, [join(root, "node_modules", "wrangler", "bin", "wrangler.js"),
+    "deploy", "--dry-run", "--config", config, "--outdir", outdir], { stdio: ["ignore", "ignore", "inherit"] });
+  if (result.error) throw result.error;
   if (result.status !== 0) process.exit(result.status ?? 1);
   for (const extra of ["index.js.map", "README.md"]) rmSync(join(outdir, extra), { force: true });
 } finally {
