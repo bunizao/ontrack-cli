@@ -5,6 +5,7 @@ import OAuthProvider, {
   type OAuthProviderOptions,
 } from "@cloudflare/workers-oauth-provider";
 import { CONSENT_HEADERS, consentPage, messagePage } from "@bunizao/cli-kit/consent";
+import { siteIcon } from "@bunizao/cli-kit/site-icon";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { DurableObject } from "cloudflare:workers";
 
@@ -209,7 +210,7 @@ const LIMITS = ["Submit work, change a task's status or message your tutor"];
 const PAIRING_HINT = "Each code works once, for 10 minutes. Get one on the computer you deployed from: `ontrack mcp pair`";
 
 async function handleAuthorize(request: Request, env: Env, helpers: OAuthHelpers): Promise<Response> {
-  if (request.method === "GET") return consent(request, helpers);
+  if (request.method === "GET") return consent(request, env, helpers);
   if (request.method !== "POST") return new Response("Method not allowed.", { status: 405, headers: { allow: "GET, POST" } });
   if (request.headers.get("origin") !== new URL(request.url).origin) {
     return new Response("Invalid request origin.", { status: 403 });
@@ -227,7 +228,7 @@ async function handleAuthorize(request: Request, env: Env, helpers: OAuthHelpers
     if (!paired.ok) {
       // Show the page again for the same request, with a fresh consent handle.
       const again = new Request(new URL(`/authorize${String(form.get("request") ?? "")}`, request.url), { headers: request.headers });
-      return consent(again, helpers, paired.attemptsLeft > 0
+      return consent(again, env, helpers, paired.attemptsLeft > 0
         ? `That code didn't match. ${paired.attemptsLeft} ${paired.attemptsLeft === 1 ? "try" : "tries"} left.`
         : "That code has expired or was used up. Get a new one: `ontrack mcp pair`");
     }
@@ -246,7 +247,7 @@ async function handleAuthorize(request: Request, env: Env, helpers: OAuthHelpers
   }
 }
 
-async function consent(request: Request, helpers: OAuthHelpers, error?: string): Promise<Response> {
+async function consent(request: Request, env: Env, helpers: OAuthHelpers, error?: string): Promise<Response> {
   let authRequest;
   try {
     authRequest = await helpers.parseAuthRequest(request);
@@ -256,8 +257,10 @@ async function consent(request: Request, helpers: OAuthHelpers, error?: string):
   }
   const client = await helpers.lookupClient(authRequest.clientId);
   const { handle, headers } = await helpers.beginConsent(authRequest);
+  const appIcon = await siteIcon(env.ONTRACK_ORIGIN);
   const page = consentPage({
     app: "OnTrack",
+    ...(appIcon ? { appIcon } : {}),
     client: client?.clientName?.trim() || authRequest.clientId,
     redirectUri: authRequest.redirectUri,
     access: ACCESS,
