@@ -149,6 +149,20 @@ export async function test_output_defaults_to_json_for_pipes_and_table_for_termi
   assert.match(yaml.stdout, /code: FIT1045/u);
 }
 
+export async function test_mcp_status_table_shows_when_the_session_renews(): Promise<void> {
+  const status = {
+    url: "https://ontrack-mcp.someone.workers.dev/mcp",
+    version: "0.5.0",
+    session: { username: "student", refresh_expires_at: "2026-11-26T05:00:20.000Z", okta_blocked: null, next_alarm_at: "2026-11-24T05:00:20.000Z" },
+  };
+  const run = (stdoutIsTty: boolean) => executeCli(["mcp", "status"], dependencies(fakeApplication().app,
+    { version: "1.0.0", stdoutIsTty, stdoutColumns: 80, mcpStatus: async () => status }));
+  const terminal = await run(true);
+  assert.match(terminal.stdout, /^user\s+refresh until\s+renews at\s+okta blocked$/mu);
+  assert.match(terminal.stdout, /^student\s+2026-11-26T05:00:20\.000Z\s+2026-11-24T05:00:20\.000Z$/mu);
+  assert.deepEqual(JSON.parse((await run(false)).stdout), status);
+}
+
 export async function test_output_flags_are_exclusive_and_fields_filter_top_level_values(): Promise<void> {
   const conflictApp = fakeApplication().app;
   const conflict = await executeCli(["units", "--json", "--yaml"], dependencies(conflictApp, { version: "1.0.0" }));

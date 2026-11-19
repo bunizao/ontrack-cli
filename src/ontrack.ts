@@ -2,7 +2,7 @@ import { CliError } from "./errors.js";
 import { HttpClient, type DownloadResponse } from "./http.js";
 import { readProject, readProjects, readRoles, readTaskComment, readTaskComments, readTaskUpdate, readUnit } from "./readers.js";
 import type { Project, ProjectSummary, TaskComment, TaskUpdate, Unit, UnitRole } from "./types.js";
-import type { PreparedUpload } from "./uploads.js";
+import type { PreparedUpload } from "./types.js";
 import type { WritableTaskState } from "./status.js";
 
 export interface ProjectResourcesArchive {

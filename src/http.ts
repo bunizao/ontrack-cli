@@ -189,7 +189,8 @@ export class HttpClient {
     validateCredentials(options.credentials);
     this.#baseUrl = new URL(options.baseUrl.endsWith("/") ? options.baseUrl : `${options.baseUrl}/`);
     this.#credentials = options.credentials;
-    this.#fetch = options.fetch ?? globalThis.fetch;
+    // Wrapped: Workers throws "Illegal invocation" when fetch is called as a method of another object.
+    this.#fetch = options.fetch ?? ((input, init) => globalThis.fetch(input, init));
     this.#refresh = options.refresh;
     this.#timeoutMs = options.timeoutMs ?? 30_000;
     this.#signal = options.signal;
@@ -299,7 +300,9 @@ export class HttpClient {
       ? AbortSignal.any([externalSignal, timeoutController.signal])
       : timeoutController.signal;
     try {
-      const init: RequestInit = { method, headers, signal, redirect: "error" };
+      // Never follow a redirect with the credentials. "manual" hands the 3xx back as a
+      // failed response; Workers does not implement "error".
+      const init: RequestInit = { method, headers, signal, redirect: "manual" };
       if (options.body !== undefined) init.body = options.body;
       const response = await this.#fetch(url, init);
       if (!response.ok) {

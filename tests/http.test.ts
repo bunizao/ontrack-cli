@@ -647,7 +647,7 @@ export async function test_get_401_recovers_once_and_reports_the_rejected_creden
       return { username: "alice", accessToken: "renewed" };
     },
     fetch: async (_input, init) => {
-      assert.equal(init?.redirect, "error");
+      assert.equal(init?.redirect, "manual");
       return new Headers(init?.headers).get("Auth-Token") === "initial"
         ? new Response(null, { status: 401 }) : Response.json({ ok: true });
     },
@@ -680,4 +680,28 @@ export function test_invalid_credential_headers_do_not_expose_values(): void {
   assert.throws(() => new HttpClient({
     baseUrl: "https://school.example.edu", credentials: { username: "alice", accessToken: "private-marker\r\ninjected" },
   }), (error) => error instanceof CliError && !error.message.includes("private-marker"));
+}
+
+export async function test_http_client_calls_the_default_fetch_unbound(): Promise<void> {
+  // Workers rejects fetch called as a method of another object ("Illegal invocation").
+  const original = globalThis.fetch;
+  globalThis.fetch = function (this: unknown): Promise<Response> {
+    if (this !== undefined && this !== globalThis) throw new TypeError("Illegal invocation");
+    return Promise.resolve(Response.json([]));
+  } as typeof fetch;
+  try {
+    const client = new HttpClient({ baseUrl: "https://school.example.edu", credentials: { username: "student", accessToken: "secret" } });
+    assert.deepEqual(await client.request("api/projects"), []);
+  } finally {
+    globalThis.fetch = original;
+  }
+}
+
+export async function test_http_client_reports_a_redirect_instead_of_following_it(): Promise<void> {
+  const client = new HttpClient({
+    baseUrl: "https://school.example.edu", credentials: { username: "alice", accessToken: "secret" },
+    fetch: async () => new Response(null, { status: 302, headers: { Location: "https://elsewhere.example.com/" } }),
+  });
+  await assert.rejects(client.request("api/projects"),
+    (error: unknown) => error instanceof CliError && error.category === "upstream_api" && error.statusCode === 302);
 }

@@ -1,6 +1,6 @@
 # ontrack commands
 
-Generated from `ontrack commands --json` for version 0.4.0.
+Generated from `ontrack commands --json` for version 0.5.0.
 
 | Command | Description | Arguments | Options | Mutating |
 | --- | --- | --- | --- | --- |
@@ -29,6 +29,7 @@ Generated from `ontrack commands --json` for version 0.4.0.
 | `ontrack chats send` | Send a task chat message | <unit> <task> | --message <text> | yes |
 | `ontrack roles` | Teaching roles you hold |  |  | no |
 | `ontrack roles list` | List teaching roles |  | --all | no |
+| `ontrack mcp` | Run a remote MCP server on your Cloudflare account; it renews the session through Okta | <action> |  | no |
 | `ontrack commands` | Describe the complete command tree |  |  | no |
 | `ontrack skills` | Generate the agent skill |  |  | no |
 | `ontrack skills generate` | Write the skill folder and plugin files into the current directory |  |  | no |

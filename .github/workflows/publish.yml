@@ -29,4 +29,5 @@ jobs:
       - run: npm ci
       - name: Verify release tag
         run: node scripts/verify-release-tag.mjs
-      - run: npm publish --access public --provenance
+      # A tag like v0.6.0-beta.0 goes to the beta dist-tag; latest stays on the last stable release.
+      - run: npm publish --access public --provenance --tag ${{ contains(github.ref_name, '-') && 'beta' || 'latest' }}

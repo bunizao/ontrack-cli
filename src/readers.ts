@@ -175,7 +175,9 @@ function readUploadRequirements(value: unknown): UploadRequirement[] {
   return array(value, "task definition upload_requirements").map((item, index) => {
     const data = object(item, `upload requirement ${index + 1}`);
     const key = requiredString(data.key, `upload requirement key ${index + 1}`);
-    if (key !== `file${index}`) return contract(`upload requirement key ${index + 1} must be file${index}`);
+    // Doubtfire matches each upload's form field to a key of this form. Keys need not
+    // run in sequence: OnTrack keeps them when a unit's requirements are edited (file0, file5).
+    if (!/^file\d+$/u.test(key)) return contract(`upload requirement key ${index + 1} must look like file0`);
     const type = requiredString(data.type, `upload requirement type ${index + 1}`);
     if (type !== "code" && type !== "document" && type !== "image" && type !== "zip") {
       return contract(`upload requirement type ${index + 1} is unsupported`);

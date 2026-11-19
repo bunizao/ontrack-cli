@@ -1,5 +1,5 @@
 import { CliError } from "./errors.js";
-import type { PreparedUpload } from "./uploads.js";
+import type { PreparedUpload } from "./types.js";
 
 export const submissionTypes = ["ready_for_feedback", "need_help", "assess_in_portfolio"] as const;
 export type SubmissionType = (typeof submissionTypes)[number];

@@ -1,6 +1,6 @@
 {
   "name": "ontrack",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Terminal-first CLI for OnTrack and Doubtfire",
   "type": "module",
   "bin": {
@@ -23,7 +23,8 @@
   },
   "scripts": {
     "build": "node scripts/apply-sweet-cookie-patch.mjs && node scripts/clean-output.mjs && tsc -p tsconfig.build.json && node scripts/mark-cli-executable.mjs",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.core.json",
+    "build:worker": "node scripts/build-worker.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.core.json && tsc -p tsconfig.worker.json",
     "test": "npm run build && tsc -p tsconfig.json && node .build/tests/harness.js",
     "test:bun": "npm run build && tsc -p tsconfig.json && bun .build/tests/harness.js",
     "test:golden": "npm run build && tsc -p tsconfig.json && node scripts/golden-run.mjs",
@@ -34,11 +35,16 @@
     "verify:live": "npm run build && node dist/cli.js auth status --json",
     "coverage:domain": "npm run build && tsc -p tsconfig.json && node scripts/check-domain-coverage.mjs",
     "skill:generate": "npm run build && node dist/cli.js skills generate",
-    "prepack": "npm run build"
+    "prepack": "npm run build && npm run build:worker"
   },
   "devDependencies": {
+    "@cloudflare/workers-oauth-provider": "1.2.4",
+    "@cloudflare/workers-types": "5.20261104.1",
+    "@modelcontextprotocol/sdk": "1.32.2",
     "@types/node": "24.1.0",
-    "typescript": "7.0.2"
+    "typescript": "7.0.2",
+    "wrangler": "4.158.0",
+    "zod": "4.6.7"
   },
   "license": "MIT",
   "repository": {

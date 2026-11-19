@@ -22,6 +22,7 @@ import {
   type Ui,
 } from "@bunizao/cli-kit";
 
+import type { ChatSendConfirmation } from "./application-core.js";
 import { CliError } from "./errors.js";
 import { assertSupportedRuntime } from "./runtime.js";
 import { skillFiles } from "./skill.js";
@@ -29,6 +30,8 @@ import { submissionType, submissionTypes, type TaskSubmissionOptions, type TaskS
 import { STATUS_TONES, writableTaskState, writableTaskStates, type WritableTaskState } from "./status.js";
 import { ONTRACK_TAGLINE, ONTRACK_WORDMARK } from "./wordmark.js";
 import type { LoginMode } from "./auth.js";
+
+export type { ChatSendConfirmation } from "./application-core.js";
 
 export interface CliApplication {
   resolveProject(reference: string): Promise<number>;
@@ -71,6 +74,8 @@ interface Dependencies {
   readonly authLocalStatus?: () => Promise<unknown>;
   readonly authRenew?: () => Promise<unknown>;
   readonly doctor?: (live: boolean, cookies: boolean) => Promise<unknown>;
+  readonly mcpDeploy?: () => Promise<unknown>;
+  readonly mcpStatus?: () => Promise<unknown>;
   readonly version: string;
   readonly sensitiveValues?: readonly string[];
   readonly onDiagnostic?: (message: string) => void;
@@ -102,6 +107,12 @@ const TABLE_COLUMNS: Readonly<Record<string, readonly [string, string][]>> = {
   "chats list": [["id", "id"], ["abbreviation", "task"], ["name", "name"], ["status_label", "status"]],
 };
 
+/** The URL is long and fixed; a person checking the Worker wants to know when it renews. */
+const MCP_STATUS_COLUMNS: readonly [string, string][] = [
+  ["session.username", "user"], ["session.refresh_expires_at", "refresh until"],
+  ["session.next_alarm_at", "renews at"], ["session.okta_blocked", "okta blocked"],
+];
+
 function commandPath(command: { name(): string; parent?: unknown }): string {
   const names: string[] = [];
   for (let current = command; current?.parent; current = current.parent as typeof command) {
@@ -110,18 +121,14 @@ function commandPath(command: { name(): string; parent?: unknown }): string {
   return names.join(" ");
 }
 
-export interface ChatSendConfirmation {
-  readonly projectId: number;
-  readonly taskDefinitionId: number;
-  readonly task: string;
-  readonly message: string;
-}
 
 interface InvocationResult {
   readonly value?: unknown;
   readonly markdown?: string;
   readonly diagnostic?: string;
   readonly dryRun?: string;
+  /** Table columns for a command whose rows differ by argument; beats TABLE_COLUMNS. */
+  readonly columns?: readonly [string, string][];
   /** Overrides the success exit code; the output is still printed. */
   readonly exitCode?: number;
 }
@@ -168,7 +175,7 @@ function describeArguments(command: ReturnType<typeof createProgram>): void {
 // Grouped the way `gh` does: what a person reaches for daily, then the rest, then what only an agent runs.
 const HELP_SECTIONS: Readonly<Record<string, readonly string[]>> = {
   "Core commands": ["courses", "tasks", "chats"],
-  "Additional commands": ["user", "roles", "auth", "doctor"],
+  "Additional commands": ["user", "roles", "auth", "doctor", "mcp"],
   "Agent commands": ["commands", "skills"],
 };
 
@@ -496,6 +503,16 @@ export async function executeCli(argv: readonly string[], dependencies: Dependen
       setResult({ value: await (await application()).roles({ showAll: options.all === true }) });
     });
 
+    // One command with an action argument: cli-kit's verb vocabulary has no "deploy".
+    program.command("mcp").description("Run a remote MCP server on your Cloudflare account; it renews the session through Okta")
+      .argument("<action>", "deploy (or update) the Worker, or status: its URL and how its OnTrack session renews")
+      .action(async (action: string) => {
+        const run = action === "deploy" ? dependencies.mcpDeploy : action === "status" ? dependencies.mcpStatus : undefined;
+        if (action !== "deploy" && action !== "status") throw new CliError("usage", `Unknown mcp action ${JSON.stringify(action)}; use deploy or status.`);
+        if (!run) throw new CliError("config", "The remote MCP commands are unavailable.");
+        setResult({ value: await run(), ...(action === "status" ? { columns: MCP_STATUS_COLUMNS } : {}) });
+      });
+
     program.command("commands").description("Describe the complete command tree").action(() => {
       setResult({ value: commandsJson(program) });
     });
@@ -539,7 +556,7 @@ export async function executeCli(argv: readonly string[], dependencies: Dependen
       stdout += render(sanitized(result.value), {
         format,
         ...(selectedFields ? { fields: selectedFields } : {}),
-        ...(!selectedFields && TABLE_COLUMNS[ranCommand] ? { columns: TABLE_COLUMNS[ranCommand] } : {}),
+        ...(!selectedFields && (result.columns ?? TABLE_COLUMNS[ranCommand]) ? { columns: result.columns ?? TABLE_COLUMNS[ranCommand] } : {}),
         ...(dependencies.stdoutColumns ? { width: dependencies.stdoutColumns } : {}),
         ...(theme ? { theme, tones: STATUS_TONES } : {}),
       });

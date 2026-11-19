@@ -74,7 +74,9 @@ export async function diagnoseAuth(options: DoctorOptions): Promise<Record<strin
       : site.reachable === false ? "Sign-in discovery is unavailable. Check the site URL and connection, then retry."
       : auth.credential_source === "environment" || auth.credential_source === "config" || auth.credential_source === "migration"
         ? "Explicit credentials override the cache. Replace or remove an invalid override before signing in through a browser."
-        : auth.renewal === "refresh_cookie" || auth.renewal === "browser"
+        : auth.renewal === "okta" && auth.okta_blocked
+          ? `Okta renewal stopped (${String(auth.okta_blocked)}). Fix the credentials in okta-auth, then run \`ontrack auth login --okta\`.`
+        : auth.renewal === "okta" || auth.renewal === "refresh_cookie" || auth.renewal === "browser"
           ? "Run `ontrack auth renew` to verify and renew the session."
           : browser ? "Run `ontrack auth login --browser`." : "Run `ontrack auth login --paste` or `--manual`.",
   };
