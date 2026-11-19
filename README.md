@@ -64,7 +64,7 @@ ontrack mcp deploy
 ontrack mcp status
 ```
 
-`deploy` prints the server's URL. In Claude, add it as a custom connector; the approval page asks for user `ontrack` and the owner token stored in `mcp.json` next to your ontrack config. The Worker runs on the free plan.
+`deploy` prints the server's URL. In Claude, add it as a custom connector; the approval page asks for user `ontrack` and the owner token stored in `mcp.json` next to your ontrack config.
 
 OnTrack keeps one renewal token per user, so the Worker and this CLI share it. When the Worker renews, the CLI signs in through Okta once on its next run, and the other way round.
 
