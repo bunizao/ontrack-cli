@@ -6,7 +6,7 @@
 
 Check task status, read task sheets, download resources, follow up in task chats, and submit work. Works with OnTrack and Doubtfire, for students and teaching staff.
 
-It is a CLI only for now. There is no MCP server, so web AI cannot connect to it directly.
+For Claude on the web or your phone, `ontrack mcp deploy` runs a private, read-only MCP server on your own Cloudflare account. See [Remote MCP](#remote-mcp).
 
 [![npm version](https://img.shields.io/npm/v/ontrack?logo=npm)](https://www.npmjs.com/package/ontrack)
 [![CI](https://github.com/bunizao/ontrack-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/bunizao/ontrack-cli/actions/workflows/ci.yml)
@@ -53,6 +53,20 @@ Ask in plain language, or run the command yourself:
 | “Submit my report for TASK.” | `ontrack tasks submit UNIT TASK --file report.pdf` |
 
 `UNIT` is the unit's code or name as OnTrack shows it. `courses`, `units` and `projects` are interchangeable. `TASK` is the task abbreviation. Writes always show a plan and ask first.
+
+## Remote MCP
+
+A Cloudflare Worker that serves your units, tasks and chats to Claude and other MCP clients, read-only. It signs in to OnTrack through Okta with the credentials [okta-auth-cli](https://www.npmjs.com/package/okta-auth-cli) holds, and renews the session two days before it lapses, so nobody has to sign in again.
+
+```bash
+npx wrangler login
+ontrack mcp deploy
+ontrack mcp status
+```
+
+`deploy` prints the server's URL. In Claude, add it as a custom connector; the approval page asks for user `ontrack` and the owner token stored in `mcp.json` next to your ontrack config. The Worker runs on the free plan.
+
+OnTrack keeps one renewal token per user, so the Worker and this CLI share it. When the Worker renews, the CLI signs in through Okta once on its next run, and the other way round.
 
 ## Learn more
 
