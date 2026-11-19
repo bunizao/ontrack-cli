@@ -23,7 +23,7 @@
   },
   "scripts": {
     "build": "node scripts/apply-sweet-cookie-patch.mjs && node scripts/clean-output.mjs && tsc -p tsconfig.build.json && node scripts/mark-cli-executable.mjs",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.core.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.core.json && tsc -p tsconfig.worker.json",
     "test": "npm run build && tsc -p tsconfig.json && node .build/tests/harness.js",
     "test:bun": "npm run build && tsc -p tsconfig.json && bun .build/tests/harness.js",
     "test:golden": "npm run build && tsc -p tsconfig.json && node scripts/golden-run.mjs",

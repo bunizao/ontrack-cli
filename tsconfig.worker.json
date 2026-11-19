@@ -1,0 +1,12 @@
+{
+  // The remote MCP Worker (src/worker), checked against Workers types instead of
+  // Node's. Wrangler bundles it; tsc only checks it.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["@cloudflare/workers-types"],
+    "resolveJsonModule": true,
+    "noEmit": true
+  },
+  "include": ["src/worker/**/*.ts"],
+  "exclude": []
+}
