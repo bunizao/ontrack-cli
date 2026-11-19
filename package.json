@@ -52,7 +52,7 @@
     "url": "git+https://github.com/bunizao/ontrack-cli.git"
   },
   "dependencies": {
-    "@bunizao/cli-kit": "^0.8.0",
+    "@bunizao/cli-kit": "^0.9.0",
     "@opendocsg/pdf2md": "0.2.7",
     "@steipete/sweet-cookie": "0.4.0",
     "okta-auth-cli": "0.3.0"
