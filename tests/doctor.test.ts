@@ -46,3 +46,24 @@ export async function test_doctor_keeps_an_expired_session_failure_actionable():
     assert.match(String(report.recovery), /discovery is unavailable/u);
   } finally { await rm(directory, { recursive: true, force: true }); }
 }
+
+export async function test_doctor_points_okta_sessions_at_renewal_or_okta_sign_in(): Promise<void> {
+  const directory = await mkdtemp(join(tmpdir(), "ontrack-doctor-okta-"));
+  const sessionFile = join(directory, "session.json");
+  const key = { encryptionKey: async () => Buffer.alloc(32, 7) };
+  const diagnose = () => diagnoseAuth({
+    ...key, baseUrl: "https://school.example.edu", sessionFile, env: {}, nodeVersion: "24.0.0",
+    findBrowser: async () => ({ path: "/test/chrome", name: "Test Chrome" }),
+    fetch: async () => Response.json({ method: "saml", redirect_to: "https://identity.example.edu/saml" }),
+  });
+  const session = {
+    base_url: "https://school.example.edu", username: "alice", access_token: "private-access",
+    auth_token_expiry: "2030-01-01T00:00:00Z", provenance: "okta",
+  };
+  try {
+    await writeSessionCache(sessionFile, { ...session, okta: { secrets: "a".repeat(64), failures: 0 } }, key);
+    assert.match(String((await diagnose()).recovery), /auth renew/u);
+    await writeSessionCache(sessionFile, { ...session, okta: { secrets: "a".repeat(64), failures: 0, blocked: "passcode_rejected" } }, key);
+    assert.match(String((await diagnose()).recovery), /passcode_rejected.*auth login --okta/u);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+}
