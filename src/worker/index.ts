@@ -221,6 +221,8 @@ async function handleAuthorize(request: Request, env: Env, helpers: OAuthHelpers
       const denied = await helpers.denyConsent(request, handle);
       return redirect(denied.redirectTo, denied.headers);
     }
+    // The handle is checked (and spent) first, so only a real consent form can use up pairing tries.
+    const approved = await helpers.approveConsent(request, handle, { scope: [SCOPE] });
     const paired = await broker(env).consumePairing(String(form.get("pairing_code") ?? ""));
     if (!paired.ok) {
       // Show the page again for the same request, with a fresh consent handle.
@@ -229,7 +231,6 @@ async function handleAuthorize(request: Request, env: Env, helpers: OAuthHelpers
         ? `That code didn't match. ${paired.attemptsLeft} ${paired.attemptsLeft === 1 ? "try" : "tries"} left.`
         : "That code has expired or was used up. Get a new one: `ontrack mcp pair`");
     }
-    const approved = await helpers.approveConsent(request, handle, { scope: [SCOPE] });
     const client = await helpers.lookupClient(approved.request.clientId);
     const { redirectTo } = await helpers.completeAuthorization({
       request: approved.request,

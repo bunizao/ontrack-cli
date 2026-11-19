@@ -34,12 +34,15 @@ export async function openPairing(store: PairingStore, now = Date.now()): Promis
 
 /** A right code closes the window; so do an expired window and the last wrong try. */
 export async function consumePairing(store: PairingStore, submitted: string, now = Date.now()): Promise<PairingResult> {
+  // Hash before reading: from here on only storage calls await, which a Durable Object's
+  // input gate keeps from interleaving, so two requests cannot both spend one code.
+  const hashed = await digest(normalize(submitted));
   const record = await store.get();
   if (!record || record.expiresAt <= now || record.attempts >= PAIRING_ATTEMPTS) {
     await store.delete();
     return { ok: false, attemptsLeft: 0 };
   }
-  if (await digest(normalize(submitted)) === record.digest) {
+  if (hashed === record.digest) {
     await store.delete();
     return { ok: true };
   }
