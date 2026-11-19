@@ -2,20 +2,13 @@ import { lstat, readFile } from "node:fs/promises";
 import { basename, extname } from "node:path";
 
 import { CliError } from "./errors.js";
-import type { UploadRequirement, UploadRequirementType } from "./types.js";
+import type { PreparedUpload, UploadRequirement } from "./types.js";
+
+export type { PreparedUpload } from "./types.js";
 
 const maxFileBytes = 100 * 1024 * 1024;
 const maxTotalBytes = 100 * 1024 * 1024;
 
-export interface PreparedUpload {
-  readonly key: string;
-  readonly requirementName: string;
-  readonly requirementType: UploadRequirementType;
-  readonly path: string;
-  readonly filename: string;
-  readonly contentType: string;
-  readonly bytes: Uint8Array;
-}
 
 const contentTypes: Readonly<Record<string, string>> = {
   ".doc": "application/msword",

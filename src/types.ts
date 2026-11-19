@@ -128,3 +128,14 @@ export interface TaskComment {
   readonly recipient_read_time: string | null;
   readonly status?: string;
 }
+
+/** A file read and checked against one upload requirement, ready to send. */
+export interface PreparedUpload {
+  readonly key: string;
+  readonly requirementName: string;
+  readonly requirementType: UploadRequirementType;
+  readonly path: string;
+  readonly filename: string;
+  readonly contentType: string;
+  readonly bytes: Uint8Array;
+}

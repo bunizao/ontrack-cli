@@ -22,6 +22,7 @@ import {
   type Ui,
 } from "@bunizao/cli-kit";
 
+import type { ChatSendConfirmation } from "./application-core.js";
 import { CliError } from "./errors.js";
 import { assertSupportedRuntime } from "./runtime.js";
 import { skillFiles } from "./skill.js";
@@ -29,6 +30,8 @@ import { submissionType, submissionTypes, type TaskSubmissionOptions, type TaskS
 import { STATUS_TONES, writableTaskState, writableTaskStates, type WritableTaskState } from "./status.js";
 import { ONTRACK_TAGLINE, ONTRACK_WORDMARK } from "./wordmark.js";
 import type { LoginMode } from "./auth.js";
+
+export type { ChatSendConfirmation } from "./application-core.js";
 
 export interface CliApplication {
   resolveProject(reference: string): Promise<number>;
@@ -110,12 +113,6 @@ function commandPath(command: { name(): string; parent?: unknown }): string {
   return names.join(" ");
 }
 
-export interface ChatSendConfirmation {
-  readonly projectId: number;
-  readonly taskDefinitionId: number;
-  readonly task: string;
-  readonly message: string;
-}
 
 interface InvocationResult {
   readonly value?: unknown;
