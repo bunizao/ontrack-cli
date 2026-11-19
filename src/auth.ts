@@ -17,6 +17,7 @@ import { OktaSignInError } from "okta-auth-cli";
 
 import { readSessionCache, withFileLock, writeSessionCache, type SessionCacheOptions } from "./session-cache.js";
 import { HttpClient } from "./http.js";
+import { cookieHeader, exchangeRefreshCookies, isFuture } from "./token-exchange.js";
 
 export type LoginMode = "browser" | "reuse" | "paste" | "manual" | "okta";
 
@@ -138,11 +139,6 @@ function currentTime(options: BrowserSessionOptions): Date {
 
 // A cached token this close to expiry is renewed first, so a command's read phase and its write cannot straddle it.
 const RENEW_BEFORE_EXPIRY_MS = 120_000;
-
-function isFuture(value: string, now: Date): boolean {
-  const expiry = new Date(value);
-  return !Number.isNaN(expiry.valueOf()) && expiry.valueOf() > now.valueOf();
-}
 
 function isFresh(value: string, now: Date): boolean {
   return isFuture(value, new Date(now.valueOf() + RENEW_BEFORE_EXPIRY_MS));
@@ -335,10 +331,6 @@ function applicableCookies(records: readonly BrowserCookie[], baseUrl: string, n
   });
 }
 
-function cookieHeader(cookies: readonly CookieRecord[]): string {
-  return cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join("; ");
-}
-
 async function exchangeCookies(
   baseUrl: string,
   cookies: readonly CookieRecord[],
@@ -347,76 +339,15 @@ async function exchangeCookies(
   timeoutMs: number,
   signal?: AbortSignal,
 ): Promise<AuthenticatedSession> {
-  if (cookies.length === 0) throw new RejectedBrowserCookieCandidate();
-  let response: Response;
-  const timeoutController = new AbortController();
-  const timeout = setTimeout(() => timeoutController.abort(), timeoutMs);
-  const requestSignal = signal
-    ? AbortSignal.any([signal, timeoutController.signal])
-    : timeoutController.signal;
-  try {
-    const init: RequestInit = {
-      method: "POST",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        Cookie: cookieHeader(cookies),
-      },
-      body: JSON.stringify({ delete_auth_token: false }),
-      redirect: "error",
-    };
-    init.signal = requestSignal;
-    response = await fetchImplementation(`${baseUrl}/api/auth/access-token`, init);
-  } catch {
-    clearTimeout(timeout);
-    if (signal?.aborted) throw new CliError("cancellation", "Authentication cancelled.");
-    if (timeoutController.signal.aborted) throw new CliError("network", `Cookie exchange timed out after ${timeoutMs}ms.`);
-    throw new CliError("network", "Cookie exchange failed: OnTrack could not be reached.");
-  }
-  if (!response.ok) {
-    clearTimeout(timeout);
-    if (response.status === 401 || response.status === 403 || response.status === 419) {
-      throw new RejectedBrowserCookieCandidate();
-    }
-    throw new CliError("upstream_api", `Cookie exchange failed: OnTrack returned HTTP ${response.status}.`, response.status);
-  }
-
-  let payload: unknown;
-  try {
-    payload = await response.json();
-  } catch {
-    if (signal?.aborted) throw new CliError("cancellation", "Authentication cancelled.");
-    if (timeoutController.signal.aborted) throw new CliError("network", `Cookie exchange timed out after ${timeoutMs}ms.`);
-    throw new CliError("upstream_contract", "Cookie exchange failed: OnTrack returned malformed JSON.");
-  } finally {
-    clearTimeout(timeout);
-  }
-  if (payload === null) throw new RejectedBrowserCookieCandidate();
-  if (typeof payload !== "object" || Array.isArray(payload)) {
-    throw authError("Cookie exchange failed: OnTrack returned no access token.");
-  }
-  const data = payload as Record<string, unknown>;
-  const user = data.user;
-  if (typeof user !== "object" || user === null || Array.isArray(user)) {
-    throw authError("Cookie exchange failed: OnTrack returned no user.");
-  }
-  const username = (user as Record<string, unknown>).username;
-  if (
-    typeof data.auth_token !== "string"
-    || !data.auth_token
-    || typeof data.auth_token_expiry !== "string"
-    || typeof username !== "string"
-    || !username
-  ) throw authError("Cookie exchange failed: OnTrack returned an incomplete session.");
-  if (!isFuture(data.auth_token_expiry, now)) throw authError("The exchanged access token is already expired.");
-  const userData = user as Record<string, unknown>;
+  const exchanged = await exchangeRefreshCookies(baseUrl, cookies, fetchImplementation, now, timeoutMs, signal);
+  if (!exchanged) throw new RejectedBrowserCookieCandidate();
   return {
     baseUrl,
-    username,
-    accessToken: data.auth_token,
-    authTokenExpiry: new Date(data.auth_token_expiry).toISOString(),
+    username: exchanged.username,
+    accessToken: exchanged.accessToken,
+    authTokenExpiry: exchanged.authTokenExpiry,
     provenance: "browser",
-    user: safeUserView(userData, username),
+    user: safeUserView(exchanged.user, exchanged.username),
     ...(cookies.some((cookie) => cookie.name === "refresh_token") ? {
       renewalCookies: cookies.filter((cookie) => cookie.name === "refresh_token" || cookie.name === "username"),
     } : {}),
