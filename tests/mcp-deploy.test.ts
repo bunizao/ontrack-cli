@@ -58,7 +58,8 @@ export async function test_mcp_deploy_uploads_the_bundle_and_sends_secrets_only_
 
     const saved = JSON.parse(await readFile(deploymentFile(dir), "utf8")) as { url: string; owner_token: string };
     assert.deepEqual(saved, { url: ORIGIN, owner_token: secrets.OWNER_TOKEN });
-    assert.equal((await stat(deploymentFile(dir))).mode & 0o777, 0o600);
+    // Windows has no POSIX permission bits to check.
+    if (process.platform !== "win32") assert.equal((await stat(deploymentFile(dir))).mode & 0o777, 0o600);
     assert.equal(seen[0]?.headers.get("authorization"), `Bearer ${secrets.OWNER_TOKEN}`);
   } finally {
     await cleanup();
