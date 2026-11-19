@@ -17,6 +17,7 @@ import { OnTrackClient } from "../ontrack.js";
 import { SessionKeeper, type KeeperRecord, type KeeperStatus, type KeptCredentials } from "../session-keeper.js";
 import { CivilDate, Instant, type Clock } from "../time.js";
 import { safeUserView } from "../user.js";
+import { ONTRACK_LOGO } from "./logo.js";
 import { consumePairing, openPairing, type PairingRecord, type PairingResult, type PairingStore } from "./pairing.js";
 import { createOnTrackMcpServer } from "./tools.js";
 
@@ -258,6 +259,7 @@ async function consent(request: Request, helpers: OAuthHelpers, error?: string):
   const { handle, headers } = await helpers.beginConsent(authRequest);
   const page = consentPage({
     app: "OnTrack",
+    appLogo: ONTRACK_LOGO,
     client: client?.clientName?.trim() || authRequest.clientId,
     redirectUri: authRequest.redirectUri,
     access: ACCESS,
