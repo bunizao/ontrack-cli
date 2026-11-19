@@ -14,7 +14,7 @@ import { authenticationCookieCandidates } from "./browser-cookies.js";
 import { executeCli, type ChatSendConfirmation } from "./cli-app.js";
 import { configuredBaseUrl, loadConfig, resolveBaseUrl, resolveConfigPaths, resolveCredentialSource, type ConfigPaths, type Environment } from "./config.js";
 import { diagnoseAuth } from "./doctor.js";
-import { deployMcp, mcpStatus } from "./mcp-deploy.js";
+import { deployMcp, mcpPair, mcpStatus } from "./mcp-deploy.js";
 import { exportOktaCredentials } from "./okta-export.js";
 import { readSecretLine } from "./secret-input.js";
 import { CliError } from "./errors.js";
@@ -327,6 +327,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         });
       },
       mcpStatus: () => mcpStatus({ configDir: configPaths(env, platform).configDir }),
+      mcpPair: () => mcpPair({ configDir: configPaths(env, platform).configDir }),
       confirmChatSend: (details) => confirmChatSend(details, controller.signal),
       confirmTaskSubmit: (plan) => confirmTaskSubmit(plan, controller.signal),
       confirmMutation: (summary) => confirmMutation(summary, controller.signal),
