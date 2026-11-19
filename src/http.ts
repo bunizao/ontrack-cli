@@ -189,7 +189,8 @@ export class HttpClient {
     validateCredentials(options.credentials);
     this.#baseUrl = new URL(options.baseUrl.endsWith("/") ? options.baseUrl : `${options.baseUrl}/`);
     this.#credentials = options.credentials;
-    this.#fetch = options.fetch ?? globalThis.fetch;
+    // Wrapped: Workers throws "Illegal invocation" when fetch is called as a method of another object.
+    this.#fetch = options.fetch ?? ((input, init) => globalThis.fetch(input, init));
     this.#refresh = options.refresh;
     this.#timeoutMs = options.timeoutMs ?? 30_000;
     this.#signal = options.signal;

@@ -681,3 +681,18 @@ export function test_invalid_credential_headers_do_not_expose_values(): void {
     baseUrl: "https://school.example.edu", credentials: { username: "alice", accessToken: "private-marker\r\ninjected" },
   }), (error) => error instanceof CliError && !error.message.includes("private-marker"));
 }
+
+export async function test_http_client_calls_the_default_fetch_unbound(): Promise<void> {
+  // Workers rejects fetch called as a method of another object ("Illegal invocation").
+  const original = globalThis.fetch;
+  globalThis.fetch = function (this: unknown): Promise<Response> {
+    if (this !== undefined && this !== globalThis) throw new TypeError("Illegal invocation");
+    return Promise.resolve(Response.json([]));
+  } as typeof fetch;
+  try {
+    const client = new HttpClient({ baseUrl: "https://school.example.edu", credentials: { username: "student", accessToken: "secret" } });
+    assert.deepEqual(await client.request("api/projects"), []);
+  } finally {
+    globalThis.fetch = original;
+  }
+}
