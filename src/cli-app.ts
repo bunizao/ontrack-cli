@@ -76,6 +76,7 @@ interface Dependencies {
   readonly doctor?: (live: boolean, cookies: boolean) => Promise<unknown>;
   readonly mcpDeploy?: () => Promise<unknown>;
   readonly mcpStatus?: () => Promise<unknown>;
+  readonly mcpPair?: () => Promise<unknown>;
   readonly version: string;
   readonly sensitiveValues?: readonly string[];
   readonly onDiagnostic?: (message: string) => void;
@@ -505,10 +506,13 @@ export async function executeCli(argv: readonly string[], dependencies: Dependen
 
     // One command with an action argument: cli-kit's verb vocabulary has no "deploy".
     program.command("mcp").description("Run a remote MCP server on your Cloudflare account; it renews the session through Okta")
-      .argument("<action>", "deploy (or update) the Worker, or status: its URL and how its OnTrack session renews")
+      .argument("<action>", "deploy (or update) the Worker; pair: a one-time code for connecting a client; status: how its OnTrack session renews")
       .action(async (action: string) => {
-        const run = action === "deploy" ? dependencies.mcpDeploy : action === "status" ? dependencies.mcpStatus : undefined;
-        if (action !== "deploy" && action !== "status") throw new CliError("usage", `Unknown mcp action ${JSON.stringify(action)}; use deploy or status.`);
+        const actions: Record<string, (() => Promise<unknown>) | undefined> = {
+          deploy: dependencies.mcpDeploy, pair: dependencies.mcpPair, status: dependencies.mcpStatus,
+        };
+        if (!Object.hasOwn(actions, action)) throw new CliError("usage", `Unknown mcp action ${JSON.stringify(action)}; use deploy, pair or status.`);
+        const run = actions[action];
         if (!run) throw new CliError("config", "The remote MCP commands are unavailable.");
         setResult({ value: await run(), ...(action === "status" ? { columns: MCP_STATUS_COLUMNS } : {}) });
       });

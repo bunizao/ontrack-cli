@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { CliError } from "../src/errors.js";
-import { deployMcp, deploymentFile, mcpStatus, workerOrigin, WRANGLER, type CommandRunner } from "../src/mcp-deploy.js";
+import { deployMcp, deploymentFile, mcpPair, mcpStatus, workerOrigin, WRANGLER, type CommandRunner } from "../src/mcp-deploy.js";
 
 const ORIGIN = "https://ontrack-mcp.someone.workers.dev";
 const OKTA = { username: "student@example.edu", password: "hunter2-password", totpSecret: "JBSWY3DPEHPK3PXP" };
@@ -26,9 +26,13 @@ function runner(calls: Call[], deployCode = 0): CommandRunner {
   };
 }
 
+const PAIRING = { code: "ABCD2345", expires_at: "2026-11-19T07:00:00.000Z" };
+
 function worker(answer: { isError?: boolean; text: string }, seen: Request[] = []): typeof fetch {
   return async (input, init) => {
-    seen.push(new Request(input, init));
+    const request = new Request(input, init);
+    seen.push(request);
+    if (new URL(request.url).pathname === "/pair") return Response.json(PAIRING);
     return Response.json({ jsonrpc: "2.0", id: 1, result: { isError: answer.isError ?? false, content: [{ type: "text", text: answer.text }] } });
   };
 }
@@ -41,9 +45,11 @@ export async function test_mcp_deploy_uploads_the_bundle_and_sends_secrets_only_
     const result = await deployMcp({
       configDir: dir, baseUrl: "https://ontrack.example.edu", bundle, timeZone: "Australia/Melbourne",
       oktaCredentials: async () => OKTA, run: runner(calls), fetch: worker({ text: JSON.stringify({ username: "student" }) }, seen),
-    }) as { url: string; signed_in_as: string };
+    }) as { url: string; signed_in_as: string; pairing_code: string };
     assert.equal(result.url, `${ORIGIN}/mcp`);
     assert.equal(result.signed_in_as, "student");
+    // The deploy ends with a code, so whoever deployed can hand it straight to the person connecting.
+    assert.equal(result.pairing_code, PAIRING.code);
 
     assert.deepEqual(calls.map((call) => call.args.slice(0, 3)), [["--yes", WRANGLER, "deploy"], ["--yes", WRANGLER, "secret"]]);
     for (const call of calls) for (const secret of [OKTA.password, OKTA.totpSecret]) assert.ok(!call.args.join(" ").includes(secret));
@@ -113,7 +119,9 @@ export async function test_mcp_deploy_waits_for_a_new_workers_dev_hostname(): Pr
     const answer = worker({ text: JSON.stringify({ username: "student" }) });
     const result = await deployMcp({ configDir: dir, baseUrl: "https://ontrack.example.edu", bundle, oktaCredentials: async () => OKTA,
       run: runner([]), retryDelayMs: 0,
-      fetch: async (input, init) => (calls += 1) <= 2 ? new Response("There is nothing here yet", { status: 404 }) : answer(input, init) }) as { signed_in_as: string };
+      fetch: async (input, init) => new Request(input, init).url.endsWith("/mcp") && (calls += 1) <= 2
+        ? new Response("There is nothing here yet", { status: 404 })
+        : answer(input, init) }) as { signed_in_as: string };
     assert.equal(calls, 3);
     assert.equal(result.signed_in_as, "student");
   } finally {
@@ -133,6 +141,24 @@ export async function test_mcp_status_reads_the_worker_with_the_owner_token(): P
     } });
     assert.deepEqual(status, { url: `${ORIGIN}/mcp`, version: "0.5.0", session: { username: "student" } });
     assert.equal(seen[0]?.url, `${ORIGIN}/status`);
+    assert.equal(seen[0]?.headers.get("authorization"), "Bearer owner");
+  } finally {
+    await cleanup();
+  }
+}
+
+export async function test_mcp_pair_opens_a_window_with_the_owner_token(): Promise<void> {
+  const { dir, cleanup } = await workspace();
+  try {
+    await assert.rejects(mcpPair({ configDir: dir }), (error: unknown) => error instanceof CliError && /mcp deploy/u.test(error.hint ?? ""));
+    await writeFile(deploymentFile(dir), JSON.stringify({ url: ORIGIN, owner_token: "owner" }));
+    const seen: Request[] = [];
+    const paired = await mcpPair({ configDir: dir, fetch: worker({ text: "{}" }, seen) }) as Record<string, unknown>;
+    assert.equal(paired.url, `${ORIGIN}/mcp`);
+    assert.equal(paired.pairing_code, PAIRING.code);
+    assert.equal(paired.expires_at, PAIRING.expires_at);
+    assert.equal(seen[0]?.method, "POST");
+    assert.equal(seen[0]?.url, `${ORIGIN}/pair`);
     assert.equal(seen[0]?.headers.get("authorization"), "Bearer owner");
   } finally {
     await cleanup();

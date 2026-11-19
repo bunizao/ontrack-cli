@@ -87,27 +87,50 @@ export async function deployMcp(options: McpOptions): Promise<unknown> {
 
   progress("Signing in to OnTrack from the Worker (Okta, about ten seconds)...");
   const whoami = await callTool(origin, ownerToken, "whoami", options.fetch ?? fetch, options.retryDelayMs ?? 3_000);
+  const deployment = { url: origin, owner_token: ownerToken };
   return {
-    url: `${origin}/mcp`,
     worker: WORKER_NAME,
     signed_in_as: (whoami as { username?: unknown }).username ?? null,
-    owner_token_file: deploymentFile(options.configDir),
-    connect: [
-      `Claude: add ${origin}/mcp as a custom connector. The approval page asks for user "ontrack" and the owner token.`,
-      `Claude Code: claude mcp add --transport http ontrack ${origin}/mcp --header "Authorization: Bearer $(jq -r .owner_token ${deploymentFile(options.configDir)})"`,
-    ],
+    ...await pairing(deployment, options.fetch),
+    claude_code: `claude mcp add --transport http ontrack ${origin}/mcp --header "Authorization: Bearer $(jq -r .owner_token ${deploymentFile(options.configDir)})"`,
   };
 }
 
+/** Opens a ten-minute window: the approval page takes the code instead of the owner token. */
+export async function mcpPair(options: Pick<McpOptions, "configDir" | "fetch">): Promise<unknown> {
+  return pairing(await requireDeployment(options.configDir), options.fetch);
+}
+
 export async function mcpStatus(options: Pick<McpOptions, "configDir" | "fetch">): Promise<unknown> {
-  const deployment = await readDeployment(options.configDir);
+  const deployment = await requireDeployment(options.configDir);
+  return { url: `${deployment.url}/mcp`, ...await callOwner(deployment, "GET", "/status", options.fetch) };
+}
+
+async function pairing(deployment: McpDeployment, fetchImplementation: typeof fetch | undefined): Promise<Record<string, unknown>> {
+  const opened = await callOwner(deployment, "POST", "/pair", fetchImplementation);
+  return {
+    url: `${deployment.url}/mcp`,
+    pairing_code: opened.code,
+    expires_at: opened.expires_at,
+    next: "Add the url as a custom connector in Claude, ChatGPT or another MCP client, "
+      + "then enter the pairing code on the approval page it opens. Run `ontrack mcp pair` for a new code.",
+  };
+}
+
+async function requireDeployment(configDir: string): Promise<McpDeployment> {
+  const deployment = await readDeployment(configDir);
   if (!deployment) throw new CliError("config", "No remote MCP is deployed from this machine.", undefined, "Run `ontrack mcp deploy`.");
-  const response = await (options.fetch ?? fetch)(`${deployment.url}/status`, {
+  return deployment;
+}
+
+async function callOwner(deployment: McpDeployment, method: "GET" | "POST", path: string, fetchImplementation = fetch): Promise<Record<string, unknown>> {
+  const response = await fetchImplementation(`${deployment.url}${path}`, {
+    method,
     headers: { Authorization: `Bearer ${deployment.owner_token}` },
     signal: AbortSignal.timeout(30_000),
   }).catch(() => { throw new CliError("network", `${deployment.url} could not be reached.`); });
-  if (!response.ok) throw new CliError("upstream_api", `${deployment.url}/status returned HTTP ${response.status}.`, response.status);
-  return { url: `${deployment.url}/mcp`, ...(await response.json() as Record<string, unknown>) };
+  if (!response.ok) throw new CliError("upstream_api", `${deployment.url}${path} returned HTTP ${response.status}.`, response.status);
+  return await response.json() as Record<string, unknown>;
 }
 
 export function wranglerConfig(bundle: string, baseUrl: string, timeZone: string): Record<string, unknown> {

@@ -6,7 +6,7 @@
 
 Check task status, read task sheets, download resources, follow up in task chats, and submit work. Works with OnTrack and Doubtfire, for students and teaching staff.
 
-For Claude on the web or your phone, `ontrack mcp deploy` runs a private, read-only MCP server on your own Cloudflare account. See [Remote MCP](#remote-mcp).
+For Claude on the web, ChatGPT or your phone, `ontrack mcp deploy` runs a private MCP server on your own Cloudflare account. See [Remote MCP](#remote-mcp).
 
 [![npm version](https://img.shields.io/npm/v/ontrack?logo=npm)](https://www.npmjs.com/package/ontrack)
 [![CI](https://github.com/bunizao/ontrack-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/bunizao/ontrack-cli/actions/workflows/ci.yml)
@@ -56,15 +56,28 @@ Ask in plain language, or run the command yourself:
 
 ## Remote MCP
 
-A Cloudflare Worker that serves your units, tasks and chats to Claude and other MCP clients, read-only. It signs in to OnTrack through Okta with the credentials [okta-auth-cli](https://www.npmjs.com/package/okta-auth-cli) holds, and renews the session two days before it lapses, so nobody has to sign in again.
+Use OnTrack from Claude on the web, ChatGPT or your phone. `ontrack mcp deploy` puts a private MCP server on your own Cloudflare account (the free plan covers it). It signs in to OnTrack through Okta by itself and renews the session before it lapses, so you set it up once.
 
-```bash
-npx wrangler login
-ontrack mcp deploy
-ontrack mcp status
+Ask your agent:
+
+```text
+Read https://unicorn.tuuhub.com/docs/ontrack/agent-setup.md and set up remote MCP for ontrack.
 ```
 
-`deploy` prints the server's URL. In Claude, add it as a custom connector; the approval page asks for user `ontrack` and the owner token stored in `mcp.json` next to your ontrack config.
+It runs the commands; you do three things in your browser: save your Okta password and authenticator secret on the page `okta-auth setup` opens, approve Cloudflare, and type a pairing code when your AI app asks.
+
+Or by hand:
+
+```bash
+npm install -g okta-auth-cli
+okta-auth setup
+npx wrangler login
+ontrack mcp deploy
+```
+
+`deploy` prints a URL and an eight-character pairing code. Add the URL as a custom connector in Claude, ChatGPT or another MCP client; the approval page it opens asks for the code. A code lasts ten minutes and approves one client; `ontrack mcp pair` prints a new one. `ontrack mcp status` shows when the session renews.
+
+The server reads your units, tasks, task sheets and chats. It submits nothing. Reading a task's comments marks them read, as the website does.
 
 OnTrack keeps one renewal token per user, so the Worker and this CLI share it. When the Worker renews, the CLI signs in through Okta once on its next run, and the other way round.
 

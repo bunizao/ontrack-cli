@@ -163,6 +163,17 @@ export async function test_mcp_status_table_shows_when_the_session_renews(): Pro
   assert.deepEqual(JSON.parse((await run(false)).stdout), status);
 }
 
+export async function test_mcp_pair_prints_the_code_and_unknown_actions_name_all_three(): Promise<void> {
+  const paired = { url: "https://ontrack-mcp.someone.workers.dev/mcp", pairing_code: "ABCD2345" };
+  const deps = (stdoutIsTty: boolean) => dependencies(fakeApplication().app, { version: "1.0.0", stdoutIsTty, mcpPair: async () => paired });
+  assert.deepEqual(JSON.parse((await executeCli(["mcp", "pair"], deps(false))).stdout), paired);
+  for (const action of ["token", "constructor", "__proto__"]) {
+    const unknown = await executeCli(["mcp", action], deps(false));
+    assert.equal(unknown.exitCode, 2);
+    assert.match(unknown.stdout + unknown.stderr, /use deploy, pair or status/u);
+  }
+}
+
 export async function test_output_flags_are_exclusive_and_fields_filter_top_level_values(): Promise<void> {
   const conflictApp = fakeApplication().app;
   const conflict = await executeCli(["units", "--json", "--yaml"], dependencies(conflictApp, { version: "1.0.0" }));

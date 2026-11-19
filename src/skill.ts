@@ -70,6 +70,33 @@ export const INTENTS: readonly Intent[] = [
     command: "ontrack roles",
     then: "`--all` includes inactive roles",
   },
+  {
+    when: "use OnTrack from Claude on the web, ChatGPT or a phone",
+    what: "Deploys a private remote MCP server and prints its URL and a pairing code.",
+    command: "ontrack mcp deploy",
+    then: "follow \"Set up remote MCP\" below",
+  },
+  {
+    when: "connect another AI app / the pairing code expired",
+    what: "A new one-time pairing code for the deployed server.",
+    command: "ontrack mcp pair",
+  },
+  {
+    when: "is the remote MCP still signed in",
+    what: "The deployed server's OnTrack session and when it renews.",
+    command: "ontrack mcp status",
+  },
+];
+
+// The person does three steps in a browser; the agent runs the rest and waits at each.
+const REMOTE_MCP_STEPS = [
+  "`ontrack auth status` works, so the site is configured",
+  "`okta-auth --help` runs; otherwise `npm install -g okta-auth-cli`",
+  "Run `okta-auth setup`. PERSON: saves their Okta username, password and authenticator secret on the page it opens",
+  "Run `npx wrangler whoami`; if signed out, run `npx wrangler login`. PERSON: approves Cloudflare in the browser",
+  "Run `ontrack mcp deploy` and give the person the `url` and `pairing_code` it prints",
+  "PERSON: adds the URL as a custom connector in their AI app and types the code on the approval page",
+  "Run `ontrack mcp status` and confirm `session.username` is theirs",
 ];
 
 const DESCRIPTION =
@@ -92,10 +119,12 @@ export function skillFiles(program: ProgramDescription, version: string): Record
         "`UNIT` is a project ID, or the unit's code or name exactly as OnTrack shows it; `ontrack courses` is the vocabulary for this site. `TASK` is the task abbreviation shown by `ontrack tasks UNIT`, or a task definition ID. Never assume what a code or abbreviation looks like; if a reference matches several units the CLI lists their project IDs, so pick one rather than guess.",
       ].join("\n\n"),
       intents: INTENTS,
+      workflows: [{ title: "Set up remote MCP", steps: REMOTE_MCP_STEPS }],
       rules: [
         "`courses`, `units` and `projects` are interchangeable.",
         "`chats read` is the exception to the `read` rule: it marks the comments read upstream, so `ontrack chats` stops flagging them; it needs `--yes`.",
         "Sign in with `ontrack auth login`: `--browser` opens a private CLI browser, `--reuse-browser` reuses the everyday browser's cookies, `--paste` reads credentials from stdin. `auth status --local` reads the cache without a network call, `auth renew` renews once, and `auth logout` ends the session and deletes the cache. Credentials set in the environment or config override the cache.",
+        "Remote MCP: never ask for the Okta password or authenticator secret in chat, and never run `okta-auth export`. A pairing code lasts ten minutes and approves one client. Running `mcp deploy` again updates the server in place.",
         "`auth status --local` and `doctor` report `renewal_expires_at`. Under 24 hours left, ask the user to sign in on the OnTrack website or run `auth login`, because renewal stops working once it lapses. `doctor` exits 3 when a check fails.",
       ],
       setup: [

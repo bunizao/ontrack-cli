@@ -4,6 +4,7 @@ import OAuthProvider, {
   type OAuthHelpers,
   type OAuthProviderOptions,
 } from "@cloudflare/workers-oauth-provider";
+import { CONSENT_HEADERS, consentPage, messagePage } from "@bunizao/cli-kit/consent";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { DurableObject } from "cloudflare:workers";
 
@@ -16,14 +17,16 @@ import { OnTrackClient } from "../ontrack.js";
 import { SessionKeeper, type KeeperRecord, type KeeperStatus, type KeptCredentials } from "../session-keeper.js";
 import { CivilDate, Instant, type Clock } from "../time.js";
 import { safeUserView } from "../user.js";
+import { consumePairing, openPairing, type PairingRecord, type PairingResult, type PairingStore } from "./pairing.js";
 import { createOnTrackMcpServer } from "./tools.js";
 
 // The remote MCP Worker. One owner, one OnTrack session:
 // - SessionBroker, a Durable Object named "owner", holds the session and renews it
 //   (src/session-keeper.ts), on demand and from its alarm;
 // - /mcp serves the tools, behind OAuth for connectors or the OWNER_TOKEN bearer;
-// - /authorize asks for OWNER_TOKEN (Basic auth, user "ontrack") before approving a connector;
-// - /status reports the session's expiries to `ontrack mcp status`, behind the OWNER_TOKEN bearer.
+// - /authorize approves a connector with a one-time pairing code (src/worker/pairing.ts);
+// - /pair opens a pairing window and /status reports the session's expiries, both for
+//   `ontrack mcp` behind the OWNER_TOKEN bearer.
 
 export interface Env {
   readonly SESSION_BROKER: DurableObjectNamespace<SessionBroker>;
@@ -38,6 +41,7 @@ export interface Env {
 }
 
 const RECORD_KEY = "record";
+const PAIRING_KEY = "pairing";
 const OWNER = "owner";
 const MCP_PATH = "/mcp";
 const SCOPE = "ontrack";
@@ -50,10 +54,16 @@ type BrokerResult =
 
 export class SessionBroker extends DurableObject<Env> {
   private readonly keeper: SessionKeeper;
+  private readonly pairing: PairingStore;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     const storage = ctx.storage;
+    this.pairing = {
+      get: () => storage.get<PairingRecord>(PAIRING_KEY),
+      put: (record) => storage.put(PAIRING_KEY, record),
+      delete: async () => { await storage.delete(PAIRING_KEY); },
+    };
     this.keeper = new SessionKeeper({
       baseUrl: env.ONTRACK_ORIGIN,
       okta: oktaCredentialsFrom(env as unknown as Record<string, string | undefined>),
@@ -78,6 +88,15 @@ export class SessionBroker extends DurableObject<Env> {
 
   async status(): Promise<KeeperStatus> {
     return this.keeper.status();
+  }
+
+  // One object, so a code's attempts are counted without races.
+  async openPairing(): Promise<{ code: string; expires_at: string }> {
+    return openPairing(this.pairing);
+  }
+
+  async consumePairing(code: string): Promise<PairingResult> {
+    return consumePairing(this.pairing, code);
   }
 
   override async alarm(): Promise<void> {
@@ -132,14 +151,12 @@ async function handleMcp(request: Request, env: Env): Promise<Response> {
 async function handleOther(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   const helpers = (env as unknown as { OAUTH_PROVIDER: OAuthHelpers }).OAUTH_PROVIDER;
-  if (url.pathname === "/authorize") {
-    if (!basicAuthorized(request.headers.get("authorization"), env.OWNER_TOKEN)) {
-      return new Response("Enter the owner token as the password; the user name is ontrack.", {
-        status: 401,
-        headers: { "www-authenticate": 'Basic realm="ontrack MCP", charset="UTF-8"' },
-      });
+  if (url.pathname === "/authorize") return handleAuthorize(request, env, helpers);
+  if (url.pathname === "/pair" && request.method === "POST") {
+    if (!bearerAuthorized(request.headers.get("authorization"), env.OWNER_TOKEN)) {
+      return Response.json({ error: "unauthorized" }, { status: 401 });
     }
-    return handleAuthorize(request, helpers);
+    return Response.json(await broker(env).openPairing());
   }
   if (url.pathname === "/status" && request.method === "GET") {
     if (!bearerAuthorized(request.headers.get("authorization"), env.OWNER_TOKEN)) {
@@ -184,67 +201,77 @@ function oauthProvider(env: Env, origin: string): OAuthProvider<Env> {
   return new OAuthProvider(options);
 }
 
-async function handleAuthorize(request: Request, helpers: OAuthHelpers): Promise<Response> {
-  if (request.method === "GET") {
-    let authRequest;
-    try {
-      authRequest = await helpers.parseAuthRequest(request);
-    } catch (error) {
-      // Never redirect: the redirect_uri is not validated against a client yet.
-      return page("Cannot connect", `<p>${escapeHtml(error instanceof Error ? error.message : "Invalid authorization request.")}</p>`, 400);
-    }
-    const client = await helpers.lookupClient(authRequest.clientId);
-    const name = client?.clientName?.trim() || authRequest.clientId;
-    let redirectHost = authRequest.redirectUri;
-    try {
-      redirectHost = new URL(authRequest.redirectUri).host || redirectHost;
-    } catch {
-      // A native app's private-use URI has no host; show it whole.
-    }
-    const { handle, headers } = await helpers.beginConsent(authRequest);
-    const body = `<p><strong>${escapeHtml(name)}</strong> wants to read your OnTrack units, tasks and comments.
-Tokens go to <code>${escapeHtml(redirectHost)}</code>.</p>
-<form method="post" action="/authorize">
-<input type="hidden" name="handle" value="${escapeHtml(handle)}">
-<button name="action" value="deny">Deny</button> <button name="action" value="approve">Approve</button>
-</form>`;
-    return withHeaders(page("Connect to ontrack", body), headers);
+const ACCESS = [
+  "See your units, tasks, due dates and task sheets",
+  "Read your tutors' comments, which marks them read, as the website does",
+];
+const LIMITS = ["Submit work, change a task's status or message your tutor"];
+const PAIRING_HINT = "Each code works once, for 10 minutes. Get one on the computer you deployed from: `ontrack mcp pair`";
+
+async function handleAuthorize(request: Request, env: Env, helpers: OAuthHelpers): Promise<Response> {
+  if (request.method === "GET") return consent(request, helpers);
+  if (request.method !== "POST") return new Response("Method not allowed.", { status: 405, headers: { allow: "GET, POST" } });
+  if (request.headers.get("origin") !== new URL(request.url).origin) {
+    return new Response("Invalid request origin.", { status: 403 });
   }
-  if (request.method === "POST") {
-    if (request.headers.get("origin") !== new URL(request.url).origin) {
-      return new Response("Invalid request origin.", { status: 403 });
+  const form = await request.formData();
+  const handle = String(form.get("handle") ?? "");
+  try {
+    if (form.get("decision") !== "approve") {
+      const denied = await helpers.denyConsent(request, handle);
+      return redirect(denied.redirectTo, denied.headers);
     }
-    const form = await request.formData();
-    const handle = String(form.get("handle") ?? "");
-    try {
-      if (form.get("action") === "deny") {
-        const denied = await helpers.denyConsent(request, handle);
-        return redirect(denied.redirectTo, denied.headers);
-      }
-      const approved = await helpers.approveConsent(request, handle, { scope: [SCOPE] });
-      const client = await helpers.lookupClient(approved.request.clientId);
-      const { redirectTo } = await helpers.completeAuthorization({
-        request: approved.request,
-        userId: OWNER,
-        metadata: { clientName: client?.clientName?.trim() || approved.request.clientId },
-        scope: approved.request.scope,
-        props: { subject: OWNER },
-      });
-      return redirect(redirectTo, approved.headers);
-    } catch (error) {
-      if (error instanceof AuthorizationError) return page("Cannot connect", `<p>${escapeHtml(error.message)}</p>`, 400);
-      throw error;
+    // The handle is checked (and spent) first, so only a real consent form can use up pairing tries.
+    const approved = await helpers.approveConsent(request, handle, { scope: [SCOPE] });
+    const paired = await broker(env).consumePairing(String(form.get("pairing_code") ?? ""));
+    if (!paired.ok) {
+      // Show the page again for the same request, with a fresh consent handle.
+      const again = new Request(new URL(`/authorize${String(form.get("request") ?? "")}`, request.url), { headers: request.headers });
+      return consent(again, helpers, paired.attemptsLeft > 0
+        ? `That code didn't match. ${paired.attemptsLeft} ${paired.attemptsLeft === 1 ? "try" : "tries"} left.`
+        : "That code has expired or was used up. Get a new one: `ontrack mcp pair`");
     }
+    const client = await helpers.lookupClient(approved.request.clientId);
+    const { redirectTo } = await helpers.completeAuthorization({
+      request: approved.request,
+      userId: OWNER,
+      metadata: { clientName: client?.clientName?.trim() || approved.request.clientId },
+      scope: approved.request.scope,
+      props: { subject: OWNER },
+    });
+    return redirect(redirectTo, approved.headers);
+  } catch (error) {
+    if (error instanceof AuthorizationError) return html(messagePage("Cannot connect", error.message), 400);
+    throw error;
   }
-  return new Response("Method not allowed.", { status: 405, headers: { allow: "GET, POST" } });
 }
 
-function page(title: string, body: string, status = 200): Response {
-  const html = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">
-<title>${escapeHtml(title)}</title>
-<style>body{font:16px system-ui;max-width:36rem;margin:3rem auto;padding:0 1rem}button{font:inherit;padding:.4rem 1rem}</style>
-<h1>${escapeHtml(title)}</h1>${body}`;
-  return new Response(html, { status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
+async function consent(request: Request, helpers: OAuthHelpers, error?: string): Promise<Response> {
+  let authRequest;
+  try {
+    authRequest = await helpers.parseAuthRequest(request);
+  } catch (failure) {
+    // Never redirect: the redirect_uri is not validated against a client yet.
+    return html(messagePage("Cannot connect", failure instanceof Error ? failure.message : "Invalid authorization request."), 400);
+  }
+  const client = await helpers.lookupClient(authRequest.clientId);
+  const { handle, headers } = await helpers.beginConsent(authRequest);
+  const page = consentPage({
+    app: "OnTrack",
+    client: client?.clientName?.trim() || authRequest.clientId,
+    redirectUri: authRequest.redirectUri,
+    access: ACCESS,
+    limits: LIMITS,
+    action: "/authorize",
+    fields: { handle, request: new URL(request.url).search },
+    secret: { name: "pairing_code", label: "Pairing code", kind: "code", placeholder: "ABCD 2345", hint: PAIRING_HINT },
+    ...(error ? { error } : {}),
+  });
+  return withHeaders(html(page, error ? 400 : 200), headers);
+}
+
+function html(body: string, status = 200): Response {
+  return new Response(body, { status, headers: CONSENT_HEADERS });
 }
 
 /** Adds the library's consent cookie and clickjacking headers. */
@@ -262,24 +289,11 @@ function redirect(location: string, extra: Headers): Response {
   return new Response(null, { status: 302, headers });
 }
 
-function escapeHtml(value: string): string {
-  return value.replace(/[&<>"']/gu, (character) => `&#${character.charCodeAt(0)};`);
-}
 
 function bearerAuthorized(header: string | null, token: string): boolean {
   return Boolean(token) && header?.startsWith("Bearer ") === true && constantTimeEqual(header.slice(7), token);
 }
 
-function basicAuthorized(header: string | null, token: string): boolean {
-  if (!token || !header?.startsWith("Basic ")) return false;
-  try {
-    const decoded = atob(header.slice(6));
-    const separator = decoded.indexOf(":");
-    return separator !== -1 && decoded.slice(0, separator) === "ontrack" && constantTimeEqual(decoded.slice(separator + 1), token);
-  } catch {
-    return false;
-  }
-}
 
 function constantTimeEqual(left: string, right: string): boolean {
   let difference = left.length ^ right.length;
