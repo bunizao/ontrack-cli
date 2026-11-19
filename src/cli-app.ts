@@ -511,7 +511,7 @@ export async function executeCli(argv: readonly string[], dependencies: Dependen
         const actions: Record<string, (() => Promise<unknown>) | undefined> = {
           deploy: dependencies.mcpDeploy, pair: dependencies.mcpPair, status: dependencies.mcpStatus,
         };
-        if (!(action in actions)) throw new CliError("usage", `Unknown mcp action ${JSON.stringify(action)}; use deploy, pair or status.`);
+        if (!Object.hasOwn(actions, action)) throw new CliError("usage", `Unknown mcp action ${JSON.stringify(action)}; use deploy, pair or status.`);
         const run = actions[action];
         if (!run) throw new CliError("config", "The remote MCP commands are unavailable.");
         setResult({ value: await run(), ...(action === "status" ? { columns: MCP_STATUS_COLUMNS } : {}) });
