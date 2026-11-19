@@ -25,6 +25,9 @@ Use `ontrack` to inspect and update OnTrack from a terminal. Start from what the
 | message the tutor on a task | `ontrack chats send UNIT TASK --message "..."` |  |
 | am I signed in / is it working | `ontrack auth status` | `ontrack auth login` to sign in; `ontrack doctor --live --cookies` when access still fails |
 | my teaching roles | `ontrack roles` | `--all` includes inactive roles |
+| use OnTrack from Claude on the web, ChatGPT or a phone | `ontrack mcp deploy` | follow "Set up remote MCP" below |
+| connect another AI app / the pairing code expired | `ontrack mcp pair` |  |
+| is the remote MCP still signed in | `ontrack mcp status` |  |
 
 ## Workflows
 
@@ -40,6 +43,18 @@ Copy the checklist into your reply and tick each step as it is done; the last st
 - [ ] Read the result back with the matching `list` or `show` and report what changed
 ```
 
+### Set up remote MCP
+
+```text
+- [ ] `ontrack auth status` works, so the site is configured
+- [ ] `okta-auth --help` runs; otherwise `npm install -g okta-auth-cli`
+- [ ] Run `okta-auth setup`. PERSON: saves their Okta username, password and authenticator secret on the page it opens
+- [ ] Run `npx wrangler whoami`; if signed out, run `npx wrangler login`. PERSON: approves Cloudflare in the browser
+- [ ] Run `ontrack mcp deploy` and give the person the `url` and `pairing_code` it prints
+- [ ] PERSON: adds the URL as a custom connector in their AI app and types the code on the approval page
+- [ ] Run `ontrack mcp status` and confirm `session.username` is theirs
+```
+
 ## Rules
 
 - Start from the table row that matches the request: the narrowest command or tool answers sooner and costs fewer tokens than a broad listing.
@@ -51,6 +66,7 @@ Copy the checklist into your reply and tick each step as it is done; the last st
 - `courses`, `units` and `projects` are interchangeable.
 - `chats read` is the exception to the `read` rule: it marks the comments read upstream, so `ontrack chats` stops flagging them; it needs `--yes`.
 - Sign in with `ontrack auth login`: `--browser` opens a private CLI browser, `--reuse-browser` reuses the everyday browser's cookies, `--paste` reads credentials from stdin. `auth status --local` reads the cache without a network call, `auth renew` renews once, and `auth logout` ends the session and deletes the cache. Credentials set in the environment or config override the cache.
+- Remote MCP: never ask for the Okta password or authenticator secret in chat, and never run `okta-auth export`. A pairing code lasts ten minutes and approves one client. Running `mcp deploy` again updates the server in place.
 - `auth status --local` and `doctor` report `renewal_expires_at`. Under 24 hours left, ask the user to sign in on the OnTrack website or run `auth login`, because renewal stops working once it lapses. `doctor` exits 3 when a check fails.
 - Every command, argument, option and exit code is in [references/commands.md](references/commands.md); `ontrack commands --json` is the source of truth.
 
