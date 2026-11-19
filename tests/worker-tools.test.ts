@@ -76,7 +76,7 @@ export async function test_remote_mcp_reports_an_unknown_unit_as_a_tool_error():
 
 export async function test_remote_mcp_passes_a_session_error_and_its_hint_to_the_client(): Promise<void> {
   const lapsed = new CliError("auth", "The OnTrack session has lapsed and this Worker has no Okta credentials.", undefined,
-    "Run `ontrack mcp deploy --okta` to store them.");
+    "Run `ontrack mcp deploy` to store them.");
   const result = await (await connect({ service: async () => { throw lapsed; } })).callTool({ name: "whoami", arguments: {} });
   assert.equal(result.isError, true);
   assert.equal(text(result), `${lapsed.message}\n${lapsed.hint}`);

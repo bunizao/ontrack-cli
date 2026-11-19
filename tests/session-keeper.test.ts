@@ -103,7 +103,7 @@ export async function test_keeper_without_okta_says_how_to_add_it_and_schedules_
   const storage = memoryStorage();
   const fake = fakeOkta({ now: () => NOW });
   await assert.rejects(keeper(storage, fake.fetch, () => NOW, false).credentials(),
-    (error: unknown) => error instanceof CliError && error.category === "auth" && /--okta/u.test(error.hint ?? ""));
+    (error: unknown) => error instanceof CliError && error.category === "auth" && /ontrack mcp deploy/u.test(error.hint ?? ""));
   assert.equal(fake.requests.length, 0);
   assert.equal(storage.alarm, null);
 }

@@ -23,6 +23,7 @@
   },
   "scripts": {
     "build": "node scripts/apply-sweet-cookie-patch.mjs && node scripts/clean-output.mjs && tsc -p tsconfig.build.json && node scripts/mark-cli-executable.mjs",
+    "build:worker": "node scripts/build-worker.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.core.json && tsc -p tsconfig.worker.json",
     "test": "npm run build && tsc -p tsconfig.json && node .build/tests/harness.js",
     "test:bun": "npm run build && tsc -p tsconfig.json && bun .build/tests/harness.js",
@@ -34,7 +35,7 @@
     "verify:live": "npm run build && node dist/cli.js auth status --json",
     "coverage:domain": "npm run build && tsc -p tsconfig.json && node scripts/check-domain-coverage.mjs",
     "skill:generate": "npm run build && node dist/cli.js skills generate",
-    "prepack": "npm run build"
+    "prepack": "npm run build && npm run build:worker"
   },
   "devDependencies": {
     "@cloudflare/workers-oauth-provider": "1.2.4",

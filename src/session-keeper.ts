@@ -145,7 +145,7 @@ export class SessionKeeper {
     const credentials = this.options.okta;
     if (!credentials) {
       throw new CliError("auth", "The OnTrack session has lapsed and this Worker has no Okta credentials.",
-        undefined, "Run `ontrack mcp deploy --okta` to store them.");
+        undefined, "Run `ontrack mcp deploy` to store them.");
     }
     const attempt = await attemptOktaSignIn({
       baseUrl: this.options.baseUrl,
@@ -212,7 +212,7 @@ function oktaError(attempt: Exclude<OktaAttempt, { outcome: "signed_in" }>): Cli
   const state = attempt.state;
   if (state.blocked) {
     return new CliError("auth", `Okta sign-in is blocked (${state.blocked}).`, undefined,
-      "Fix the credentials in okta-auth, then run `ontrack mcp deploy --okta` again.");
+      "Fix the credentials in okta-auth, then run `ontrack mcp deploy` again.");
   }
   if (attempt.outcome === "waiting") {
     const at = state.next_attempt_at ? new Date(state.next_attempt_at).toISOString() : "later";

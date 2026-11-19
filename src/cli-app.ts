@@ -74,6 +74,8 @@ interface Dependencies {
   readonly authLocalStatus?: () => Promise<unknown>;
   readonly authRenew?: () => Promise<unknown>;
   readonly doctor?: (live: boolean, cookies: boolean) => Promise<unknown>;
+  readonly mcpDeploy?: () => Promise<unknown>;
+  readonly mcpStatus?: () => Promise<unknown>;
   readonly version: string;
   readonly sensitiveValues?: readonly string[];
   readonly onDiagnostic?: (message: string) => void;
@@ -165,7 +167,7 @@ function describeArguments(command: ReturnType<typeof createProgram>): void {
 // Grouped the way `gh` does: what a person reaches for daily, then the rest, then what only an agent runs.
 const HELP_SECTIONS: Readonly<Record<string, readonly string[]>> = {
   "Core commands": ["courses", "tasks", "chats"],
-  "Additional commands": ["user", "roles", "auth", "doctor"],
+  "Additional commands": ["user", "roles", "auth", "doctor", "mcp"],
   "Agent commands": ["commands", "skills"],
 };
 
@@ -492,6 +494,16 @@ export async function executeCli(argv: readonly string[], dependencies: Dependen
     roles.command("list").description("List teaching roles").option("--all", "Include inactive roles").action(async (options) => {
       setResult({ value: await (await application()).roles({ showAll: options.all === true }) });
     });
+
+    // One command with an action argument: cli-kit's verb vocabulary has no "deploy".
+    program.command("mcp").description("Run a remote MCP server on your Cloudflare account; it renews the session through Okta")
+      .argument("<action>", "deploy (or update) the Worker, or status: its URL and how its OnTrack session renews")
+      .action(async (action: string) => {
+        const run = action === "deploy" ? dependencies.mcpDeploy : action === "status" ? dependencies.mcpStatus : undefined;
+        if (action !== "deploy" && action !== "status") throw new CliError("usage", `Unknown mcp action ${JSON.stringify(action)}; use deploy or status.`);
+        if (!run) throw new CliError("config", "The remote MCP commands are unavailable.");
+        setResult({ value: await run() });
+      });
 
     program.command("commands").description("Describe the complete command tree").action(() => {
       setResult({ value: commandsJson(program) });
