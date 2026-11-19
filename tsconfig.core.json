@@ -7,5 +7,5 @@
     "types": [],
     "noEmit": true
   },
-  "include": ["src/okta-sign-in.ts", "src/okta-renewal.ts", "src/application-core.ts", "src/ontrack.ts", "src/token-exchange.ts"]
+  "include": ["src/okta-sign-in.ts", "src/okta-renewal.ts", "src/application-core.ts", "src/ontrack.ts", "src/token-exchange.ts", "src/session-keeper.ts"]
 }
