@@ -6,7 +6,7 @@ import type { OnTrackService } from "../application-core.js";
 import { CliError } from "../errors.js";
 import type { KeeperStatus } from "../session-keeper.js";
 
-// The remote MCP's tools: read-only views over OnTrackService. No Worker API here,
+// The remote MCP's tools: views over OnTrackService. No Worker API here,
 // so the tests drive it in Node.
 
 export interface ToolContext {
@@ -65,12 +65,23 @@ export function createOnTrackMcpServer(context: ToolContext): McpServer {
   }));
 
   server.registerTool("chats", {
-    description: "Without a task: unread comment counts per task. With a task: that task's comments.",
-    inputSchema: { unit, task: task.optional() },
+    description: "Unread comment counts per task in a unit.",
+    inputSchema: { unit },
     annotations: readOnly,
   }, (input) => run(async () => {
     const service = await context.service();
-    return service.chats(await projectId(service, input.unit), input.task ? { task: input.task } : {});
+    return service.chats(await projectId(service, input.unit), {});
+  }));
+
+  // OnTrack marks a task's comments read when their history is fetched, so this is
+  // the one tool that changes state; clients ask before calling it.
+  server.registerTool("chat", {
+    description: "One task's comment history. Fetching it marks those comments read in OnTrack.",
+    inputSchema: { unit, task },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, (input) => run(async () => {
+    const service = await context.service();
+    return service.chats(await projectId(service, input.unit), { task: input.task });
   }));
 
   server.registerTool("session", {

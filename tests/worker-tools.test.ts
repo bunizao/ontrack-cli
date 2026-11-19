@@ -55,10 +55,13 @@ function text(result: unknown): string {
   return content.text;
 }
 
-export async function test_remote_mcp_lists_only_read_only_tools(): Promise<void> {
+export async function test_remote_mcp_marks_only_chat_history_as_changing_state(): Promise<void> {
   const { tools } = await (await connect()).listTools();
-  assert.deepEqual(tools.map((tool) => tool.name).sort(), ["chats", "session", "task", "tasks", "unit", "units", "whoami"]);
-  assert.ok(tools.every((tool) => tool.annotations?.readOnlyHint === true));
+  assert.deepEqual(tools.map((tool) => tool.name).sort(), ["chat", "chats", "session", "task", "tasks", "unit", "units", "whoami"]);
+  // Reading a task's comments marks them read in OnTrack, so clients must ask first.
+  const changing = tools.filter((tool) => tool.annotations?.readOnlyHint !== true);
+  assert.deepEqual(changing.map((tool) => [tool.name, tool.annotations?.destructiveHint]), [["chat", false]]);
+  assert.deepEqual(Object.keys(tools.find((tool) => tool.name === "chats")?.inputSchema.properties ?? {}), ["unit"]);
 }
 
 export async function test_remote_mcp_units_returns_the_project_list_as_json(): Promise<void> {
