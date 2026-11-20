@@ -1,44 +1,14 @@
-import { assignedTask, OnTrackService, selectedTask, type SessionState } from "./application-core.js";
+import { OnTrackService, placeholderFile, selectedDownloadTask, selectedTask, taskSheetTask, type SessionState } from "./application-core.js";
 import type { CliApplication } from "./cli-app.js";
 import type { OnTrackClient } from "./ontrack.js";
 import { assertOutputAvailable, writeDownloadedFile, writeResourceArchive } from "./resources.js";
 import { CliError } from "./errors.js";
-import type { ProjectSnapshot } from "./project-snapshot.js";
-import type { TaskDefinition } from "./types.js";
 import type { Clock } from "./time.js";
 import { pdfToMarkdown } from "./pdf.js";
 import { submissionType, type TaskSubmissionOptions, type TaskSubmissionPlan } from "./submission.js";
 import { prepareUploads } from "./uploads.js";
 
 export type { SessionState } from "./application-core.js";
-
-function selectedDownloadTask(
-  snapshot: ProjectSnapshot,
-  reference: string,
-): { readonly abbreviation: string; readonly definition: TaskDefinition } {
-  const normalized = reference.trim().toLowerCase();
-  const numericId = /^\d+$/u.test(normalized) ? Number(normalized) : undefined;
-  const assigned = assignedTask(snapshot, reference);
-  const unitDefinition = snapshot.unit.task_definitions.find((candidate) => candidate.abbreviation.toLowerCase() === normalized)
-    ?? (numericId === undefined ? undefined : snapshot.unit.task_definitions.find((candidate) => candidate.id === numericId));
-  const definition = assigned
-    ? snapshot.unit.task_definitions.find((candidate) => candidate.id === assigned.task_definition_id)
-    : snapshot.tasks.length === 0
-      ? unitDefinition
-      : undefined;
-  if (!definition) {
-    throw new CliError("not_found", `Task ${reference} is not available in project ${snapshot.project.id}. Use an abbreviation shown by \`ontrack units show ${snapshot.project.id}\`.`);
-  }
-  return { abbreviation: definition.abbreviation, definition };
-}
-
-function placeholderFile(filename: string | null): boolean {
-  return filename?.toLowerCase() === "filenotfound.pdf";
-}
-
-function isPdf(bytes: Uint8Array): boolean {
-  return bytes.length >= 5 && new TextDecoder().decode(bytes.subarray(0, 5)) === "%PDF-";
-}
 
 // The CLI's application: the shared service plus what needs a file system.
 export class OnTrackApplication extends OnTrackService implements CliApplication {
@@ -169,17 +139,11 @@ export class OnTrackApplication extends OnTrackService implements CliApplication
     options?: { readonly output?: string; readonly force?: boolean },
   ) {
     const snapshot = await this.snapshot(projectId);
-    const selected = selectedDownloadTask(snapshot, task);
-    if (selected.definition.has_task_sheet === false) {
-      throw new CliError("upstream_api", `Task ${selected.abbreviation} has no task sheet.`);
-    }
+    const selected = taskSheetTask(snapshot, task);
     const destination = options?.output ?? `${snapshot.unit.code}-${selected.abbreviation}.pdf`;
     if (options && !options.force) await assertOutputAvailable(destination);
-    const download = await this.client.downloadTaskSheet(snapshot.unit.id, selected.definition.id);
-    if (placeholderFile(download.filename)) throw new CliError("upstream_api", `Task ${selected.abbreviation} has no task sheet.`);
-    if (download.contentType !== "application/pdf" || !isPdf(download.bytes)) {
-      throw new CliError("upstream_contract", "OnTrack returned an invalid task sheet PDF");
-    }
+    const download = await this.downloadTaskSheet(snapshot, selected);
     return { snapshot, selected, download, destination };
   }
+
 }

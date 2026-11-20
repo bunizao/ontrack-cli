@@ -77,7 +77,7 @@ ontrack mcp deploy
 
 `deploy` prints a URL and an eight-character pairing code. Add the URL as a custom connector in Claude, ChatGPT or another MCP client; the approval page it opens asks for the code. A code lasts ten minutes and approves one client; `ontrack mcp pair` prints a new one. `ontrack mcp status` shows when the session renews.
 
-The server reads your units, tasks, task sheets and chats. It submits nothing. Reading a task's comments marks them read, as the website does.
+The server reads your units, tasks, task sheets and chats. It submits nothing. Reading a task's comments marks them read, as the website does. Task sheets come back as Markdown: Workers AI on your Cloudflare account converts the PDF, which the free plan covers. A server deployed before 0.6.0 needs `ontrack mcp deploy` again for that.
 
 OnTrack keeps one renewal token per user, so the Worker and this CLI share it. When the Worker renews, the CLI signs in through Okta once on its next run, and the other way round.
 

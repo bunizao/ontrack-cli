@@ -148,6 +148,8 @@ export function wranglerConfig(bundle: string, baseUrl: string, timeZone: string
     migrations: [{ tag: "v1", new_sqlite_classes: ["SessionBroker"] }],
     // No id: wrangler creates the namespace on the first deploy.
     kv_namespaces: [{ binding: "OAUTH_KV" }],
+    // task_sheet converts PDFs with Workers AI's toMarkdown, which runs outside the Worker's CPU limit.
+    ai: { binding: "AI" },
   };
 }
 

@@ -1,4 +1,5 @@
 import { CliError } from "./errors.js";
+import type { DownloadResponse } from "./http.js";
 import type { OnTrackClient } from "./ontrack.js";
 import { buildProjectSnapshot, type ProjectSnapshot, type TaskRow } from "./project-snapshot.js";
 import { projectSummaryToJson, roleToJson, snapshotToJson, userToJson } from "./serialize.js";
@@ -18,6 +19,16 @@ export interface SessionView {
 
 export interface SessionState {
   current: SessionView;
+}
+
+export interface TaskSheet {
+  readonly project_id: number;
+  readonly unit_id: number;
+  readonly task_definition_id: number;
+  readonly task: string;
+  /** UNIT-TASK.pdf, the name `ontrack tasks get` saves it under. */
+  readonly name: string;
+  readonly bytes: Uint8Array;
 }
 
 export interface ChatSendConfirmation {
@@ -42,6 +53,42 @@ export function assignedTask(snapshot: ProjectSnapshot, reference: string): Task
   if (byAbbreviation) return byAbbreviation;
   const numericId = /^\d+$/u.test(normalized) ? Number(normalized) : undefined;
   return numericId === undefined ? undefined : snapshot.tasks.find((task) => task.task_definition_id === numericId);
+}
+
+export function selectedDownloadTask(
+  snapshot: ProjectSnapshot,
+  reference: string,
+): { readonly abbreviation: string; readonly definition: TaskDefinition } {
+  const normalized = reference.trim().toLowerCase();
+  const numericId = /^\d+$/u.test(normalized) ? Number(normalized) : undefined;
+  const assigned = assignedTask(snapshot, reference);
+  const unitDefinition = snapshot.unit.task_definitions.find((candidate) => candidate.abbreviation.toLowerCase() === normalized)
+    ?? (numericId === undefined ? undefined : snapshot.unit.task_definitions.find((candidate) => candidate.id === numericId));
+  const definition = assigned
+    ? snapshot.unit.task_definitions.find((candidate) => candidate.id === assigned.task_definition_id)
+    : snapshot.tasks.length === 0
+      ? unitDefinition
+      : undefined;
+  if (!definition) {
+    throw new CliError("not_found", `Task ${reference} is not available in project ${snapshot.project.id}. Use an abbreviation shown by \`ontrack units show ${snapshot.project.id}\`.`);
+  }
+  return { abbreviation: definition.abbreviation, definition };
+}
+
+export function placeholderFile(filename: string | null): boolean {
+  return filename?.toLowerCase() === "filenotfound.pdf";
+}
+
+function isPdf(bytes: Uint8Array): boolean {
+  return bytes.length >= 5 && new TextDecoder().decode(bytes.subarray(0, 5)) === "%PDF-";
+}
+
+export function taskSheetTask(snapshot: ProjectSnapshot, reference: string): { readonly abbreviation: string; readonly definition: TaskDefinition } {
+  const selected = selectedDownloadTask(snapshot, reference);
+  if (selected.definition.has_task_sheet === false) {
+    throw new CliError("upstream_api", `Task ${selected.abbreviation} has no task sheet.`);
+  }
+  return selected;
 }
 
 // Exact code first, then a unique substring of the code or the unit name.
@@ -210,6 +257,30 @@ export class OnTrackService {
       previous_status: selected.row.status,
       status: updated.status,
     };
+  }
+
+  /** The task sheet's PDF, for a reader that converts it itself. */
+  async taskSheet(projectId: number, task: string): Promise<TaskSheet> {
+    const snapshot = await this.snapshot(projectId);
+    const selected = taskSheetTask(snapshot, task);
+    const download = await this.downloadTaskSheet(snapshot, selected);
+    return {
+      project_id: projectId,
+      unit_id: snapshot.unit.id,
+      task_definition_id: selected.definition.id,
+      task: selected.abbreviation,
+      name: `${snapshot.unit.code}-${selected.abbreviation}.pdf`,
+      bytes: download.bytes,
+    };
+  }
+
+  protected async downloadTaskSheet(snapshot: ProjectSnapshot, selected: { readonly abbreviation: string; readonly definition: TaskDefinition }): Promise<DownloadResponse> {
+    const download = await this.client.downloadTaskSheet(snapshot.unit.id, selected.definition.id);
+    if (placeholderFile(download.filename)) throw new CliError("upstream_api", `Task ${selected.abbreviation} has no task sheet.`);
+    if (download.contentType !== "application/pdf" || !isPdf(download.bytes)) {
+      throw new CliError("upstream_contract", "OnTrack returned an invalid task sheet PDF");
+    }
+    return download;
   }
 
   protected async snapshot(projectId: number) {
