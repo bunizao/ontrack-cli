@@ -35,6 +35,8 @@ export interface Env {
   readonly ONTRACK_ORIGIN: string;
   /** IANA zone for "today" in due dates, e.g. Australia/Melbourne. Workers run in UTC. */
   readonly TIME_ZONE: string;
+  /** Workers AI; absent on a Worker deployed before task_sheet. */
+  readonly AI?: Ai;
   readonly OWNER_TOKEN: string;
   readonly OKTA_USERNAME?: string;
   readonly OKTA_PASSWORD?: string;
@@ -144,6 +146,7 @@ async function handleMcp(request: Request, env: Env): Promise<Response> {
     version: packageJson.version,
     service: () => service(env),
     status: () => broker(env).status(),
+    ai: env.AI,
   });
   await server.connect(transport);
   return transport.handleRequest(request);

@@ -1,3 +1,4 @@
+import { fileContent, type MarkdownConverter } from "@bunizao/cli-kit/file-content";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import * as z from "zod";
@@ -14,6 +15,8 @@ export interface ToolContext {
   /** Built per call: a session renewal can take seconds, and `session` needs none. */
   readonly service: () => Promise<OnTrackService>;
   readonly status: () => Promise<KeeperStatus>;
+  /** Workers AI, which turns task sheet PDFs into Markdown; without it task_sheet says so. */
+  readonly ai?: MarkdownConverter | undefined;
 }
 
 const unit = z.string().min(1).describe("A unit code or name as `units` shows it (e.g. FIT2004), or a project ID.");
@@ -64,6 +67,18 @@ export function createOnTrackMcpServer(context: ToolContext): McpServer {
     return service.taskShow(await projectId(service, input.unit), input.task);
   }));
 
+  server.registerTool("task_sheet", {
+    description: "One task's task sheet (the PDF brief: what to do, what to submit, how it is checked) as Markdown.",
+    inputSchema: { unit, task },
+    annotations: readOnly,
+  }, (input) => guarded(async () => {
+    const service = await context.service();
+    const { bytes, ...sheet } = await service.taskSheet(await projectId(service, input.unit), input.task);
+    const file = await fileContent({ name: sheet.name, mimeType: "application/pdf", bytes }, { ai: context.ai });
+    const note = file.kind === "link" ? { hint: `Run \`ontrack tasks read ${input.unit} ${sheet.task}\` locally to read it.` } : {};
+    return { content: [{ type: "text", text: JSON.stringify({ ...sheet, ...note }, null, 2) }, ...file.content] };
+  }));
+
   server.registerTool("chats", {
     description: "Unread comment counts per task in a unit.",
     inputSchema: { unit },
@@ -97,9 +112,13 @@ async function projectId(service: OnTrackService, reference: string): Promise<nu
   return /^\d+$/u.test(trimmed) ? Number(trimmed) : service.resolveProject(trimmed);
 }
 
-async function run(action: () => Promise<unknown>): Promise<CallToolResult> {
+function run(action: () => Promise<unknown>): Promise<CallToolResult> {
+  return guarded(async () => ({ content: [{ type: "text", text: JSON.stringify(await action(), null, 2) }] }));
+}
+
+async function guarded(action: () => Promise<CallToolResult>): Promise<CallToolResult> {
   try {
-    return { content: [{ type: "text", text: JSON.stringify(await action(), null, 2) }] };
+    return await action();
   } catch (error) {
     if (!(error instanceof CliError)) throw error;
     const text = error.hint ? `${error.message}\n${error.hint}` : error.message;

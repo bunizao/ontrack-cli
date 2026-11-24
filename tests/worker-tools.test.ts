@@ -17,6 +17,7 @@ const PROJECTS = [
   { id: 5183, unit: { id: 15, code: "FIT1061", name: "AI" } },
   { id: 6200, unit: { id: 16, code: "FIT1045", name: "Algorithms" } },
 ];
+const PDF = new TextEncoder().encode("%PDF-1.4\n");
 const STATUS: KeeperStatus = {
   username: "student",
   access_token_expiry: "2026-11-19T12:00:00.000Z",
@@ -34,6 +35,16 @@ function service(): OnTrackService {
     fetch: async (input) => {
       const url = new URL(input instanceof Request ? input.url : input);
       if (url.pathname === "/api/projects") return Response.json(PROJECTS);
+      if (url.pathname === "/api/projects/5183") return Response.json({ ...PROJECTS[0], tasks: [{ id: 21, task_definition_id: 27, status: "not_started" }] });
+      if (url.pathname === "/api/units/15") return Response.json({
+        id: 15,
+        code: "FIT1061",
+        name: "AI",
+        task_definitions: [{ id: 27, abbreviation: "1.1P", name: "Search", has_task_sheet: true }],
+      });
+      if (url.pathname === "/api/units/15/task_definitions/27/task_pdf") {
+        return new Response(PDF, { headers: { "Content-Type": "application/pdf", "Content-Disposition": "attachment; filename=FIT1061-1.1P.pdf" } });
+      }
       return Response.json({ error: "not found" }, { status: 404 });
     },
   });
@@ -57,7 +68,7 @@ function text(result: unknown): string {
 
 export async function test_remote_mcp_marks_only_chat_history_as_changing_state(): Promise<void> {
   const { tools } = await (await connect()).listTools();
-  assert.deepEqual(tools.map((tool) => tool.name).sort(), ["chat", "chats", "session", "task", "tasks", "unit", "units", "whoami"]);
+  assert.deepEqual(tools.map((tool) => tool.name).sort(), ["chat", "chats", "session", "task", "task_sheet", "tasks", "unit", "units", "whoami"]);
   // Reading a task's comments marks them read in OnTrack, so clients must ask first.
   const changing = tools.filter((tool) => tool.annotations?.readOnlyHint !== true);
   assert.deepEqual(changing.map((tool) => [tool.name, tool.annotations?.destructiveHint]), [["chat", false]]);
@@ -89,4 +100,28 @@ export async function test_remote_mcp_session_tool_needs_no_ontrack_session(): P
   const client = await connect({ service: async () => { throw new Error("must not be called"); } });
   const result = await client.callTool({ name: "session", arguments: {} });
   assert.deepEqual(JSON.parse(text(result)), STATUS);
+}
+
+export async function test_remote_mcp_task_sheet_returns_the_pdf_as_markdown(): Promise<void> {
+  const calls: Array<{ name: string; type: string; size: number }> = [];
+  const ai = {
+    async toMarkdown(file: { name: string; blob: Blob }) {
+      calls.push({ name: file.name, type: file.blob.type, size: file.blob.size });
+      return { format: "markdown", data: "# FIT1061-1.1P.pdf\n\nSearch a maze." };
+    },
+  };
+  const result = await (await connect({ ai })).callTool({ name: "task_sheet", arguments: { unit: "FIT1061", task: "1.1p" } });
+  assert.notEqual(result.isError, true);
+  assert.deepEqual(JSON.parse(text(result)), { project_id: 5183, unit_id: 15, task_definition_id: 27, task: "1.1P", name: "FIT1061-1.1P.pdf" });
+  assert.deepEqual((result as CallToolResult).content[1], { type: "text", text: "# FIT1061-1.1P.pdf\n\nSearch a maze." });
+  assert.deepEqual(calls, [{ name: "FIT1061-1.1P.pdf", type: "application/pdf", size: PDF.byteLength }]);
+}
+
+export async function test_remote_mcp_task_sheet_without_workers_ai_points_to_the_cli(): Promise<void> {
+  const result = await (await connect()).callTool({ name: "task_sheet", arguments: { unit: "FIT1061", task: "1.1P" } });
+  assert.notEqual(result.isError, true);
+  assert.equal(JSON.parse(text(result)).hint, "Run `ontrack tasks read FIT1061 1.1P` locally to read it.");
+  assert.deepEqual((result as CallToolResult).content.slice(1), [
+    { type: "text", text: "This server cannot convert FIT1061-1.1P.pdf to text. Download it with the local CLI." },
+  ]);
 }
